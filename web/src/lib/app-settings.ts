@@ -20,6 +20,61 @@ export function normalizeJenisAsrama(value: string): JenisAsrama | '' {
   return '';
 }
 
+/** Role akun pengguna aplikasi. */
+export type PenggunaRole = 'super_admin' | 'pengawas';
+
+/** Kunci modul untuk hak akses pengawas (checklist per modul). */
+export type ModulAkses =
+  | 'santri'
+  | 'kamar'
+  | 'kelas'
+  | 'kegiatan'
+  | 'absensi'
+  | 'izin'
+  | 'pembinaan'
+  | 'pembayaran'
+  | 'penjadwalan'
+  | 'laporan'
+  | 'kesehatan'
+  | 'pengaturan'
+  | 'database';
+
+export const MODUL_AKSES_OPTIONS: { id: ModulAkses; label: string }[] = [
+  { id: 'santri', label: 'Data Santri' },
+  { id: 'kamar', label: 'Data Kamar' },
+  { id: 'kelas', label: 'Data Kelas' },
+  { id: 'kegiatan', label: 'Data Kegiatan' },
+  { id: 'absensi', label: 'Absensi' },
+  { id: 'izin', label: 'Izin Keluar' },
+  { id: 'pembinaan', label: 'Pelanggaran & Pembinaan' },
+  { id: 'pembayaran', label: 'Pembayaran' },
+  { id: 'penjadwalan', label: 'Penjadwalan' },
+  { id: 'laporan', label: 'Laporan' },
+  { id: 'kesehatan', label: 'Kesehatan' },
+  { id: 'pengaturan', label: 'Pengaturan' },
+  { id: 'database', label: 'Cadangan Data' },
+];
+
+export type Asrama = {
+  id: string;
+  nama: string;
+  jenis?: string;
+  alamat?: string;
+};
+
+export type Pengguna = {
+  id: string;
+  nama: string;
+  role: PenggunaRole;
+  /** Hash PIN/kata sandi (hashSecretSync). */
+  pinHash: string;
+  /** Asrama yang ditugaskan; kosong = semua asrama. */
+  asramaIds: string[];
+  /** Modul yang boleh diakses (diabaikan untuk super_admin). */
+  akses: ModulAkses[];
+  aktif: boolean;
+};
+
 export type AppSettings = {
   namaAsrama: string;
   jenisAsrama: string;
@@ -36,6 +91,10 @@ export type AppSettings = {
   passwordHash: string;
   /** Tiga pertanyaan pemulihan kata sandi */
   securityQuestions: SecurityQuestionsTriple;
+  /** Daftar asrama (multi-asrama). */
+  asrama: Asrama[];
+  /** Akun pengguna (super admin & pengawas). */
+  pengguna: Pengguna[];
 };
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -47,6 +106,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   tampilkanPrestasi: false,
   passwordHash: DEFAULT_PASSWORD_HASH,
   securityQuestions: [null, null, null],
+  asrama: [],
+  pengguna: [],
   setupSelesai: false,
 };
 
@@ -86,6 +147,13 @@ export function isSetupSelesai(partial?: Partial<AppSettings> | null): boolean {
 /** Gabungkan simpanan pengaturan dengan default & normalisasi zona waktu. */
 export function mergeAppSettings(partial?: Partial<AppSettings> | Record<string, unknown>): AppSettings {
   const merged = { ...DEFAULT_APP_SETTINGS, ...partial } as AppSettings;
+  merged.asrama = Array.isArray(merged.asrama) ? merged.asrama : [];
+  merged.pengguna = (Array.isArray(merged.pengguna) ? merged.pengguna : []).map((p) => ({
+    ...p,
+    asramaIds: Array.isArray(p.asramaIds) ? p.asramaIds : [],
+    akses: Array.isArray(p.akses) ? p.akses : [],
+    aktif: p.aktif !== false,
+  }));
   const setupSelesai =
     partial && typeof (partial as Partial<AppSettings>).setupSelesai === 'boolean'
       ? (partial as Partial<AppSettings>).setupSelesai!

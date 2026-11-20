@@ -19,6 +19,7 @@ import {
   normalizeIndonesiaTimezone,
 } from '@/lib/indonesia-timezone';
 import { AppSecuritySettingsForm } from '@/components/app-login-gate';
+import { getSessionUser } from '@/lib/app-auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -46,6 +47,79 @@ function SettingsCard({ children, className }: { children: ReactNode; className?
   return (
     <div className={cn(appCardClass, 'p-3.5 space-y-3', className)}>
       {children}
+    </div>
+  );
+}
+
+/** Ganti PIN akun yang sedang login (pengawas & admin). */
+function PinAkunSayaForm() {
+  const user = getSessionUser();
+  const [currentPin, setCurrentPin] = useState('');
+  const [newPin, setNewPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  if (!user) return null;
+
+  const submit = async () => {
+    if (newPin.trim().length < 4) {
+      toast.error('PIN baru minimal 4 karakter');
+      return;
+    }
+    if (newPin !== confirmPin) {
+      toast.error('Konfirmasi PIN tidak sama');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch('/api/auth/change-pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: user.id, currentPin, newPin }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        toast.error(data.error || 'Gagal mengganti PIN');
+        return;
+      }
+      toast.success('PIN akun berhasil diganti');
+      setCurrentPin('');
+      setNewPin('');
+      setConfirmPin('');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide">
+        PIN akun saya ({user.nama})
+      </h3>
+      <Input
+        type="password"
+        inputMode="numeric"
+        placeholder="PIN saat ini"
+        value={currentPin}
+        onChange={(e) => setCurrentPin(e.target.value)}
+      />
+      <Input
+        type="password"
+        inputMode="numeric"
+        placeholder="PIN baru"
+        value={newPin}
+        onChange={(e) => setNewPin(e.target.value)}
+      />
+      <Input
+        type="password"
+        inputMode="numeric"
+        placeholder="Ulangi PIN baru"
+        value={confirmPin}
+        onChange={(e) => setConfirmPin(e.target.value)}
+      />
+      <Button type="button" variant="outline" className="w-full" disabled={loading} onClick={() => void submit()}>
+        {loading ? 'Menyimpan…' : 'Ganti PIN saya'}
+      </Button>
     </div>
   );
 }
@@ -236,6 +310,9 @@ export default function Pengaturan() {
 
       {section === 'keamanan' && (
         <div className="space-y-3 animate-in fade-in duration-150">
+          <SettingsCard>
+            <PinAkunSayaForm />
+          </SettingsCard>
           <SettingsCard>
             <AppSecuritySettingsForm />
           </SettingsCard>

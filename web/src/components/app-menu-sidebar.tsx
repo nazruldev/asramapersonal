@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router';
 import {
@@ -14,9 +14,22 @@ import {
   Settings,
   HardDrive,
   X,
+  Building2,
+  LogOut,
+  UserCircle2,
   type LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import {
+  clearAuthenticated,
+  getSessionUser,
+  hasModuleAccess,
+  setActiveAsramaId,
+  subscribeSessionUser,
+} from '@/lib/app-auth';
+import type { Asrama, ModulAkses } from '@/lib/app-settings';
+import { appSelectClass } from '@/lib/form-styles';
+import { useAppStore } from '@/store/app-store';
 
 type MenuItem = {
   label: string;
@@ -24,6 +37,7 @@ type MenuItem = {
   icon: LucideIcon;
   match: (pathname: string) => boolean;
   badge?: number | null;
+  modul?: ModulAkses;
 };
 
 type MenuSection = {
@@ -71,6 +85,7 @@ function buildSections(activeIzinCount: number): MenuSection[] {
           path: '/laporan/absensi',
           icon: CalendarCheck,
           match: (p) => p === '/laporan/absensi',
+          modul: 'absensi',
         },
         {
           label: 'Izin Keluar',
@@ -78,30 +93,35 @@ function buildSections(activeIzinCount: number): MenuSection[] {
           icon: ClockAlert,
           match: (p) => p === '/laporan/izin',
           badge: activeIzinCount > 0 ? activeIzinCount : null,
+          modul: 'izin',
         },
         {
           label: 'Pelanggaran & Teguran',
           path: '/laporan/pembinaan',
           icon: ShieldAlert,
           match: (p) => p === '/laporan/pembinaan' || p.startsWith('/laporan/pembinaan/'),
+          modul: 'pembinaan',
         },
         {
           label: 'Peringkat Santri',
           path: '/laporan/peringkat',
           icon: Trophy,
           match: (p) => p === '/laporan/peringkat',
+          modul: 'laporan',
         },
         {
           label: 'Sebaran Wilayah',
           path: '/laporan/wilayah',
           icon: MapPin,
           match: (p) => p === '/laporan/wilayah',
+          modul: 'laporan',
         },
         {
           label: 'Menu Laporan',
           path: '/laporan',
           icon: FileText,
           match: (p) => p === '/laporan',
+          modul: 'laporan',
         },
       ],
     },
@@ -113,18 +133,21 @@ function buildSections(activeIzinCount: number): MenuSection[] {
           path: '/penjadwalan',
           icon: CalendarRange,
           match: (p) => p === '/penjadwalan' || p.startsWith('/penjadwalan/'),
+          modul: 'penjadwalan',
         },
         {
           label: 'Pengaturan Asrama',
           path: '/pengaturan',
           icon: Settings,
           match: (p) => p === '/pengaturan',
+          modul: 'pengaturan',
         },
         {
           label: 'Cadangan data',
           path: '/database',
           icon: HardDrive,
           match: (p) => p === '/database',
+          modul: 'database',
         },
       ],
     },
@@ -134,7 +157,36 @@ function buildSections(activeIzinCount: number): MenuSection[] {
 export function AppMenuSidebar({ open, onClose, theme, namaAsrama, activeIzinCount }: Props) {
   const navigate = useNavigate();
   const location = useLocation();
-  const sections = buildSections(activeIzinCount);
+  const reloadAll = useAppStore((s) => s.reloadAll);
+  const [sessionUser, setSessionUserState] = useState(() => getSessionUser());
+  const [asramaList, setAsramaList] = useState<Asrama[]>([]);
+
+  useEffect(() => subscribeSessionUser(() => setSessionUserState(getSessionUser())), []);
+
+  useEffect(() => {
+    if (!open) return;
+    void fetch('/api/asrama')
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => setAsramaList(data as Asrama[]))
+      .catch(() => setAsramaList([]));
+  }, [open]);
+
+  const isAdmin = !sessionUser || sessionUser.role === 'super_admin';
+  const asramaOptions = isAdmin
+    ? asramaList
+    : asramaList.filter((a) => sessionUser?.asramaIds.includes(a.id));
+  const activeAsrama =
+    sessionUser?.activeAsramaId ??
+    (isAdmin ? null : (asramaOptions[0]?.id ?? sessionUser?.asramaIds[0] ?? null));
+
+  const sections = buildSections(activeIzinCount)
+    .map((section) => ({
+      ...section,
+      items: section.items.filter(
+        (item) => !item.modul || hasModuleAccess(sessionUser, item.modul)
+      ),
+    }))
+    .filter((section) => section.items.length > 0);
 
   useEffect(() => {
     if (!open) return;
@@ -150,6 +202,16 @@ export function AppMenuSidebar({ open, onClose, theme, namaAsrama, activeIzinCou
   const go = (path: string) => {
     navigate(path);
     onClose();
+  };
+
+  const switchAsrama = (id: string) => {
+    setActiveAsramaId(id || null);
+    void reloadAll();
+  };
+
+  const gantiAkun = () => {
+    clearAuthenticated();
+    window.location.reload();
   };
 
   return createPortal(
@@ -252,6 +314,70 @@ export function AppMenuSidebar({ open, onClose, theme, namaAsrama, activeIzinCou
             </div>
           ))}
         </nav>
+
+        <div
+          className={cn(
+            'shrink-0 border-t px-3 py-2.5 space-y-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]',
+            theme === 'dark' ? 'border-slate-500' : 'border-slate-200'
+          )}
+        >
+          {asramaOptions.length > 1 || (isAdmin && asramaOptions.length >= 1) ? (
+            <div className="space-y-1">
+              <p
+                className={cn(
+                  'flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider',
+                  theme === 'dark' ? 'text-slate-500' : 'text-slate-400'
+                )}
+              >
+                <Building2 className="w-3 h-3" />
+                Asrama aktif
+              </p>
+              <select
+                className={cn(appSelectClass, 'h-8 text-[11px]')}
+                value={activeAsrama ?? ''}
+                onChange={(e) => switchAsrama(e.target.value)}
+              >
+                {isAdmin && <option value="">Semua asrama</option>}
+                {asramaOptions.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.nama}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
+          <div className="flex items-center gap-2">
+            <UserCircle2
+              className={cn('w-5 h-5 shrink-0', theme === 'dark' ? 'text-slate-400' : 'text-slate-500')}
+            />
+            <div className="flex-1 min-w-0">
+              <p
+                className={cn(
+                  'text-[11px] font-bold truncate leading-tight',
+                  theme === 'dark' ? 'text-slate-100' : 'text-slate-800'
+                )}
+              >
+                {sessionUser?.nama ?? 'Administrator'}
+              </p>
+              <p className="text-[9px] text-slate-400 leading-tight">
+                {isAdmin ? 'Super Admin' : 'Pengawas'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={gantiAkun}
+              className={cn(
+                'flex items-center gap-1 rounded-sm px-2 py-1.5 text-[10px] font-bold transition-colors',
+                theme === 'dark'
+                  ? 'text-rose-300 hover:bg-rose-950/60'
+                  : 'text-rose-600 hover:bg-rose-50'
+              )}
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              Ganti Akun
+            </button>
+          </div>
+        </div>
       </aside>
     </div>,
     document.body

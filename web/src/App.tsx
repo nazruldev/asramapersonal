@@ -49,6 +49,9 @@ import PenjadwalanList from './pages/PenjadwalanList';
 import PenjadwalanGenerate from './pages/PenjadwalanGenerate';
 import PenjadwalanDetail from './pages/PenjadwalanDetail';
 import Pembayaran from './pages/Pembayaran';
+import Asrama from './pages/Asrama';
+import PenggunaPage from './pages/Pengguna';
+import { RequireAkses } from './components/require-akses';
 import { useKeyboardInset } from './hooks/use-keyboard-inset';
 import { cn } from './lib/utils';
 import {
@@ -80,6 +83,7 @@ function AppShell() {
   const hydrate = useAppStore((s) => s.hydrate);
   const retryCloudHydrate = useAppStore((s) => s.retryCloudHydrate);
   const reload = useAppStore((s) => s.reload);
+  const reloadAll = useAppStore((s) => s.reloadAll);
   const hydrated = useAppStore((s) => s.hydrated);
   const settings = useAppStore((s) => s.settings);
   const initialLoading = useInitialAppLoading();
@@ -215,7 +219,14 @@ function AppShell() {
   }
 
   if (!unlocked) {
-    return <AppLoginGate onSuccess={() => setUnlocked(true)} />;
+    return (
+      <AppLoginGate
+        onSuccess={() => {
+          setUnlocked(true);
+          void reloadAll();
+        }}
+      />
+    );
   }
 
   return (
@@ -265,6 +276,7 @@ function AppShell() {
               : 'pb-[calc(1rem+env(safe-area-inset-bottom))]'
           } ${addAction || headerRight ? 'max-sm:pb-[calc(10.5rem+env(safe-area-inset-bottom))]' : ''}`}
         >
+          <RequireAkses>
           <KeepAlivePages
             routes={[
               {
@@ -293,6 +305,8 @@ function AppShell() {
               { path: '/master/kelas', match: (p) => p === '/master/kelas', element: <Kelas /> },
               { path: '/master/kegiatan', match: (p) => p === '/master/kegiatan', element: <Kegiatan /> },
               { path: '/master/pembayaran', match: (p) => p === '/master/pembayaran', element: <Pembayaran /> },
+              { path: '/master/asrama', match: (p) => p === '/master/asrama', element: <Asrama /> },
+              { path: '/master/pengguna', match: (p) => p === '/master/pengguna', element: <PenggunaPage /> },
               { path: '/laporan', match: (p) => p === '/laporan', element: <Laporan /> },
               { path: '/laporan/absensi', match: (p) => p === '/laporan/absensi', element: <Absensi /> },
               { path: '/laporan/izin', match: (p) => p === '/laporan/izin', element: <Izin /> },
@@ -324,6 +338,7 @@ function AppShell() {
               },
             ]}
           />
+          </RequireAkses>
         </main>
 
         {/* Aksi kanan header (tambah/filter/dll) -> bar sticky bawah, khusus mobile */}

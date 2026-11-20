@@ -135,14 +135,15 @@ export async function writeSnapshotToTursoTables(
   for (const row of kamar) {
     inserts.push(
       stmt(
-        `INSERT INTO kamar (id, nama, kapasitas, lantai, ketua_santri_id, fasilitas_json, updated_at)
-         VALUES (?, ?, ?, ?, NULL, ?, ?)`,
+        `INSERT INTO kamar (id, nama, kapasitas, lantai, ketua_santri_id, fasilitas_json, asrama_id, updated_at)
+         VALUES (?, ?, ?, ?, NULL, ?, ?, ?)`,
         [
           String(row.id),
           str(row, 'nama'),
           Number(row.kapasitas) || 4,
           opt(row, 'lantai'),
           JSON.stringify(row.fasilitas ?? []),
+          opt(row, 'asrama_id'),
           now,
         ]
       )
@@ -167,8 +168,8 @@ export async function writeSnapshotToTursoTables(
           jumlah_pelanggaran, masuk_kamar_sejak,
           asal_provinsi_code, asal_provinsi_nama, asal_kota_code, asal_kota_nama,
           asal_kecamatan_code, asal_kecamatan_nama, asal_desa_code, asal_desa_nama,
-          created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          asrama_id, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           String(row.id),
           str(row, 'nama'),
@@ -189,6 +190,7 @@ export async function writeSnapshotToTursoTables(
           opt(row, 'asal_kecamatan_nama'),
           opt(row, 'asal_desa_code'),
           opt(row, 'asal_desa_nama'),
+          opt(row, 'asrama_id'),
           opt(row, 'created_at') ?? now,
           opt(row, 'updated_at') ?? now,
         ]
@@ -451,6 +453,7 @@ export async function readSnapshotFromTursoTables(
       ketua: r.ketua_nama ? String(r.ketua_nama) : '',
       ketua_santri_id: r.ketua_santri_id ? String(r.ketua_santri_id) : undefined,
       fasilitas,
+      asrama_id: r.asrama_id ? String(r.asrama_id) : undefined,
     };
   });
 
@@ -476,6 +479,7 @@ export async function readSnapshotFromTursoTables(
     asal_kecamatan_nama: r.asal_kecamatan_nama ? String(r.asal_kecamatan_nama) : undefined,
     asal_desa_code: r.asal_desa_code ? String(r.asal_desa_code) : undefined,
     asal_desa_nama: r.asal_desa_nama ? String(r.asal_desa_nama) : undefined,
+    asrama_id: r.asrama_id ? String(r.asrama_id) : undefined,
     created_at: r.created_at ? String(r.created_at) : undefined,
     updated_at: r.updated_at ? String(r.updated_at) : undefined,
   }));

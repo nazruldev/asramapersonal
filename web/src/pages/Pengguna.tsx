@@ -1,0 +1,365 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router';
+import { Edit2, Trash2, Save, UserCog, ShieldCheck, KeyRound } from 'lucide-react';
+import { EmptyState } from '@/components/ui/empty-state';
+import { useScreenAddAction } from '@/lib/screen-header-actions';
+import { PageWithPullRefresh } from '@/components/page-with-pull-refresh';
+import { ListSkeleton } from '@/components/ui/list-skeleton';
+import { AppModal } from '@/components/ui/app-modal';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { Button } from '@/components/ui/button';
+import { appFieldClass, appLabelClass, appSelectClass } from '@/lib/form-styles';
+import { appCardClass } from '@/lib/surface-styles';
+import { cn } from '@/lib/utils';
+import { useConfirmDialog } from '@/lib/use-confirm-dialog';
+import { toast } from '@/lib/toast';
+import {
+  MODUL_AKSES_OPTIONS,
+  type Asrama,
+  type ModulAkses,
+  type Pengguna,
+} from '@/lib/app-settings';
+
+type PenggunaPublic = Omit<Pengguna, 'pinHash'>;
+
+type FormState = {
+  nama: string;
+  pin: string;
+  role: 'pengawas' | 'super_admin';
+  asramaIds: string[];
+  akses: ModulAkses[];
+  aktif: boolean;
+};
+
+const emptyForm: FormState = {
+  nama: '',
+  pin: '',
+  role: 'pengawas',
+  asramaIds: [],
+  akses: [],
+  aktif: true,
+};
+
+export default function PenggunaPage() {
+  const location = useLocation();
+  const isScreen = location.pathname === '/master/pengguna';
+  const confirmDialog = useConfirmDialog();
+
+  const [items, setItems] = useState<PenggunaPublic[] | null>(null);
+  const [asramaList, setAsramaList] = useState<Asrama[]>([]);
+  const [showModal, setShowModal] = useState(false);
+  const [editing, setEditing] = useState<PenggunaPublic | null>(null);
+  const [form, setForm] = useState<FormState>(emptyForm);
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const [u, a] = await Promise.all([fetch('/api/pengguna'), fetch('/api/asrama')]);
+      if (!u.ok) throw new Error('fail');
+      setItems((await u.json()) as PenggunaPublic[]);
+      if (a.ok) setAsramaList((await a.json()) as Asrama[]);
+    } catch {
+      toast.error('Gagal memuat akun');
+      setItems([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const closeModal = () => {
+    setShowModal(false);
+    setEditing(null);
+    setForm(emptyForm);
+  };
+
+  const toggleInList = <T,>(list: T[], value: T): T[] =>
+    list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
+
+  const handleSave = async () => {
+    if (!form.nama.trim()) {
+      toast.error('Nama pengguna wajib diisi');
+      return;
+    }
+    if (!editing && form.pin.trim().length < 4) {
+      toast.error('PIN minimal 4 karakter');
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload: Record<string, unknown> = {
+        nama: form.nama,
+        role: form.role,
+        asramaIds: form.asramaIds,
+        akses: form.akses,
+        aktif: form.aktif,
+      };
+      if (form.pin.trim()) payload.pin = form.pin.trim();
+      const res = await fetch(editing ? `/api/pengguna/${editing.id}` : '/api/pengguna', {
+        method: editing ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        toast.error(data.error || 'Gagal menyimpan akun');
+        return;
+      }
+      toast.success(editing ? 'Akun diperbarui' : 'Akun ditambahkan');
+      closeModal();
+      void load();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const requestResetPin = (item: PenggunaPublic) => {
+    const pin = window.prompt(`PIN baru untuk ${item.nama} (min. 4 karakter):`, '');
+    if (pin === null) return;
+    if (pin.trim().length < 4) {
+      toast.error('PIN minimal 4 karakter');
+      return;
+    }
+    void (async () => {
+      const res = await fetch(`/api/pengguna/${item.id}/reset-pin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: pin.trim() }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        toast.error(data.error || 'Gagal mereset PIN');
+        return;
+      }
+      toast.success(`PIN ${item.nama} direset`);
+    })();
+  };
+
+  const requestDelete = (item: PenggunaPublic) => {
+    confirmDialog.ask({
+      message: `Hapus akun "${item.nama}"?`,
+      confirmLabel: 'Ya, Hapus',
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/pengguna/${item.id}`, { method: 'DELETE' });
+          const data = (await res.json().catch(() => ({}))) as { error?: string };
+          if (!res.ok) {
+            toast.error(data.error || 'Gagal menghapus akun');
+            return;
+          }
+          toast.success('Akun dihapus');
+          void load();
+        } catch {
+          toast.error('Gagal menghapus akun');
+        }
+      },
+    });
+  };
+
+  const asramaName = (id: string) => asramaList.find((a) => a.id === id)?.nama ?? '?';
+
+  const openAdd = useCallback(() => setShowModal(true), []);
+  const headerAddAction = useMemo(
+    () => ({ onClick: openAdd, label: 'Tambah akun' }),
+    [openAdd]
+  );
+  useScreenAddAction(isScreen ? headerAddAction : null, [isScreen, headerAddAction]);
+
+  return (
+    <PageWithPullRefresh keys={['settings']} className="space-y-3">
+      <div className="space-y-2">
+        {items === null ? (
+          <ListSkeleton rows={3} />
+        ) : items.length === 0 ? (
+          <EmptyState
+            icon={UserCog}
+            title="Belum ada akun"
+            description="Klik tombol + untuk menambahkan"
+          />
+        ) : (
+          items.map((p) => (
+            <div key={p.id} className={cn(appCardClass, 'p-3 flex items-start gap-3')}>
+              {p.role === 'super_admin' ? (
+                <ShieldCheck className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />
+              ) : (
+                <UserCog className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-slate-900 dark:text-slate-50 truncate">
+                  {p.nama}
+                  {!p.aktif && (
+                    <span className="ml-2 text-[9px] font-bold uppercase text-rose-500">
+                      nonaktif
+                    </span>
+                  )}
+                </p>
+                <p className="text-[11px] text-slate-500">
+                  {p.role === 'super_admin' ? 'Super Admin' : 'Pengawas'}
+                  {' · '}
+                  {p.role === 'super_admin'
+                    ? 'Semua asrama'
+                    : p.asramaIds.length
+                      ? p.asramaIds.map(asramaName).join(', ')
+                      : 'Semua asrama'}
+                </p>
+                {p.role === 'pengawas' && (
+                  <p className="text-[10px] text-slate-400 truncate">
+                    {p.akses.length
+                      ? p.akses
+                          .map((m) => MODUL_AKSES_OPTIONS.find((o) => o.id === m)?.label ?? m)
+                          .join(', ')
+                      : 'Tanpa akses modul'}
+                  </p>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => requestResetPin(p)}
+                className="p-2 text-slate-400 hover:text-amber-600"
+                aria-label="Reset PIN"
+                title="Reset PIN"
+              >
+                <KeyRound className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditing(p);
+                  setForm({
+                    nama: p.nama,
+                    pin: '',
+                    role: p.role,
+                    asramaIds: [...p.asramaIds],
+                    akses: [...p.akses],
+                    aktif: p.aktif,
+                  });
+                  setShowModal(true);
+                }}
+                className="p-2 text-slate-400 hover:text-emerald-600"
+                aria-label="Edit"
+              >
+                <Edit2 className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => requestDelete(p)}
+                className="p-2 text-slate-400 hover:text-rose-600"
+                aria-label="Hapus"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+
+      <AppModal open={showModal} onClose={closeModal} title={editing ? 'Edit Akun' : 'Tambah Akun'}>
+        <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
+          <div className="space-y-1">
+            <label className={appLabelClass}>Nama pengguna</label>
+            <input
+              className={appFieldClass}
+              value={form.nama}
+              onChange={(e) => setForm((f) => ({ ...f, nama: e.target.value }))}
+              placeholder="cth: Ust. Ahmad"
+            />
+          </div>
+          <div className="space-y-1">
+            <label className={appLabelClass}>
+              {editing ? 'PIN baru (kosongkan jika tidak diganti)' : 'PIN (min. 4 karakter)'}
+            </label>
+            <input
+              className={appFieldClass}
+              type="password"
+              inputMode="numeric"
+              value={form.pin}
+              onChange={(e) => setForm((f) => ({ ...f, pin: e.target.value }))}
+              placeholder="PIN unik — tidak boleh sama dengan akun lain"
+            />
+          </div>
+          <div className="space-y-1">
+            <label className={appLabelClass}>Role</label>
+            <select
+              className={appSelectClass}
+              value={form.role}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, role: e.target.value as FormState['role'] }))
+              }
+            >
+              <option value="pengawas">Pengawas</option>
+              <option value="super_admin">Super Admin</option>
+            </select>
+          </div>
+          <div className="space-y-1">
+            <label className={appLabelClass}>Tugas asrama (kosong = semua asrama)</label>
+            <div className="space-y-1">
+              {asramaList.map((a) => (
+                <label key={a.id} className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={form.asramaIds.includes(a.id)}
+                    onChange={() =>
+                      setForm((f) => ({ ...f, asramaIds: toggleInList(f.asramaIds, a.id) }))
+                    }
+                  />
+                  {a.nama}
+                </label>
+              ))}
+            </div>
+          </div>
+          {form.role === 'pengawas' && (
+            <div className="space-y-1">
+              <label className={appLabelClass}>Hak akses modul</label>
+              <div className="grid grid-cols-2 gap-1">
+                {MODUL_AKSES_OPTIONS.map((o) => (
+                  <label
+                    key={o.id}
+                    className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-200"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={form.akses.includes(o.id)}
+                      onChange={() => setForm((f) => ({ ...f, akses: toggleInList(f.akses, o.id) }))}
+                    />
+                    {o.label}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+          <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-200">
+            <input
+              type="checkbox"
+              checked={form.aktif}
+              onChange={(e) => setForm((f) => ({ ...f, aktif: e.target.checked }))}
+            />
+            Akun aktif (bisa login)
+          </label>
+          <div className="flex gap-2 pt-1">
+            <Button type="button" variant="outline" className="flex-1" onClick={closeModal}>
+              Batal
+            </Button>
+            <Button type="button" className="flex-1" disabled={saving} onClick={() => void handleSave()}>
+              <Save className="w-4 h-4" />
+              {saving ? 'Menyimpan…' : 'Simpan'}
+            </Button>
+          </div>
+        </div>
+      </AppModal>
+
+      <ConfirmDialog
+        open={confirmDialog.open}
+        onClose={confirmDialog.close}
+        onConfirm={confirmDialog.confirm}
+        loading={confirmDialog.loading}
+        title={confirmDialog.request?.title}
+        message={confirmDialog.request?.message ?? ''}
+        confirmLabel={confirmDialog.request?.confirmLabel}
+        cancelLabel={confirmDialog.request?.cancelLabel}
+        destructive={confirmDialog.request?.destructive}
+      />
+    </PageWithPullRefresh>
+  );
+}

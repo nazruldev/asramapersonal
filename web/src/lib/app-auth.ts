@@ -1,4 +1,5 @@
 import { Capacitor } from '@capacitor/core';
+import type { ModulAkses, Pengguna, PenggunaRole } from './app-settings';
 
 export const DEFAULT_APP_PASSWORD = '12345';
 
@@ -94,6 +95,111 @@ export function verifySecurityAnswers(
 }
 
 export const AUTH_SESSION_KEY = 'asrama_manager_authenticated';
+const SESSION_USER_KEY = 'asrama_manager_session_user';
+
+/** Akun yang sedang login (disimpan di sessionStorage). */
+export type SessionUser = {
+  id: string;
+  nama: string;
+  role: PenggunaRole;
+  akses: ModulAkses[];
+  asramaIds: string[];
+  /** Asrama yang sedang dilihat/dikelola. */
+  activeAsramaId: string | null;
+};
+
+export function sessionUserFromPengguna(p: Pengguna, activeAsramaId?: string | null): SessionUser {
+  const asramaIds = Array.isArray(p.asramaIds) ? p.asramaIds : [];
+  return {
+    id: p.id,
+    nama: p.nama,
+    role: p.role,
+    akses: Array.isArray(p.akses) ? p.akses : [],
+    asramaIds,
+    activeAsramaId:
+      activeAsramaId !== undefined
+        ? activeAsramaId
+        : p.role === 'super_admin'
+          ? null
+          : (asramaIds[0] ?? null),
+  };
+}
+
+const sessionListeners = new Set<() => void>();
+
+export function subscribeSessionUser(listener: () => void): () => void {
+  sessionListeners.add(listener);
+  return () => sessionListeners.delete(listener);
+}
+
+function notifySessionChanged(): void {
+  sessionListeners.forEach((fn) => {
+    try {
+      fn();
+    } catch {
+      /* ignore */
+    }
+  });
+}
+
+export function setSessionUser(user: SessionUser | null): void {
+  try {
+    if (user) sessionStorage.setItem(SESSION_USER_KEY, JSON.stringify(user));
+    else sessionStorage.removeItem(SESSION_USER_KEY);
+  } catch {
+    /* ignore */
+  }
+  notifySessionChanged();
+}
+
+export function getSessionUser(): SessionUser | null {
+  try {
+    const raw = sessionStorage.getItem(SESSION_USER_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as SessionUser;
+    if (!parsed || !parsed.id || !parsed.role) return null;
+    return {
+      ...parsed,
+      akses: Array.isArray(parsed.akses) ? parsed.akses : [],
+      asramaIds: Array.isArray(parsed.asramaIds) ? parsed.asramaIds : [],
+      activeAsramaId: parsed.activeAsramaId ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function setActiveAsramaId(asramaId: string | null): void {
+  const user = getSessionUser();
+  if (!user) return;
+  setSessionUser({ ...user, activeAsramaId: asramaId });
+}
+
+/** Super admin selalu punya akses penuh; pengawas dibatasi checklist modul. */
+export function hasModuleAccess(user: SessionUser | null | undefined, modul: ModulAkses): boolean {
+  // Tanpa sesi akun (wizard/login legacy) = admin penuh
+  if (!user) return true;
+  if (user.role === 'super_admin') return true;
+  return user.akses.includes(modul);
+}
+
+/** Pemetaan path route → modul hak akses (null = bebas/admin-only ditangani khusus). */
+export function requiredModuleForPath(pathname: string): ModulAkses | null {
+  if (pathname.startsWith('/master/santri')) return 'santri';
+  if (pathname.startsWith('/master/kamar')) return 'kamar';
+  if (pathname.startsWith('/master/kelas')) return 'kelas';
+  if (pathname.startsWith('/master/kegiatan')) return 'kegiatan';
+  if (pathname.startsWith('/master/pembayaran')) return 'pembayaran';
+  if (pathname.startsWith('/laporan/absensi')) return 'absensi';
+  if (pathname.startsWith('/laporan/izin')) return 'izin';
+  if (pathname.startsWith('/laporan/pembinaan')) return 'pembinaan';
+  if (pathname === '/laporan/peringkat' || pathname === '/laporan/wilayah' || pathname === '/laporan')
+    return 'laporan';
+  if (pathname.startsWith('/penjadwalan')) return 'penjadwalan';
+  if (pathname === '/pengaturan') return 'pengaturan';
+  if (pathname === '/database') return 'database';
+  return null;
+}
 
 /** Hapus flag login lama di localStorage (rilis sebelumnya menyimpan di sana di APK). */
 function purgeLegacyPersistentAuthFlag(): void {
@@ -122,6 +228,7 @@ export function clearAuthenticated(): void {
   } catch {
     /* ignore */
   }
+  setSessionUser(null);
 }
 
 export function isAuthenticatedSession(): boolean {

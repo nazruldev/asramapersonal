@@ -129,6 +129,7 @@ function kamarSqlParams(
     optStr(row, 'lantai'),
     ketuaId,
     JSON.stringify(row.fasilitas ?? []),
+    optStr(row, 'asrama_id'),
   ];
 }
 
@@ -138,13 +139,14 @@ export async function sqlUpsertKamarRow(row: Record<string, unknown>): Promise<v
   await withWrite(async (db) => {
     const ketuaId = await resolveKetuaSantriIdForKamarRow(db, row);
     await db.run(
-      `INSERT INTO kamar (id, nama, kapasitas, lantai, ketua_santri_id, fasilitas_json) VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO kamar (id, nama, kapasitas, lantai, ketua_santri_id, fasilitas_json, asrama_id) VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          nama=excluded.nama,
          kapasitas=excluded.kapasitas,
          lantai=excluded.lantai,
          ketua_santri_id=excluded.ketua_santri_id,
-         fasilitas_json=excluded.fasilitas_json`,
+         fasilitas_json=excluded.fasilitas_json,
+         asrama_id=excluded.asrama_id`,
       kamarSqlParams(row, ketuaId)
     );
   });
@@ -429,6 +431,7 @@ function mapKamarRowFromSql(r: Record<string, unknown>): Record<string, unknown>
     ketua: ketuaFromJoin || ketuaLegacy,
     ketua_santri_id: r.ketua_santri_id ?? undefined,
     fasilitas,
+    asrama_id: r.asrama_id ?? undefined,
   };
 }
 
@@ -572,8 +575,8 @@ export async function sqlUpsertSantriRow(
       jumlah_pelanggaran, masuk_kamar_sejak,
       asal_provinsi_code, asal_provinsi_nama, asal_kota_code, asal_kota_nama,
       asal_kecamatan_code, asal_kecamatan_nama, asal_desa_code, asal_desa_nama,
-      created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      asrama_id, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       nama=excluded.nama, kelas_id=excluded.kelas_id, kamar_id=excluded.kamar_id,
       nomor_wali=excluded.nomor_wali, include_wa=excluded.include_wa,
@@ -583,6 +586,7 @@ export async function sqlUpsertSantriRow(
       asal_kota_code=excluded.asal_kota_code, asal_kota_nama=excluded.asal_kota_nama,
       asal_kecamatan_code=excluded.asal_kecamatan_code, asal_kecamatan_nama=excluded.asal_kecamatan_nama,
       asal_desa_code=excluded.asal_desa_code, asal_desa_nama=excluded.asal_desa_nama,
+      asrama_id=excluded.asrama_id,
       updated_at=excluded.updated_at`,
     [
       String(row.id),
@@ -604,6 +608,7 @@ export async function sqlUpsertSantriRow(
       optStr(row, 'asal_kecamatan_nama'),
       optStr(row, 'asal_desa_code'),
       optStr(row, 'asal_desa_nama'),
+      optStr(row, 'asrama_id'),
       optStr(row, 'created_at') ?? now,
       optStr(row, 'updated_at') ?? now,
     ]

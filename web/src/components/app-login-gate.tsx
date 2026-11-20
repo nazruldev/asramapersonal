@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Lock, KeyRound, HelpCircle } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Lock, KeyRound, HelpCircle, UserCircle2, ShieldCheck, ChevronLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -8,17 +8,22 @@ import {
   SECURITY_QUESTION_OPTIONS,
   markAuthenticated,
   securityQuestionLabel,
+  sessionUserFromPengguna,
+  setSessionUser,
   type SecurityQuestionId,
 } from '@/lib/app-auth';
 import { appSelectClass } from '@/lib/form-styles';
 import { cn } from '@/lib/utils';
 import { toast } from '@/lib/toast';
-import { attemptAppLogin } from '@/lib/app-login';
+import { attemptAccountLogin, listLoginAccounts, type AccountOption } from '@/lib/app-login';
+import type { Pengguna } from '@/lib/app-settings';
 
 type Mode = 'login' | 'forgot';
 
 export function AppLoginGate({ onSuccess }: { onSuccess: () => void }) {
   const [mode, setMode] = useState<Mode>('login');
+  const [accounts, setAccounts] = useState<AccountOption[]>([]);
+  const [selected, setSelected] = useState<AccountOption | null>(null);
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [forgotAnswers, setForgotAnswers] = useState<Record<SecurityQuestionId, string>>({} as Record<SecurityQuestionId, string>);
@@ -26,18 +31,27 @@ export function AppLoginGate({ onSuccess }: { onSuccess: () => void }) {
     { questionId: SecurityQuestionId; label: string }[] | null
   >(null);
 
+  useEffect(() => {
+    void listLoginAccounts().then(setAccounts);
+  }, []);
+
   const submitLogin = async () => {
+    if (!selected) {
+      toast.error('Pilih akun terlebih dahulu');
+      return;
+    }
     if (!password.trim()) {
-      toast.error('Masukkan kata sandi');
+      toast.error('Masukkan PIN / kata sandi');
       return;
     }
     setLoading(true);
     try {
-      const result = await attemptAppLogin(password);
-      if (!result.ok) {
-        toast.error(result.error);
+      const result = await attemptAccountLogin(selected.id, password);
+      if (!result.ok || !result.user) {
+        toast.error(result.ok ? 'Gagal masuk' : result.error);
         return;
       }
+      setSessionUser(sessionUserFromPengguna(result.user as Pengguna));
       markAuthenticated();
       onSuccess();
     } finally {
@@ -114,31 +128,80 @@ export function AppLoginGate({ onSuccess }: { onSuccess: () => void }) {
           <div>
             <h1 className="text-base font-bold text-slate-900 dark:text-white">Pengelola Asrama</h1>
             <p className="text-[11px] text-slate-500 dark:text-slate-300">
-              {mode === 'login' ? 'Masuk dengan kata sandi aplikasi' : 'Pulihkan kata sandi'}
+              {mode === 'login' ? 'Pilih akun lalu masukkan PIN' : 'Pulihkan kata sandi'}
             </p>
           </div>
         </div>
 
         {mode === 'login' ? (
           <>
-            <div className="space-y-2">
-              <Label htmlFor="app-password" className="text-xs">Kata sandi</Label>
-              <Input
-                id="app-password"
-                type="password"
-                inputMode="numeric"
-                autoComplete="current-password"
-                placeholder="Kata sandi"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && void submitLogin()}
-              />
-              <p className="text-[10px] text-slate-400 dark:text-slate-300">Bawaan pertama kali: {DEFAULT_APP_PASSWORD}</p>
-            </div>
-            <Button type="button" className="w-full" disabled={loading} onClick={() => void submitLogin()}>
-              <KeyRound className="w-4 h-4" />
-              {loading ? 'Memeriksa...' : 'Masuk'}
-            </Button>
+            {!selected ? (
+              <div className="space-y-2">
+                <Label className="text-xs">Pilih akun</Label>
+                <div className="space-y-1.5 max-h-[45vh] overflow-y-auto pr-1">
+                  {accounts.map((a) => (
+                    <button
+                      key={a.id}
+                      type="button"
+                      onClick={() => {
+                        setSelected(a);
+                        setPassword('');
+                      }}
+                      className="w-full flex items-center gap-2.5 rounded-sm border border-slate-200 dark:border-slate-600 px-3 py-2.5 text-left hover:border-emerald-400 dark:hover:border-emerald-600 hover:bg-emerald-50/60 dark:hover:bg-emerald-950/40 transition-colors active:scale-[0.99]"
+                    >
+                      {a.role === 'super_admin' ? (
+                        <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0" />
+                      ) : (
+                        <UserCircle2 className="w-5 h-5 text-slate-400 shrink-0" />
+                      )}
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
+                          {a.nama}
+                        </span>
+                        <span className="block text-[10px] text-slate-400">
+                          {a.role === 'super_admin' ? 'Super Admin' : 'Pengawas'}
+                        </span>
+                      </span>
+                    </button>
+                  ))}
+                  {accounts.length === 0 && (
+                    <p className="text-[11px] text-slate-400 text-center py-3">Memuat akun…</p>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={() => setSelected(null)}
+                  className="flex items-center gap-1 text-[11px] font-semibold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                  Ganti akun ({selected.nama})
+                </button>
+                <Label htmlFor="app-password" className="text-xs">PIN / kata sandi</Label>
+                <Input
+                  id="app-password"
+                  type="password"
+                  inputMode="numeric"
+                  autoComplete="current-password"
+                  placeholder="PIN"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && void submitLogin()}
+                  autoFocus
+                />
+                <p className="text-[10px] text-slate-400 dark:text-slate-300">
+                  Bawaan super admin pertama kali: {DEFAULT_APP_PASSWORD}
+                </p>
+              </div>
+            )}
+            {selected && (
+              <Button type="button" className="w-full" disabled={loading} onClick={() => void submitLogin()}>
+                <KeyRound className="w-4 h-4" />
+                {loading ? 'Memeriksa...' : 'Masuk'}
+              </Button>
+            )}
             <button
               type="button"
               onClick={() => void openForgot()}

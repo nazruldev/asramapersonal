@@ -606,6 +606,7 @@ async function loadV4Snapshot(includeHeavy = true): Promise<OfflineDbSnapshot | 
       ketua: r.ketua_nama ?? '',
       ketua_santri_id: r.ketua_santri_id ?? undefined,
       fasilitas,
+      asrama_id: r.asrama_id ?? undefined,
     };
   });
 
@@ -652,6 +653,7 @@ async function loadV4Snapshot(includeHeavy = true): Promise<OfflineDbSnapshot | 
         asal_desa_nama: r.asal_desa_nama ?? undefined,
         created_at: r.created_at ?? undefined,
         updated_at: r.updated_at ?? undefined,
+        asrama_id: r.asrama_id ?? undefined,
       };
     });
   }
@@ -851,6 +853,12 @@ async function ensureSchemaPatches(): Promise<void> {
   if (!(await tableHasColumn('kegiatan', 'icon'))) {
     await db.execute(`ALTER TABLE kegiatan ADD COLUMN icon TEXT`);
   }
+  if (!(await tableHasColumn('kamar', 'asrama_id'))) {
+    await db.execute(`ALTER TABLE kamar ADD COLUMN asrama_id TEXT`);
+  }
+  if (!(await tableHasColumn('santri', 'asrama_id'))) {
+    await db.execute(`ALTER TABLE santri ADD COLUMN asrama_id TEXT`);
+  }
   await db.execute(SYNC_META_SQL);
   for (const table of UPDATED_AT_TABLES) {
     if (!(await tableHasColumn(table, 'updated_at'))) {
@@ -948,13 +956,14 @@ async function flushKamarTable(db: SQLiteDBConnection, kamar: Record<string, unk
       }
     }
     await db.run(
-      `INSERT INTO kamar (id, nama, kapasitas, lantai, ketua_santri_id, fasilitas_json, updated_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+      `INSERT INTO kamar (id, nama, kapasitas, lantai, ketua_santri_id, fasilitas_json, asrama_id, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
        ON CONFLICT(id) DO UPDATE SET
          nama=excluded.nama,
          kapasitas=excluded.kapasitas,
          lantai=excluded.lantai,
          ketua_santri_id=excluded.ketua_santri_id,
          fasilitas_json=excluded.fasilitas_json,
+         asrama_id=excluded.asrama_id,
          updated_at=datetime('now')`,
       [
         String(row.id),
@@ -963,6 +972,7 @@ async function flushKamarTable(db: SQLiteDBConnection, kamar: Record<string, unk
         optStr(row, 'lantai'),
         ketuaId,
         JSON.stringify(row.fasilitas ?? []),
+        optStr(row, 'asrama_id'),
       ]
     );
   }
@@ -1075,8 +1085,8 @@ async function flushSantriTable(
         jumlah_pelanggaran, masuk_kamar_sejak,
         asal_provinsi_code, asal_provinsi_nama, asal_kota_code, asal_kota_nama,
         asal_kecamatan_code, asal_kecamatan_nama, asal_desa_code, asal_desa_nama,
-        created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        asrama_id, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         String(row.id),
         strField(row, 'nama'),
@@ -1097,6 +1107,7 @@ async function flushSantriTable(
         optStr(row, 'asal_kecamatan_nama'),
         optStr(row, 'asal_desa_code'),
         optStr(row, 'asal_desa_nama'),
+        optStr(row, 'asrama_id'),
         optStr(row, 'created_at') ?? now,
         optStr(row, 'updated_at') ?? now,
       ]

@@ -1,11 +1,15 @@
 import { useNavigate } from 'react-router';
 import { PageWithPullRefresh } from '@/components/page-with-pull-refresh';
-import { Users, BedDouble, GraduationCap, CalendarDays, Wallet } from 'lucide-react';
+import { Users, BedDouble, GraduationCap, CalendarDays, Wallet, Building2, UserCog } from 'lucide-react';
 import { appCardClass } from '@/lib/surface-styles';
 import { cn } from '@/lib/utils';
+import { getSessionUser, hasModuleAccess } from '@/lib/app-auth';
+import type { ModulAkses } from '@/lib/app-settings';
 
 export default function Master() {
   const navigate = useNavigate();
+  const sessionUser = getSessionUser();
+  const isAdmin = !sessionUser || sessionUser.role === 'super_admin';
 
   const masterItems = [
     {
@@ -14,6 +18,7 @@ export default function Master() {
       icon: Users,
       path: '/master/santri',
       color: 'text-blue-500',
+      modul: 'santri' as ModulAkses,
     },
     {
       title: 'Data Kamar',
@@ -21,6 +26,7 @@ export default function Master() {
       icon: BedDouble,
       path: '/master/kamar',
       color: 'text-emerald-500',
+      modul: 'kamar' as ModulAkses,
     },
     {
       title: 'Data Kelas',
@@ -28,6 +34,7 @@ export default function Master() {
       icon: GraduationCap,
       path: '/master/kelas',
       color: 'text-purple-500',
+      modul: 'kelas' as ModulAkses,
     },
     {
       title: 'Data Kegiatan',
@@ -35,6 +42,7 @@ export default function Master() {
       icon: CalendarDays,
       path: '/master/kegiatan',
       color: 'text-orange-500',
+      modul: 'kegiatan' as ModulAkses,
     },
     {
       title: 'Pembayaran',
@@ -42,8 +50,33 @@ export default function Master() {
       icon: Wallet,
       path: '/master/pembayaran',
       color: 'text-rose-500',
+      modul: 'pembayaran' as ModulAkses,
+    },
+    {
+      title: 'Data Asrama',
+      description: 'Kelola daftar asrama (multi-asrama)',
+      icon: Building2,
+      path: '/master/asrama',
+      color: 'text-cyan-500',
+      modul: null,
+      adminOnly: true,
+    },
+    {
+      title: 'Akun & Pengawas',
+      description: 'Akun pengawas, PIN, asrama & hak akses',
+      icon: UserCog,
+      path: '/master/pengguna',
+      color: 'text-amber-500',
+      modul: null,
+      adminOnly: true,
     },
   ];
+
+  const visibleItems = masterItems.filter((item) => {
+    if (item.adminOnly) return isAdmin;
+    if (!item.modul) return true;
+    return hasModuleAccess(sessionUser, item.modul);
+  });
 
   return (
     <PageWithPullRefresh
@@ -52,7 +85,7 @@ export default function Master() {
     >
       {/* Master Menu Grid */}
       <div className="grid grid-cols-2 gap-3">
-        {masterItems.map((item) => {
+        {visibleItems.map((item) => {
           const Icon = item.icon;
           return (
             <button

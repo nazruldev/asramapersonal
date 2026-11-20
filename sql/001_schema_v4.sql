@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS kamar (
   lantai              TEXT,
   ketua_santri_id     TEXT,
   fasilitas_json      TEXT,
+  asrama_id           TEXT,
   updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -59,6 +60,7 @@ CREATE TABLE IF NOT EXISTS santri (
   asal_kecamatan_nama     TEXT,
   asal_desa_code          TEXT,
   asal_desa_nama          TEXT,
+  asrama_id               TEXT,
   created_at              TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at              TEXT NOT NULL DEFAULT (datetime('now'))
 );

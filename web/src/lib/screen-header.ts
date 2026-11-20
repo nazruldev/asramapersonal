@@ -104,6 +104,14 @@ export function getScreenHeader(pathname: string): ScreenHeaderMeta | null {
       title: 'Pembayaran Santri',
       backTo: '/master',
     },
+    '/master/asrama': {
+      title: 'Data Asrama',
+      backTo: '/master',
+    },
+    '/master/pengguna': {
+      title: 'Akun & Pengawas',
+      backTo: '/master',
+    },
     '/laporan': {
       title: 'Laporan',
       backTo: '/',

@@ -1,7 +1,44 @@
 import { verifySecret } from '@/lib/app-auth';
-import { mergeAppSettings, type AppSettings } from '@/lib/app-settings';
+import { mergeAppSettings, type AppSettings, type Pengguna } from '@/lib/app-settings';
 
 export type LoginResult = { ok: true } | { ok: false; error: string };
+
+export type AccountOption = { id: string; nama: string; role: Pengguna['role'] };
+
+/** Daftar akun aktif untuk layar pilih akun. */
+export async function listLoginAccounts(): Promise<AccountOption[]> {
+  try {
+    const res = await fetch('/api/auth/accounts');
+    if (!res.ok) return [];
+    const data = (await res.json()) as AccountOption[];
+    return Array.isArray(data) ? data : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Login per akun (pilih akun + PIN). */
+export async function attemptAccountLogin(
+  id: string,
+  pin: string
+): Promise<(LoginResult & { user?: Omit<Pengguna, 'pinHash'> })> {
+  try {
+    const res = await fetch('/api/auth/login-account', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, pin }),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      error?: string;
+      user?: Omit<Pengguna, 'pinHash'>;
+    };
+    if (res.ok && data.ok && data.user) return { ok: true, user: data.user };
+    return { ok: false, error: data.error || 'PIN salah' };
+  } catch {
+    return { ok: false, error: 'Gagal memverifikasi PIN' };
+  }
+}
 
 async function verifyAgainstSettings(password: string): Promise<LoginResult> {
   try {

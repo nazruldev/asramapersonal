@@ -7,13 +7,28 @@ import {
   type AppSettings,
 } from './app-settings';
 import {
+  defaultAsramaId,
+  ensureAccountsSeeded,
+  handleAsramaCreate,
+  handleAsramaDelete,
+  handleAsramaList,
+  handleAsramaUpdate,
+  handleAuthAccounts,
   handleAuthChangePassword,
   handleAuthLogin,
+  handleAuthLoginAccount,
   handleAuthRecoveryQuestions,
   handleAuthResetPassword,
   handleAuthSecurityQuestions,
+  handlePenggunaChangePin,
+  handlePenggunaCreate,
+  handlePenggunaDelete,
+  handlePenggunaList,
+  handlePenggunaResetPin,
+  handlePenggunaUpdate,
   snapshotAuthSettings,
 } from './auth-api';
+import { getSessionUser } from './app-auth';
 import { handleOnboardingComplete, type OnboardingCompleteBody } from './onboarding-api';
 import { buildDefaultKelasRecords, type KelasRecord } from './kelas-defaults';
 import type { SecurityQuestionId } from './app-auth';
@@ -254,6 +269,10 @@ const applyRelationalSnapshot = (snapshot: ReturnType<typeof normalizeDb>) => {
 };
 
 const afterDbHydrated = () => {
+  if (ensureAccountsSeeded(db.settings, newId)) {
+    void saveDb(SQL_SCOPE.settings);
+  }
+  assignDefaultAsramaToRows();
   if (db.settings.setupSelesai === true) {
     markOnboardingComplete();
   }
@@ -326,6 +345,51 @@ const loadDbAsync = async () => {
     dbLoaded = true;
   }
 };
+
+/** Asrama aktif sesuai sesi login; null = lihat semua (super admin tanpa pilihan). */
+function activeAsramaId(): string | null {
+  const user = getSessionUser();
+  if (!user) return defaultAsramaId(db.settings);
+  if (user.activeAsramaId) return user.activeAsramaId;
+  if (user.role !== 'super_admin') {
+    // Pengawas tanpa tugas asrama = boleh semua asrama
+    return user.asramaIds.length ? user.asramaIds[0] : null;
+  }
+  return null;
+}
+
+/** Baris lama tanpa asrama_id diberi asrama pertama (migrasi multi-asrama). */
+function assignDefaultAsramaToRows(): void {
+  const fallback = defaultAsramaId(db.settings);
+  if (!fallback) return;
+  for (const s of db.santri) if (!s.asrama_id) s.asrama_id = fallback;
+  for (const k of db.kamar) if (!k.asrama_id) k.asrama_id = fallback;
+}
+
+function santriInScope(): Record<string, unknown>[] {
+  const aid = activeAsramaId();
+  if (!aid) return db.santri;
+  return db.santri.filter((s) => !s.asrama_id || s.asrama_id === aid);
+}
+
+function kamarInScope(): Record<string, unknown>[] {
+  const aid = activeAsramaId();
+  if (!aid) return db.kamar;
+  return db.kamar.filter((k) => !k.asrama_id || k.asrama_id === aid);
+}
+
+function scopedSantriIds(): Set<string> {
+  return new Set(santriInScope().map((s) => String(s.id)));
+}
+
+function scopedKamarIds(): Set<string> {
+  return new Set(kamarInScope().map((k) => String(k.id)));
+}
+
+function isSuperAdminSession(): boolean {
+  const u = getSessionUser();
+  return !u || u.role === 'super_admin';
+}
 
 export function ensureClientApiDbLoaded(): Promise<void> {
   if (dbLoaded) return Promise.resolve();
@@ -530,6 +594,9 @@ async function enrichWithSantriFields<T extends Record<string, unknown>>(
 async function ensureSantriForChildWrite(santriId: unknown): Promise<ApiResult | null> {
   const id = normalizeSantriId(santriId);
   if (!id) return { status: 400, body: { error: 'Pilih santri terlebih dahulu.' } };
+  if (!scopedSantriIds().has(id)) {
+    return { status: 403, body: { error: 'Santri berada di luar asrama Anda.' } };
+  }
 
   let row = await resolveSantriRecord(id);
   if (!row && shouldPersistToSqlite()) {
@@ -730,7 +797,7 @@ async function dispatchApiCore(
 
   if (pathname.startsWith('/api/pembayaran')) {
     const pembayaranResult = await handlePembayaranApi(m, pathname, searchParams, body, {
-      listSantri: () => db.santri,
+      listSantri: () => santriInScope(),
     });
     if (pembayaranResult) return pembayaranResult;
   }
@@ -773,6 +840,95 @@ async function dispatchApiCore(
     return result;
   }
 
+  if (pathname === '/api/auth/accounts' && m === 'GET') {
+    return handleAuthAccounts(db.settings);
+  }
+
+  if (pathname === '/api/auth/login-account' && m === 'POST' && body) {
+    return handleAuthLoginAccount(
+      db.settings,
+      String(body.id ?? ''),
+      String(body.pin ?? '')
+    );
+  }
+
+  if (pathname === '/api/auth/change-pin' && m === 'POST' && body) {
+    const result = handlePenggunaChangePin(
+      db.settings,
+      String(body.id ?? ''),
+      String(body.currentPin ?? ''),
+      String(body.newPin ?? '')
+    );
+    if (result.status === 200) await saveDb(SQL_SCOPE.settings);
+    return result;
+  }
+
+  if (pathname === '/api/asrama') {
+    if (m === 'GET') return handleAsramaList(db.settings);
+    if (m === 'POST' && body) {
+      if (!isSuperAdminSession()) return { status: 403, body: { error: 'Hanya super admin' } };
+      const result = handleAsramaCreate(db.settings, body, newId);
+      if (result.status === 200) await saveDb(SQL_SCOPE.settings);
+      return result;
+    }
+  }
+
+  const asramaIdMatch = pathname.match(/^\/api\/asrama\/([^/]+)$/);
+  if (asramaIdMatch) {
+    if (!isSuperAdminSession()) return { status: 403, body: { error: 'Hanya super admin' } };
+    const id = asramaIdMatch[1];
+    if (m === 'PUT' && body) {
+      const result = handleAsramaUpdate(db.settings, id, body);
+      if (result.status === 200) await saveDb(SQL_SCOPE.settings);
+      return result;
+    }
+    if (m === 'DELETE') {
+      const inUse =
+        db.santri.some((s) => s.asrama_id === id) || db.kamar.some((k) => k.asrama_id === id);
+      const result = handleAsramaDelete(db.settings, id, inUse);
+      if (result.status === 200) await saveDb(SQL_SCOPE.settings);
+      return result;
+    }
+  }
+
+  if (pathname === '/api/pengguna') {
+    if (!isSuperAdminSession()) return { status: 403, body: { error: 'Hanya super admin' } };
+    if (m === 'GET') return handlePenggunaList(db.settings);
+    if (m === 'POST' && body) {
+      const result = handlePenggunaCreate(db.settings, body, newId);
+      if (result.status === 200) await saveDb(SQL_SCOPE.settings);
+      return result;
+    }
+  }
+
+  const penggunaResetMatch = pathname.match(/^\/api\/pengguna\/([^/]+)\/reset-pin$/);
+  if (penggunaResetMatch && m === 'POST' && body) {
+    if (!isSuperAdminSession()) return { status: 403, body: { error: 'Hanya super admin' } };
+    const result = handlePenggunaResetPin(
+      db.settings,
+      penggunaResetMatch[1],
+      String(body.pin ?? '')
+    );
+    if (result.status === 200) await saveDb(SQL_SCOPE.settings);
+    return result;
+  }
+
+  const penggunaIdMatch = pathname.match(/^\/api\/pengguna\/([^/]+)$/);
+  if (penggunaIdMatch) {
+    if (!isSuperAdminSession()) return { status: 403, body: { error: 'Hanya super admin' } };
+    const id = penggunaIdMatch[1];
+    if (m === 'PUT' && body) {
+      const result = handlePenggunaUpdate(db.settings, id, body);
+      if (result.status === 200) await saveDb(SQL_SCOPE.settings);
+      return result;
+    }
+    if (m === 'DELETE') {
+      const result = handlePenggunaDelete(db.settings, id);
+      if (result.status === 200) await saveDb(SQL_SCOPE.settings);
+      return result;
+    }
+  }
+
   if (pathname === '/api/onboarding/complete' && m === 'POST' && body) {
     const result = handleOnboardingComplete(
       { settings: db.settings, kelas: db.kelas },
@@ -805,12 +961,17 @@ async function dispatchApiCore(
   }
 
   if (pathname === '/api/dashboard' && m === 'GET') {
+    const sIds = scopedSantriIds();
     const totalSantri = shouldPersistToSqlite()
-      ? await sqlCountSantri()
-      : db.santri.length;
+      ? await sqlCountSantri(activeAsramaId() ?? undefined)
+      : sIds.size;
     const sedangIzin = shouldPersistToSqlite()
-      ? await sqlCountIzinBelum()
-      : db.izin.filter((i) => i.status_kembali === 'Belum').length;
+      ? (await sqlListIzinEnriched()).filter(
+          (i) => i.status_kembali === 'Belum' && sIds.has(String(i.santri_id ?? ''))
+        ).length
+      : db.izin.filter(
+          (i) => i.status_kembali === 'Belum' && sIds.has(String(i.santri_id ?? ''))
+        ).length;
     let hadirTerakhir = 0;
     let kegiatanTerakhir = 'Belum ada absensi';
     if (shouldPersistToSqlite()) {
@@ -826,7 +987,10 @@ async function dispatchApiCore(
         (a) => a.kegiatan === kegiatanTerakhir && a.status === 'Hadir'
       ).length;
     }
-    const totalKapasitas = db.kamar.reduce((acc, k) => acc + (Number(k.kapasitas) || 0), 0);
+    const totalKapasitas = kamarInScope().reduce(
+      (acc, k) => acc + (Number(k.kapasitas) || 0),
+      0
+    );
     const totalTerisi = totalSantri;
     return {
       status: 200,
@@ -846,6 +1010,9 @@ async function dispatchApiCore(
   const santriIdOnlyGet = pathname.match(/^\/api\/santri\/([^/]+)$/);
   if (santriIdOnlyGet && m === 'GET') {
     const id = normalizeSantriId(santriIdOnlyGet[1]);
+    if (!scopedSantriIds().has(id)) {
+      return { status: 404, body: { error: 'Data santri tidak ada' } };
+    }
     if (shouldPersistToSqlite()) {
       const row = await sqlGetSantriById(id);
       if (!row) return { status: 404, body: { error: 'Data santri tidak ada' } };
@@ -864,12 +1031,12 @@ async function dispatchApiCore(
       const { page, limit, q, kamar, summary } = parsePageParams(searchParams);
       if (summary) {
         if (shouldPersistToSqlite()) {
-          const items = await sqlListSantriSummary();
+          const items = await sqlListSantriSummary(activeAsramaId() ?? undefined);
           return { status: 200, body: items };
         }
         return {
           status: 200,
-          body: db.santri.map((s) => ({
+          body: santriInScope().map((s) => ({
             id: s.id,
             nama: s.nama,
             kelas: s.kelas,
@@ -901,10 +1068,11 @@ async function dispatchApiCore(
             limit,
             q,
             kamar: kamar === 'Semua' ? '' : kamar,
+            asramaId: activeAsramaId() ?? undefined,
           });
           return { status: 200, body: paged };
         }
-        const filtered = db.santri.filter((s) => {
+        const filtered = santriInScope().filter((s) => {
           const matchQ =
             !q ||
             String(s.nama ?? '').toLowerCase().includes(q.toLowerCase()) ||
@@ -916,7 +1084,7 @@ async function dispatchApiCore(
         });
         return { status: 200, body: paginateInMemory(filtered, page, limit) };
       }
-      return { status: 200, body: db.santri };
+      return { status: 200, body: santriInScope() };
     }
     if (m === 'POST' && body) {
       const raw = omitPoin(body);
@@ -926,6 +1094,7 @@ async function dispatchApiCore(
         id: newId(),
         jumlah_pelanggaran: 0,
         kamar: '',
+        asrama_id: activeAsramaId() ?? defaultAsramaId(db.settings),
         created_at: now,
         updated_at: now,
         ...rest,
@@ -1078,16 +1247,19 @@ async function dispatchApiCore(
   }
 
   if (pathname === '/api/kamar' && m === 'GET') {
+    const aid = activeAsramaId();
     if (shouldPersistToSqlite()) {
-      const result = await sqlListKamarWithPenghuni();
+      const result = (await sqlListKamarWithPenghuni()).filter(
+        (k) => !aid || !k.asrama_id || k.asrama_id === aid
+      );
       db.kamar = result.map((row) => {
         const { terisi: _t, santriList: _s, ...base } = row;
         return base;
       });
       return { status: 200, body: result };
     }
-    const result = db.kamar.map((k) => {
-      const penghuni = db.santri.filter((s) => s.kamar === k.nama);
+    const result = kamarInScope().map((k) => {
+      const penghuni = santriInScope().filter((s) => s.kamar === k.nama);
       return {
         ...k,
         terisi: penghuni.length,
@@ -1105,6 +1277,7 @@ async function dispatchApiCore(
   if (pathname === '/api/kamar' && m === 'POST' && body) {
     const newKamar = {
       id: newId(),
+      asrama_id: activeAsramaId() ?? defaultAsramaId(db.settings),
       ...body,
       kapasitas: Number(body.kapasitas) || 4,
       fasilitas: Array.isArray(body.fasilitas) ? body.fasilitas : [],
@@ -1370,12 +1543,16 @@ async function dispatchApiCore(
       return { status: 400, body: { error: 'Jenis dan tanggal mulai wajib diisi' } };
     }
     const { dari, sampai } = dateRangeForMonths(mulai, bulanKeDepan);
-    const santriSource = shouldPersistToSqlite()
+    const sScope = scopedSantriIds();
+    const kScope = scopedKamarIds();
+    const santriSource = (shouldPersistToSqlite()
       ? await sqlListSantriPenjadwalan()
-      : (db.santri as { id: string; nama?: string; kamar?: string }[]);
-    const kamarSource = shouldPersistToSqlite()
+      : (db.santri as { id: string; nama?: string; kamar?: string }[])
+    ).filter((s) => sScope.has(String(s.id)));
+    const kamarSource = (shouldPersistToSqlite()
       ? await sqlListKamarPenjadwalan()
-      : (db.kamar as { id: string; nama?: string }[]);
+      : (db.kamar as { id: string; nama?: string }[])
+    ).filter((k) => kScope.has(String(k.id)));
     if (shouldPersistToSqlite()) {
       db.penjadwalan = (await sqlListPenjadwalanRaw()) as Record<string, unknown>[];
     }
@@ -1476,10 +1653,17 @@ async function dispatchApiCore(
   }
 
   if (pathname === '/api/penjadwalan' && m === 'GET') {
-    const rows =
+    const sScope = scopedSantriIds();
+    const kScope = scopedKamarIds();
+    const jadwalInScope = (p: PenjadwalanEntry) =>
+      p.mode === 'kamar'
+        ? !p.assignee_kamar_id || kScope.has(String(p.assignee_kamar_id))
+        : !p.assignee_santri_id || sScope.has(String(p.assignee_santri_id));
+    const rows = (
       shouldPersistToSqlite() && !db.penjadwalan.length
         ? await sqlListPenjadwalanRaw()
-        : ([...db.penjadwalan] as PenjadwalanEntry[]);
+        : ([...db.penjadwalan] as PenjadwalanEntry[])
+    ).filter(jadwalInScope);
     const sorted = rows.sort((a, b) => String(a.tanggal).localeCompare(String(b.tanggal)));
     const body = shouldPersistToSqlite()
       ? await sqlEnrichPenjadwalan(sorted, db.kamar)
@@ -1643,14 +1827,16 @@ async function dispatchApiCore(
   if (pathname === '/api/izin' && m === 'GET') {
     const dari = (searchParams.get('dari') ?? '').trim().slice(0, 10);
     const sampai = (searchParams.get('sampai') ?? '').trim().slice(0, 10);
+    const sIds = scopedSantriIds();
+    const inScope = (r: Record<string, unknown>) => sIds.has(String(r.santri_id ?? ''));
     if (shouldPersistToSqlite() && dari && sampai) {
-      return { status: 200, body: await sqlListIzinInRange(dari, sampai) };
+      return { status: 200, body: (await sqlListIzinInRange(dari, sampai)).filter(inScope) };
     }
     if (shouldPersistToSqlite()) {
-      return { status: 200, body: await sqlListIzinEnriched() };
+      return { status: 200, body: (await sqlListIzinEnriched()).filter(inScope) };
     }
     const enrichedIzin: Record<string, unknown>[] = [];
-    for (const i of db.izin) {
+    for (const i of db.izin.filter(inScope)) {
       const base = await enrichWithSantriFields(i as Record<string, unknown>);
       const sid = i.santri_id ? normalizeSantriId(i.santri_id) : '';
       const santri = sid ? await resolveSantriRecord(sid) : null;
@@ -1730,14 +1916,16 @@ async function dispatchApiCore(
   if (pathname === '/api/pembinaan' && m === 'GET') {
     const dari = (searchParams.get('dari') ?? '').trim().slice(0, 10);
     const sampai = (searchParams.get('sampai') ?? '').trim().slice(0, 10);
+    const sIds = scopedSantriIds();
+    const inScope = (r: Record<string, unknown>) => sIds.has(String(r.santri_id ?? ''));
     if (shouldPersistToSqlite() && dari && sampai) {
-      return { status: 200, body: await sqlListPembinaanInRange(dari, sampai) };
+      return { status: 200, body: (await sqlListPembinaanInRange(dari, sampai)).filter(inScope) };
     }
     if (shouldPersistToSqlite()) {
-      return { status: 200, body: await sqlListPembinaanEnriched() };
+      return { status: 200, body: (await sqlListPembinaanEnriched()).filter(inScope) };
     }
     const enriched: Record<string, unknown>[] = [];
-    for (const p of db.pembinaan) {
+    for (const p of db.pembinaan.filter(inScope)) {
       enriched.push(await enrichWithSantriFields(p as Record<string, unknown>));
     }
     enriched.sort(
@@ -1805,18 +1993,20 @@ async function dispatchApiCore(
     const kegiatan = (searchParams.get('kegiatan') ?? '').trim();
     const dari = (searchParams.get('dari') ?? '').trim().slice(0, 10);
     const sampai = (searchParams.get('sampai') ?? '').trim().slice(0, 10);
+    const sIds = scopedSantriIds();
+    const inScope = (r: Record<string, unknown>) => sIds.has(String(r.santri_id ?? ''));
 
     if (shouldPersistToSqlite() && tanggal) {
       return {
         status: 200,
-        body: await sqlListAbsensiForDate(tanggal, kegiatan || undefined),
+        body: (await sqlListAbsensiForDate(tanggal, kegiatan || undefined)).filter(inScope),
       };
     }
     if (shouldPersistToSqlite() && dari && sampai) {
-      return { status: 200, body: await sqlListAbsensiInRange(dari, sampai) };
+      return { status: 200, body: (await sqlListAbsensiInRange(dari, sampai)).filter(inScope) };
     }
     if (shouldPersistToSqlite()) {
-      return { status: 200, body: await sqlListAbsensiEnriched() };
+      return { status: 200, body: (await sqlListAbsensiEnriched()).filter(inScope) };
     }
 
     const enrichAbsensiList = async (rows: Record<string, unknown>[]) => {
@@ -1830,6 +2020,7 @@ async function dispatchApiCore(
     if (tanggal) {
       const filtered = db.absensi.filter(
         (a) =>
+          inScope(a as Record<string, unknown>) &&
           String(a.tanggal).startsWith(tanggal) &&
           (!kegiatan || a.kegiatan === kegiatan)
       ) as Record<string, unknown>[];
@@ -1840,12 +2031,14 @@ async function dispatchApiCore(
       const end = `${sampai}T23:59:59.999`;
       const filtered = db.absensi.filter((a) => {
         const t = String(a.tanggal);
-        return t >= start && t <= end;
+        return inScope(a as Record<string, unknown>) && t >= start && t <= end;
       }) as Record<string, unknown>[];
       return { status: 200, body: await enrichAbsensiList(filtered) };
     }
 
-    const all = await enrichAbsensiList(db.absensi as Record<string, unknown>[]);
+    const all = await enrichAbsensiList(
+      (db.absensi as Record<string, unknown>[]).filter(inScope)
+    );
     all.sort(
       (a, b) => new Date(String(b.tanggal)).getTime() - new Date(String(a.tanggal)).getTime()
     );

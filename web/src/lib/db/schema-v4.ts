@@ -27,7 +27,8 @@ export const SCHEMA_V4_SQL = `
     kapasitas           INTEGER NOT NULL DEFAULT 4,
     lantai              TEXT,
     ketua_santri_id     TEXT,
-    fasilitas_json      TEXT
+    fasilitas_json      TEXT,
+    asrama_id           TEXT
   );
 
   CREATE TABLE IF NOT EXISTS santri (
@@ -50,6 +51,7 @@ export const SCHEMA_V4_SQL = `
     asal_kecamatan_nama     TEXT,
     asal_desa_code          TEXT,
     asal_desa_nama          TEXT,
+    asrama_id               TEXT,
     created_at              TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at              TEXT NOT NULL DEFAULT (datetime('now'))
   );
