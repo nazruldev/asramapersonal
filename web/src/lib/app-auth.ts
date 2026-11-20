@@ -179,6 +179,10 @@ export function setActiveAsramaId(asramaId: string | null): void {
   const user = getSessionUser();
   if (!user) return;
   setSessionUser({ ...user, activeAsramaId: asramaId });
+  // Scope asrama berubah → sinkronkan ulang agar data lokal ikut scope baru.
+  void import('@/lib/sync/turso-sync')
+    .then((m) => m.runTursoSync())
+    .catch(() => undefined);
 }
 
 /** Super admin selalu punya akses penuh; pengawas dibatasi checklist modul. */

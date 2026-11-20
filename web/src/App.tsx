@@ -10,9 +10,8 @@ import {
   CalendarCheck, 
   ClockAlert, 
   Database,
-  PanelLeft,
+  UserCircle2,
 } from 'lucide-react';
-import { AppMenuSidebar, isSidebarPrimaryRoute } from './components/app-menu-sidebar';
 import { AppHomeHeader } from './components/app-home-header';
 import { AppScreenHeader } from './components/app-screen-header';
 import { getScreenHeader } from './lib/screen-header';
@@ -52,6 +51,8 @@ import PenjadwalanDetail from './pages/PenjadwalanDetail';
 import Pembayaran from './pages/Pembayaran';
 import Asrama from './pages/Asrama';
 import PenggunaPage from './pages/Pengguna';
+import Profil from './pages/Profil';
+import GantiAkun from './pages/GantiAkun';
 import { RequireAkses } from './components/require-akses';
 import { useKeyboardInset } from './hooks/use-keyboard-inset';
 import { cn } from './lib/utils';
@@ -75,7 +76,6 @@ function AppShell() {
   const location = useLocation();
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
-  const [menuOpen, setMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
   const [unlocked, setUnlocked] = useState(() => isAuthenticatedSession());
   const [retryingCloud, setRetryingCloud] = useState(false);
@@ -162,11 +162,10 @@ function AppShell() {
         location.pathname.startsWith('/laporan/pembinaan/'),
     },
     {
-      name: 'Menu',
-      path: '#',
-      icon: PanelLeft,
-      isActive: menuOpen || isSidebarPrimaryRoute(location.pathname),
-      opensMenu: true,
+      name: 'Profil',
+      path: '/profil',
+      icon: UserCircle2,
+      isActive: location.pathname === '/profil',
     },
   ];
 
@@ -187,7 +186,7 @@ function AppShell() {
   const setupDone = isTursoConfigured() || isSetupSelesai(settings);
 
   if (!hydrated || initialLoading) {
-    return <AppBootLoading message={isTursoConfigured() ? 'Menyambung ke Turso…' : 'Memuat data…'} />;
+    return <AppBootLoading message="Memuat aplikasi…" />;
   }
 
   if (isTursoConfigured() && (cloudBlocked || wentOffline)) {
@@ -331,6 +330,8 @@ function AppShell() {
               { path: '/laporan/pembinaan', match: (p) => p === '/laporan/pembinaan', element: <Pembinaan /> },
               { path: '/database', match: (p) => p === '/database', element: <DatabasePage /> },
               { path: '/pengaturan', match: (p) => p === '/pengaturan', element: <Pengaturan /> },
+              { path: '/profil', match: (p) => p === '/profil', element: <Profil /> },
+              { path: '/ganti-akun', match: (p) => p === '/ganti-akun', element: <GantiAkun /> },
               { path: '/penjadwalan', match: (p) => p === '/penjadwalan', element: <PenjadwalanList /> },
               {
                 path: '/penjadwalan/generate',
@@ -398,10 +399,6 @@ function AppShell() {
                   <button
                     type="button"
                     onClick={() => {
-                      if ('opensMenu' in tab && tab.opensMenu) {
-                        setMenuOpen(true);
-                        return;
-                      }
                       if (tab.path === '/laporan/izin' && isIzinBkSubRoute(location.pathname)) {
                         navigate(izinBkTabRoot(location.pathname));
                         return;
@@ -442,14 +439,6 @@ function AppShell() {
             })}
           </nav>
         ) : null}
-
-        <AppMenuSidebar
-          open={menuOpen}
-          onClose={() => setMenuOpen(false)}
-          theme={theme}
-          namaAsrama={settings.namaAsrama}
-          activeIzinCount={activeIzin.length}
-        />
 
       </div>
     </div>

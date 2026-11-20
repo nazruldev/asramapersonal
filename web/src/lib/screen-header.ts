@@ -152,6 +152,14 @@ export function getScreenHeader(pathname: string): ScreenHeaderMeta | null {
       title: 'Cadangan Data',
       backTo: '/',
     },
+    '/profil': {
+      title: 'Profil',
+      backTo: '/',
+    },
+    '/ganti-akun': {
+      title: 'Ganti Akun',
+      backTo: '/profil',
+    },
   };
 
   const meta = map[path] ?? {

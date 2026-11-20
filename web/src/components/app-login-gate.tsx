@@ -53,6 +53,11 @@ export function AppLoginGate({ onSuccess }: { onSuccess: () => void }) {
       }
       setSessionUser(sessionUserFromPengguna(result.user as Pengguna));
       markAuthenticated();
+      // Sync ulang dengan scope asrama akun ini — buang data asrama lain
+      // yang mungkin tertarik saat boot sebelum login.
+      void import('@/lib/sync/turso-sync')
+        .then((m) => m.runTursoSync())
+        .catch(() => undefined);
       onSuccess();
     } finally {
       setLoading(false);

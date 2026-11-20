@@ -51,8 +51,8 @@ export function isMasterSubRoute(pathname: string): boolean {
   return pathname.startsWith('/master/') && pathname !== '/master';
 }
 
-/** Halaman utama yang punya bottom navigation (bukan sub / detail) */
-const BOTTOM_NAV_ROOT_PATHS = new Set([
+/** Layar utama tab bawah (bukan sub / detail) — tanpa tombol kembali di header */
+const APP_HUB_PATHS = new Set([
   '/',
   '/master',
   '/laporan',
@@ -63,15 +63,17 @@ const BOTTOM_NAV_ROOT_PATHS = new Set([
   '/penjadwalan',
   '/pengaturan',
   '/database',
+  '/profil',
 ]);
 
-export function showBottomNavigation(pathname: string): boolean {
-  return BOTTOM_NAV_ROOT_PATHS.has(normalizeAppPathname(pathname));
+/** Bottom navigation tampil konsisten di semua halaman. */
+export function showBottomNavigation(_pathname: string): boolean {
+  return true;
 }
 
 /** Layar utama (tab bawah atau entri menu) — tanpa tombol kembali di header */
 export function isAppHubScreen(pathname: string): boolean {
-  return showBottomNavigation(normalizeAppPathname(pathname));
+  return APP_HUB_PATHS.has(normalizeAppPathname(pathname));
 }
 
 export function navigateScreenBack(

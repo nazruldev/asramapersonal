@@ -4,10 +4,10 @@ import { CapacitorUpdater } from '@capgo/capacitor-updater';
 /**
  * Update OTA untuk Android (Capacitor) dari GitHub Releases — tanpa server.
  *
- * Cara kerja: setiap GitHub Release menyertakan asset `dist.zip` (hasil vite
- * build yang di-zip). App fetch release terbaru lewat GitHub API, bandingkan
- * tag versi dengan bundle aktif, lalu download + aktifkan bundle baru.
- * Update berlaku saat app dibuka ulang.
+ * Cara kerja: setiap GitHub Release menyertakan asset `dist.zip` (hasil
+ * `npx @capgo/cli bundle zip` — jangan pakai Compress-Archive). App fetch
+ * release terbaru lewat GitHub API, bandingkan tag versi dengan bundle aktif,
+ * lalu download + aktifkan bundle baru.
  */
 const GITHUB_OWNER = 'nazruldev';
 const GITHUB_REPO = 'asramapersonal';
@@ -55,6 +55,11 @@ export interface OtaUpdateInfo {
   url: string;
 }
 
+/** URL stabil GitHub Releases (plugin Capgo mengikuti redirect HTTPS-nya). */
+function releaseAssetUrl(tagName: string): string {
+  return `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/download/${tagName}/${BUNDLE_ASSET_NAME}`;
+}
+
 /** Cek GitHub Release terbaru; return info update kalau bundle lebih baru dari aktif. */
 export async function checkOtaUpdateAvailable(): Promise<OtaUpdateInfo | null> {
   if (!Capacitor.isNativePlatform()) return null;
@@ -74,16 +79,10 @@ export async function checkOtaUpdateAvailable(): Promise<OtaUpdateInfo | null> {
     // Tetap tawarkan update kalau gagal baca versi aktif.
   }
 
-  // browser_download_url GitHub me-redirect ke URL S3 signed; plugin download
-  // tidak mengikuti redirect → resolve dulu ke URL final supaya zip-nya valid.
-  let url = asset.browser_download_url;
-  try {
-    const res = await fetch(url, { method: 'HEAD' });
-    if (res.url && res.url !== url) url = res.url;
-  } catch {
-    // fallback ke url awal
-  }
-  return { version, url };
+  // Jangan resolve ke URL signed (release-assets.githubusercontent.com):
+  // token-nya kedaluwarsa ~1 jam — user yang klik "Perbarui" belakangan gagal unduh.
+  // Pakai URL /releases/download/... yang stabil; Capgo native mengikuti redirect.
+  return { version, url: releaseAssetUrl(release.tag_name) };
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -94,8 +93,8 @@ export async function applyOtaUpdate(info: OtaUpdateInfo): Promise<void> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const bundle = await CapacitorUpdater.download({ url: info.url, version: info.version });
+      // set() mengaktifkan bundle dan reload WebView — jangan panggil reload() lagi.
       await CapacitorUpdater.set(bundle);
-      await CapacitorUpdater.reload();
       return;
     } catch (err) {
       lastErr = err;
