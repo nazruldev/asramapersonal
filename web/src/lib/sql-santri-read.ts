@@ -14,6 +14,8 @@ export function mapSantriSqlRow(r: Record<string, unknown>): Record<string, unkn
     kamar_id: r.kamar_id ?? undefined,
     nomor_wali: r.nomor_wali ?? '',
     jenis_kelamin: r.jenis_kelamin ?? '',
+    created_by: r.created_by ?? undefined,
+    updated_by: r.updated_by ?? undefined,
     include_wa: r.include_wa === 0 ? false : true,
     catatan: r.catatan ?? '',
     catatan_medis: r.catatan_medis ?? '',

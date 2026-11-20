@@ -7,6 +7,8 @@ export type SantriProfile = {
   kamar?: string;
   nomor_wali?: string;
   jenis_kelamin?: string;
+  created_by?: string;
+  updated_by?: string;
   include_wa?: boolean;
   catatan?: string;
   catatan_medis?: string;

@@ -591,6 +591,9 @@ export default function SantriDetail() {
               <AsalWilayahInfo row={santri} Row={InfoRow} />
             </div>
             <InfoRow label="Nomor wali" value={santri.nomor_wali?.trim() || '—'} />
+            {santri.jenis_kelamin ? <InfoRow label="Jenis kelamin" value={santri.jenis_kelamin} /> : null}
+            {santri.created_by ? <InfoRow label="Dibuat oleh" value={santri.created_by} /> : null}
+            {santri.updated_by ? <InfoRow label="Terakhir diubah oleh" value={santri.updated_by} /> : null}
             <InfoRow label="Cara hubungi" value={hubungiLabel} />
             <InfoRow label="Terdaftar" value={terdaftarLabel} />
             <InfoRow label="Terakhir diubah" value={diperbaruiLabel} />

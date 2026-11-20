@@ -614,7 +614,7 @@ export async function sqlUpsertSantriRow(
       optStr(row, 'asal_desa_nama'),
       optStr(row, 'asrama_id'),
       optStr(row, 'created_by') ?? actor,
-      optStr(row, 'updated_by') ?? actor,
+      actor ?? optStr(row, 'updated_by'),
       optStr(row, 'created_at') ?? now,
       optStr(row, 'updated_at') ?? now,
     ]

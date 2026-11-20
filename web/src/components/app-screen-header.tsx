@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { ScreenHeaderMeta } from '@/lib/screen-header';
+import { SyncStatusBadge } from '@/components/sync-status-badge';
 
 type Props = {
   meta: ScreenHeaderMeta;
@@ -40,6 +41,8 @@ export function AppScreenHeader({ meta, isScrolled, onBack, right }: Props) {
       <div className="flex-1 min-w-0 py-1 pr-1">
         <h1 className="text-lg font-semibold leading-tight truncate tracking-tight">{meta.title}</h1>
       </div>
+
+      <SyncStatusBadge />
 
       {right ? (
         <div className="shrink-0 hidden sm:flex items-center justify-end relative z-10 touch-manipulation">{right}</div>
