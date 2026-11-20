@@ -73,14 +73,37 @@ export async function checkOtaUpdateAvailable(): Promise<OtaUpdateInfo | null> {
   } catch {
     // Tetap tawarkan update kalau gagal baca versi aktif.
   }
-  return { version, url: asset.browser_download_url };
+
+  // browser_download_url GitHub me-redirect ke URL S3 signed; plugin download
+  // tidak mengikuti redirect → resolve dulu ke URL final supaya zip-nya valid.
+  let url = asset.browser_download_url;
+  try {
+    const res = await fetch(url, { method: 'HEAD' });
+    if (res.url && res.url !== url) url = res.url;
+  } catch {
+    // fallback ke url awal
+  }
+  return { version, url };
 }
 
-/** Download bundle OTA lalu aktifkan & reload app. */
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** Download bundle OTA lalu aktifkan & reload app. Retry 1x untuk jaringan putus. */
 export async function applyOtaUpdate(info: OtaUpdateInfo): Promise<void> {
-  const bundle = await CapacitorUpdater.download({ url: info.url, version: info.version });
-  await CapacitorUpdater.set(bundle);
-  await CapacitorUpdater.reload();
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const bundle = await CapacitorUpdater.download({ url: info.url, version: info.version });
+      await CapacitorUpdater.set(bundle);
+      await CapacitorUpdater.reload();
+      return;
+    } catch (err) {
+      lastErr = err;
+      console.warn(`OTA download percobaan ${attempt + 1} gagal:`, err);
+      if (attempt === 0) await sleep(1500);
+    }
+  }
+  throw lastErr;
 }
 
 /** Pesan error yang bisa dibaca user untuk kegagalan OTA. */
@@ -89,7 +112,10 @@ export function otaErrorMessage(err: unknown): string {
   if (!msg) return 'Gagal mengunduh update';
   const lower = msg.toLowerCase();
   if (lower.includes('network') || lower.includes('internet') || lower.includes('connect')) {
-    return 'Tidak ada koneksi internet';
+    return 'Tidak ada koneksi internet. Coba lagi saat sinyal stabil.';
   }
-  return `Gagal: ${msg.slice(0, 120)}`;
+  if (lower.includes('zip') || lower.includes('unzip') || lower.includes('index.html')) {
+    return 'Paket update tidak valid. Hubungi pengelola aplikasi.';
+  }
+  return `Gagal mengunduh: ${msg.slice(0, 200)}`;
 }

@@ -2,32 +2,24 @@ import { useEffect, useState } from 'react';
 import { DownloadCloud } from 'lucide-react';
 import { AppModal } from '@/components/ui/app-modal';
 import { Button } from '@/components/ui/button';
-import {
-  applyOtaUpdate,
-  checkOtaUpdateAvailable,
-  otaErrorMessage,
-  type OtaUpdateInfo,
-} from '@/lib/app-update';
+import { applyOtaUpdate, otaErrorMessage } from '@/lib/app-update';
+import { useOtaUpdateCheck } from '@/lib/ota-update-check';
 import { toast } from '@/lib/toast';
 
 /**
  * Popup konfirmasi update OTA (Android/Capacitor).
- * Muncul tiap app start bila ada bundle lebih baru — "Nanti" menutup,
+ * Dicek saat app start & tiap pull-to-refresh — "Nanti" menutup,
  * dan prompt tampil lagi pada launch berikutnya sampai di-update.
  */
 export function OtaUpdatePrompt() {
-  const [info, setInfo] = useState<OtaUpdateInfo | null>(null);
+  const info = useOtaUpdateCheck((s) => s.info);
+  const check = useOtaUpdateCheck((s) => s.check);
+  const dismiss = useOtaUpdateCheck((s) => s.dismiss);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    let cancelled = false;
-    void checkOtaUpdateAvailable().then((result) => {
-      if (!cancelled && result) setInfo(result);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    void check();
+  }, [check]);
 
   const handleUpdate = async () => {
     if (!info) return;
@@ -45,7 +37,7 @@ export function OtaUpdatePrompt() {
   return (
     <AppModal
       open={info !== null}
-      onClose={() => setInfo(null)}
+      onClose={dismiss}
       title="Update tersedia"
       description={`Versi ${info?.version ?? ''} siap diunduh.`}
     >
@@ -64,7 +56,7 @@ export function OtaUpdatePrompt() {
             variant="outline"
             className="flex-1"
             disabled={busy}
-            onClick={() => setInfo(null)}
+            onClick={dismiss}
           >
             Nanti
           </Button>

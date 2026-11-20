@@ -11,7 +11,7 @@ const config: CapacitorConfig = {
     CapacitorUpdater: {
       // OTA manual: app sendiri yang fetch GitHub Release & download bundle.
       autoUpdate: false,
-      appReadyTimeout: 10000,
+      appReadyTimeout: 120000,
     },
     Camera: {
       permissions: ['camera', 'photos'],

@@ -157,11 +157,12 @@ export default function Pembayaran() {
     void load();
   }, [load]);
 
-  useScreenAddAction(
-    { onClick: () => setShowGenerate(true), label: 'Buat Tagihan' },
-    [],
-    (p) => p === '/master/pembayaran'
+  const isPembayaranScreen = location.pathname === '/master/pembayaran';
+  const headerAddAction = useMemo(
+    () => ({ onClick: () => setShowGenerate(true), label: 'Buat Tagihan' }),
+    []
   );
+  useScreenAddAction(isPembayaranScreen ? headerAddAction : null, [isPembayaranScreen, headerAddAction]);
 
   const filteredTagihan = useMemo(() => {
     const q = fSearch.trim().toLowerCase();
@@ -655,8 +656,8 @@ function GenerateTagihanModal({
     <AppModal
       open={open}
       onClose={onClose}
-      title="Buat Tagihan Massal"
-      description="Tagihan yang sudah ada (santri + jenis + periode sama) otomatis dilewati."
+      title="Buat Tagihan Sekaligus"
+      description="Santri yang sudah punya tagihan dengan jenis dan periode yang sama otomatis dilewati, jadi tidak dobel."
     >
       {jenis.length === 0 ? (
         <div className="space-y-3">
@@ -709,7 +710,7 @@ function GenerateTagihanModal({
           </div>
 
           <div>
-            <label className={appLabelThemed(theme)}>Target Santri</label>
+            <label className={appLabelThemed(theme)}>Ditagihkan Kepada</label>
             <div className="flex gap-1 p-1 rounded-sm bg-slate-200/60 dark:bg-slate-800">
               {([
                 ['semua', 'Semua'],
@@ -795,20 +796,23 @@ function GenerateTagihanModal({
                 })}
               </div>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                {santriIds.length} santri dipilih · kolom nominal kosong = pakai nominal default/override.
+                {santriIds.length} santri dipilih · kolom nominal yang dikosongkan memakai nominal bawaan jenis pembayaran.
               </p>
             </div>
           )}
 
           <div>
-            <label className={appLabelThemed(theme)}>Nominal Override (opsional)</label>
+            <label className={appLabelThemed(theme)}>Nominal Khusus (boleh dikosongkan)</label>
             <input
               value={nominal}
               onChange={(e) => setNominal(e.target.value.replace(/[^0-9]/g, ''))}
               inputMode="numeric"
-              placeholder={`Default: ${rupiah(selectedJenis?.nominal_default ?? 0)}`}
+              placeholder={`Bawaan: ${rupiah(selectedJenis?.nominal_default ?? 0)}`}
               className={appFieldThemed(theme)}
             />
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+              Isi jika semua santri ditagih nominal yang sama dan berbeda dari bawaan.
+            </p>
           </div>
 
           <Button onClick={submit} disabled={saving} className="w-full">
@@ -893,7 +897,7 @@ function JenisFormModal({
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <label className={appLabelThemed(theme)}>Nominal Default</label>
+            <label className={appLabelThemed(theme)}>Nominal Bawaan</label>
             <input
               value={nominal}
               onChange={(e) => setNominal(e.target.value.replace(/[^0-9]/g, ''))}

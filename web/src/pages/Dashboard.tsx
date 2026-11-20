@@ -22,10 +22,17 @@ import {
   ShieldAlert,
   FileText,
   CalendarRange,
+  CalendarDays,
   Database,
   Trophy,
+  LayoutGrid,
+  Wallet,
+  GraduationCap,
+  MapPin,
+  Settings,
 } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
+import { AppModal } from '@/components/ui/app-modal';
 import { KegiatanMark } from '@/components/kegiatan-mark';
 import { appCardClass } from '@/lib/surface-styles';
 import { cn } from '@/lib/utils';
@@ -58,7 +65,7 @@ export default function Dashboard() {
   const kamarList = useAppStore((s) => s.kamar);
   const pembinaanList = useAppStore((s) => s.pembinaan);
   const [todayAbsensi, setTodayAbsensi] = useState<AbsensiApiRow[]>([]);
-  const quickScrollRef = useRef<HTMLDivElement>(null);
+  const [showAllMenu, setShowAllMenu] = useState(false);
   const kamarScrollRef = useRef<HTMLDivElement>(null);
   const scrollRow = useCallback(
     (ref: React.RefObject<HTMLDivElement | null>, dir: 1 | -1) => {
@@ -157,15 +164,51 @@ export default function Dashboard() {
   );
 
   const quickActions = [
-    { label: 'Absensi', path: '/laporan/absensi', icon: CalendarCheck, tone: 'text-emerald-700' },
-    { label: 'Izin', path: '/laporan/izin', icon: ClockAlert, tone: 'text-amber-700' },
-    { label: 'Catatan BK', path: '/laporan/pembinaan', icon: ShieldAlert, tone: 'text-rose-700' },
-    { label: 'Peringkat', path: '/laporan/peringkat', icon: Trophy, tone: 'text-orange-700' },
-    { label: 'Santri', path: '/master/santri', icon: Users, tone: 'text-blue-700' },
-    { label: 'Kamar', path: '/master/kamar', icon: BedDouble, tone: 'text-purple-700' },
-    { label: 'Laporan', path: '/laporan', icon: FileText, tone: 'text-slate-700 dark:text-slate-200' },
-    { label: 'Penjadwalan', path: '/penjadwalan', icon: CalendarRange, tone: 'text-violet-700' },
-    { label: 'Kelola Data', path: '/master', icon: Database, tone: 'text-teal-700' },
+    { label: 'Absensi', path: '/laporan/absensi', icon: CalendarCheck, tone: 'text-emerald-700', tile: 'bg-emerald-100 dark:bg-emerald-500/15' },
+    { label: 'Izin', path: '/laporan/izin', icon: ClockAlert, tone: 'text-amber-700', tile: 'bg-amber-100 dark:bg-amber-500/15' },
+    { label: 'Catatan BK', path: '/laporan/pembinaan', icon: ShieldAlert, tone: 'text-rose-700', tile: 'bg-rose-100 dark:bg-rose-500/15' },
+    { label: 'Santri', path: '/master/santri', icon: Users, tone: 'text-blue-700', tile: 'bg-blue-100 dark:bg-blue-500/15' },
+    { label: 'Kamar', path: '/master/kamar', icon: BedDouble, tone: 'text-purple-700', tile: 'bg-purple-100 dark:bg-purple-500/15' },
+    { label: 'Pembayaran', path: '/master/pembayaran', icon: Wallet, tone: 'text-teal-700', tile: 'bg-teal-100 dark:bg-teal-500/15' },
+    { label: 'Laporan', path: '/laporan', icon: FileText, tone: 'text-slate-700 dark:text-slate-200', tile: 'bg-slate-200 dark:bg-slate-500/20' },
+  ];
+
+  const allMenuGroups = [
+    {
+      title: 'Operasional Harian',
+      items: [
+        { label: 'Absensi', path: '/laporan/absensi', icon: CalendarCheck, tone: 'text-emerald-700', tile: 'bg-emerald-100 dark:bg-emerald-500/15' },
+        { label: 'Izin', path: '/laporan/izin', icon: ClockAlert, tone: 'text-amber-700', tile: 'bg-amber-100 dark:bg-amber-500/15' },
+        { label: 'Catatan BK', path: '/laporan/pembinaan', icon: ShieldAlert, tone: 'text-rose-700', tile: 'bg-rose-100 dark:bg-rose-500/15' },
+        { label: 'Penjadwalan', path: '/penjadwalan', icon: CalendarRange, tone: 'text-violet-700', tile: 'bg-violet-100 dark:bg-violet-500/15' },
+        { label: 'Pembayaran', path: '/master/pembayaran', icon: Wallet, tone: 'text-teal-700', tile: 'bg-teal-100 dark:bg-teal-500/15' },
+      ],
+    },
+    {
+      title: 'Data Master',
+      items: [
+        { label: 'Santri', path: '/master/santri', icon: Users, tone: 'text-blue-700', tile: 'bg-blue-100 dark:bg-blue-500/15' },
+        { label: 'Kamar', path: '/master/kamar', icon: BedDouble, tone: 'text-purple-700', tile: 'bg-purple-100 dark:bg-purple-500/15' },
+        { label: 'Kelas', path: '/master/kelas', icon: GraduationCap, tone: 'text-indigo-700', tile: 'bg-indigo-100 dark:bg-indigo-500/15' },
+        { label: 'Kegiatan', path: '/master/kegiatan', icon: CalendarDays, tone: 'text-orange-700', tile: 'bg-orange-100 dark:bg-orange-500/15' },
+        { label: 'Kelola Data', path: '/master', icon: Database, tone: 'text-teal-700', tile: 'bg-teal-100 dark:bg-teal-500/15' },
+      ],
+    },
+    {
+      title: 'Laporan & Analisis',
+      items: [
+        { label: 'Laporan', path: '/laporan', icon: FileText, tone: 'text-slate-700 dark:text-slate-200', tile: 'bg-slate-200 dark:bg-slate-500/20' },
+        { label: 'Peringkat', path: '/laporan/peringkat', icon: Trophy, tone: 'text-orange-700', tile: 'bg-orange-100 dark:bg-orange-500/15' },
+        { label: 'Sebaran Wilayah', path: '/laporan/wilayah', icon: MapPin, tone: 'text-sky-700', tile: 'bg-sky-100 dark:bg-sky-500/15' },
+      ],
+    },
+    {
+      title: 'Sistem',
+      items: [
+        { label: 'Pengaturan', path: '/pengaturan', icon: Settings, tone: 'text-slate-700 dark:text-slate-200', tile: 'bg-slate-200 dark:bg-slate-500/20' },
+        { label: 'Cadangan Data', path: '/database', icon: Database, tone: 'text-cyan-700', tile: 'bg-cyan-100 dark:bg-cyan-500/15' },
+      ],
+    },
   ];
 
   const refreshDashboard = useCallback(async () => {
@@ -258,32 +301,14 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Menu Cepat */}
+      {/* Menu Cepat — grid ala aplikasi umum, ujung kanan "Lainnya" buka semua menu */}
       <div className="space-y-2">
         <div className="flex items-center justify-between px-1">
           <h3 className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
             Akses Cepat
           </h3>
-          <div className="hidden sm:flex items-center gap-1">
-            <button
-              type="button"
-              aria-label="Geser ke kiri"
-              onClick={() => scrollRow(quickScrollRef, -1)}
-              className={scrollNavBtnClass}
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              aria-label="Geser ke kanan"
-              onClick={() => scrollRow(quickScrollRef, 1)}
-              className={scrollNavBtnClass}
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
         </div>
-        <div ref={quickScrollRef} className="flex gap-2 overflow-x-auto no-scrollbar snap-x -mx-1 px-1 pb-1">
+        <div className="grid grid-cols-4 gap-2">
           {quickActions.map((action) => {
             const Icon = action.icon;
             return (
@@ -291,20 +316,72 @@ export default function Dashboard() {
                 key={action.path}
                 type="button"
                 onClick={() => navigate(action.path)}
-                className={cn(
-                  appCardClass,
-                  'flex items-center gap-2 px-3 py-2.5 shrink-0 snap-start active:scale-95 transition-all'
-                )}
+                className="flex flex-col items-center gap-1.5 py-2 active:scale-95 transition-all"
               >
-                <Icon className={cn('w-4 h-4 shrink-0', action.tone)} />
-                <span className="text-[11px] font-bold text-slate-800 dark:text-slate-100 whitespace-nowrap">
+                <span className={cn('w-11 h-11 rounded-xl flex items-center justify-center', action.tile)}>
+                  <Icon className={cn('w-5 h-5', action.tone)} />
+                </span>
+                <span className="text-[10px] font-semibold text-slate-700 dark:text-slate-200 leading-tight text-center">
                   {action.label}
                 </span>
               </button>
             );
           })}
+          <button
+            type="button"
+            onClick={() => setShowAllMenu(true)}
+            className="flex flex-col items-center gap-1.5 py-2 active:scale-95 transition-all"
+          >
+            <span className="w-11 h-11 rounded-xl flex items-center justify-center bg-slate-200 dark:bg-slate-700">
+              <LayoutGrid className="w-5 h-5 text-slate-600 dark:text-slate-200" />
+            </span>
+            <span className="text-[10px] font-semibold text-slate-700 dark:text-slate-200 leading-tight text-center">
+              Lainnya
+            </span>
+          </button>
         </div>
       </div>
+
+      {/* Semua menu, dikelompokkan per kategori */}
+      <AppModal
+        open={showAllMenu}
+        onClose={() => setShowAllMenu(false)}
+        title="Semua Menu"
+        description="Pilih menu yang ingin dibuka."
+      >
+        <div className="space-y-4 pb-2">
+          {allMenuGroups.map((group) => (
+            <div key={group.title}>
+              <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">
+                {group.title}
+              </p>
+              <div className="grid grid-cols-4 gap-2">
+                {group.items.map((action) => {
+                  const Icon = action.icon;
+                  return (
+                    <button
+                      key={action.path}
+                      type="button"
+                      onClick={() => {
+                        setShowAllMenu(false);
+                        navigate(action.path);
+                      }}
+                      className="flex flex-col items-center gap-1.5 py-2 active:scale-95 transition-all"
+                    >
+                      <span className={cn('w-11 h-11 rounded-xl flex items-center justify-center', action.tile)}>
+                        <Icon className={cn('w-5 h-5', action.tone)} />
+                      </span>
+                      <span className="text-[10px] font-semibold text-slate-700 dark:text-slate-200 leading-tight text-center">
+                        {action.label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </AppModal>
 
       {/* Status ringkas */}
       <div className="grid grid-cols-2 gap-3">

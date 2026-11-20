@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
+import { useOtaUpdateCheck } from '@/lib/ota-update-check';
 
 type Props = {
   onRefresh: () => Promise<void>;
@@ -38,6 +39,8 @@ export function PullToRefresh({ onRefresh, children, className, disabled }: Prop
     setRefreshing(true);
     try {
       await onRefresh();
+      // Sekalian cek update OTA (di-non-native otomatis no-op).
+      void useOtaUpdateCheck.getState().check();
     } finally {
       refreshingRef.current = false;
       setRefreshing(false);
