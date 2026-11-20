@@ -56,7 +56,7 @@ export function AppModal({
     return createPortal(
       <BottomSheetFrame open={open} onClose={onClose} elevated={elevated} panelClassName={className}>
         {(title || description) && (
-          <div className="flex items-start justify-between gap-3 px-4 sm:px-5 pb-3 border-b border-slate-200 dark:border-slate-700 shrink-0">
+          <div data-sheet-handle className="flex items-start justify-between gap-3 px-4 sm:px-5 pb-3 border-b border-slate-200 dark:border-slate-700 shrink-0 touch-none select-none">
             <div className="min-w-0">
               {title && <h3 className="text-base font-semibold leading-tight">{title}</h3>}
               {description && (
@@ -72,7 +72,7 @@ export function AppModal({
             </button>
           </div>
         )}
-        <div className="overflow-y-auto overscroll-contain px-4 sm:px-5 py-4 flex-1 min-h-0">{children}</div>
+        <div className="overflow-y-auto overscroll-contain px-4 sm:px-5 py-4 flex-1 min-h-0 flex flex-col">{children}</div>
       </BottomSheetFrame>,
       document.body
     );

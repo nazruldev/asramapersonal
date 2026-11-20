@@ -361,8 +361,8 @@ export default function Pembinaan() {
         title="Filter lanjutan"
         description="Pilih satu atau lebih kelas dan kamar (kosong = semua)"
       >
-        <div className="space-y-5 text-sm -mx-1">
-          <div className="space-y-2">
+        <div className="flex flex-col flex-1 min-h-0 gap-5 text-sm -mx-1">
+          <div className="space-y-2 shrink-0">
             <p className={appSectionTitleClass}>Kelas</p>
             {kelasOptions.length === 0 ? (
               <EmptyState icon={GraduationCap} title="Belum ada data kelas" variant="minimal" />
@@ -390,12 +390,12 @@ export default function Pembinaan() {
             )}
           </div>
 
-          <div className="space-y-2">
-            <p className={appSectionTitleClass}>Kamar</p>
+          <div className="flex flex-col flex-1 min-h-0 space-y-2">
+            <p className={`${appSectionTitleClass} shrink-0`}>Kamar</p>
             {kamarOptions.length === 0 ? (
               <EmptyState icon={BedDouble} title="Belum ada data kamar" variant="minimal" />
             ) : (
-              <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto pr-0.5">
+              <div className="flex flex-wrap gap-1.5 flex-1 min-h-0 overflow-y-auto overscroll-contain pr-0.5 content-start">
                 {kamarOptions.map((kamar) => {
                   const active = draftKamar.includes(kamar);
                   return (
@@ -418,7 +418,7 @@ export default function Pembinaan() {
             )}
           </div>
 
-          <div className="flex gap-2 pt-1">
+          <div className="flex gap-2 shrink-0 sticky bottom-0 -mx-3 sm:-mx-4 -mb-4 px-3 sm:px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-card border-t border-slate-200 dark:border-slate-700">
             <Button type="button" variant="outline" className="flex-1 text-xs" onClick={resetFilters}>
               Reset filter
             </Button>

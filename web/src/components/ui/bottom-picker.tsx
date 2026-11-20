@@ -91,7 +91,7 @@ export function BottomPicker({
 
   return createPortal(
     <BottomSheetFrame open={open} onClose={onClose} elevated panelClassName="dark:bg-slate-800">
-      <div className="flex items-start justify-between gap-2 px-4 pt-1 pb-2 border-b border-slate-200 dark:border-slate-700 shrink-0">
+      <div data-sheet-handle className="flex items-start justify-between gap-2 px-4 pt-1 pb-2 border-b border-slate-200 dark:border-slate-700 shrink-0 touch-none select-none">
         <div>
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-50">{title}</h3>
           {description && (

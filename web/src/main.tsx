@@ -6,9 +6,10 @@ import { ThemeProvider } from './lib/theme';
 import { initClientApiStore, installNativeApiFetch } from './lib/client-api';
 import { setWebSqliteAvailable } from './lib/offline-db';
 import { startAutoSync } from './lib/sync/turso-sync';
-import { notifyAppReady, checkForOtaUpdate } from './lib/app-update';
+import { notifyAppReady } from './lib/app-update';
 import './index.css';
 import App from './App.tsx';
+import { OtaUpdatePrompt } from './components/ota-update-prompt';
 import { Toaster } from './components/ui/sonner';
 
 const queryClient = new QueryClient();
@@ -27,6 +28,7 @@ async function bootstrap() {
         <ThemeProvider>
           <BrowserRouter>
             <App />
+            <OtaUpdatePrompt />
             <Toaster />
           </BrowserRouter>
         </ThemeProvider>
@@ -34,8 +36,8 @@ async function bootstrap() {
     </StrictMode>
   );
 
-  // OTA Android: konfirmasi bundle aktif lalu cek update dari GitHub Release.
-  void notifyAppReady().then(() => checkForOtaUpdate());
+  // OTA Android: konfirmasi bundle aktif; pengecekan update + popup di OtaUpdatePrompt.
+  void notifyAppReady();
 }
 
 void bootstrap().catch((err) => {

@@ -3,6 +3,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react';
@@ -50,6 +51,7 @@ export function BottomSheetFrame({
   const [contentHeight, setContentHeight] = useState(0);
   const [dragY, setDragY] = useState(0);
   const dragging = useRef(false);
+  const movedRef = useRef(false);
   const startY = useRef(0);
   const snapRef = useRef<Snap>('half');
   const contentRef = useRef<HTMLDivElement>(null);
@@ -106,6 +108,9 @@ export function BottomSheetFrame({
   }, [snap]);
 
   const onHandlePointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    if (!target.closest('[data-sheet-handle]')) return;
+    if (target.closest('button, a, input, select, textarea, [role="button"], [role="menuitem"]')) return;
     dragging.current = true;
     startY.current = e.clientY;
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -125,6 +130,7 @@ export function BottomSheetFrame({
     dragging.current = false;
     e.currentTarget.releasePointerCapture(e.pointerId);
     const dy = e.clientY - startY.current;
+    if (Math.abs(dy) > 6) movedRef.current = true;
     setDragY(0);
 
     if (dy > DRAG_CLOSE_PX) {
@@ -144,6 +150,14 @@ export function BottomSheetFrame({
   const onHandlePointerCancel = () => {
     dragging.current = false;
     setDragY(0);
+  };
+
+  const onPanelClickCapture = (e: ReactMouseEvent<HTMLDivElement>) => {
+    if (movedRef.current) {
+      movedRef.current = false;
+      e.stopPropagation();
+      e.preventDefault();
+    }
   };
 
   if (!open) return null;
@@ -188,17 +202,19 @@ export function BottomSheetFrame({
           transform: dragY ? `translateY(${dragY}px)` : undefined,
           transition: isAnimating ? 'height 0.28s ease-out, transform 0.28s ease-out' : 'none',
         }}
+        onPointerDown={onHandlePointerDown}
+        onPointerMove={onHandlePointerMove}
+        onPointerUp={onHandlePointerUp}
+        onPointerCancel={onHandlePointerCancel}
+        onClickCapture={onPanelClickCapture}
         onClick={(e) => e.stopPropagation()}
       >
         <div
-          className="shrink-0 touch-none cursor-grab active:cursor-grabbing select-none py-2.5"
-          onPointerDown={onHandlePointerDown}
-          onPointerMove={onHandlePointerMove}
-          onPointerUp={onHandlePointerUp}
-          onPointerCancel={onHandlePointerCancel}
+          data-sheet-handle
+          className="shrink-0 touch-none cursor-grab active:cursor-grabbing select-none py-3.5"
           aria-hidden
         >
-          <div className="w-10 h-1 rounded-full bg-slate-200 dark:bg-slate-600 mx-auto" />
+          <div className="w-12 h-1.5 rounded-full bg-slate-300 dark:bg-slate-600 mx-auto" />
         </div>
         <div ref={contentRef} className="flex flex-col flex-1 min-h-0 overflow-hidden">{children}</div>
       </div>

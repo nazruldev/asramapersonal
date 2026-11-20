@@ -631,7 +631,7 @@ export default function Laporan() {
               Rekap pelanggaran/pembinaan mengikuti periode yang dipilih.
             </p>
           </div>
-          <div className="flex gap-2 pt-1">
+          <div className="flex gap-2 shrink-0 sticky bottom-0 -mx-4 sm:-mx-5 -mb-4 px-4 sm:px-5 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-card border-t border-slate-200 dark:border-slate-700">
             <Button type="button" variant="outline" className="flex-1 text-xs" onClick={resetRekapFilter}>
               Reset filter
             </Button>

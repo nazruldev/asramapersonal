@@ -50,30 +50,35 @@ export async function notifyAppReady(): Promise<void> {
   }
 }
 
-/** Cek GitHub Release terbaru; kalau ada dist.zip lebih baru, download & aktifkan. */
-export async function checkForOtaUpdate(): Promise<void> {
-  if (!Capacitor.isNativePlatform()) return;
-  if (!GITHUB_OWNER) return;
+export interface OtaUpdateInfo {
+  version: string;
+  url: string;
+}
+
+/** Cek GitHub Release terbaru; return info update kalau bundle lebih baru dari aktif. */
+export async function checkOtaUpdateAvailable(): Promise<OtaUpdateInfo | null> {
+  if (!Capacitor.isNativePlatform()) return null;
+  if (!GITHUB_OWNER) return null;
 
   const release = await fetchLatestRelease();
-  if (!release) return;
+  if (!release) return null;
 
   const version = normalizeVersion(release.tag_name);
   const asset = release.assets.find((a) => a.name === BUNDLE_ASSET_NAME);
-  if (!asset) return;
+  if (!asset) return null;
 
   try {
     const current = await CapacitorUpdater.current();
-    if (current?.bundle?.version === version) return;
-
-    const bundle = await CapacitorUpdater.download({
-      url: asset.browser_download_url,
-      version,
-    });
-    // Bundle baru aktif; dipakai mulai launch berikutnya (atau reload manual).
-    await CapacitorUpdater.set(bundle);
-    await CapacitorUpdater.reload();
-  } catch (err) {
-    console.warn('OTA update gagal:', err);
+    if (current?.bundle?.version === version) return null;
+  } catch {
+    // Tetap tawarkan update kalau gagal baca versi aktif.
   }
+  return { version, url: asset.browser_download_url };
+}
+
+/** Download bundle OTA lalu aktifkan & reload app. */
+export async function applyOtaUpdate(info: OtaUpdateInfo): Promise<void> {
+  const bundle = await CapacitorUpdater.download({ url: info.url, version: info.version });
+  await CapacitorUpdater.set(bundle);
+  await CapacitorUpdater.reload();
 }

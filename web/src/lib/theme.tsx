@@ -1,4 +1,6 @@
 import { createContext, useContext, useState, useLayoutEffect, ReactNode } from 'react';
+import { Capacitor } from '@capacitor/core';
+import { StatusBar, Style } from '@capacitor/status-bar';
 
 type Theme = 'light' | 'dark';
 
@@ -17,11 +19,19 @@ function readInitialTheme(): Theme {
   return 'light';
 }
 
+function applyStatusBarTheme(theme: Theme) {
+  if (!Capacitor.isNativePlatform()) return;
+  // Style.Dark -> ikon/teks status bar putih (untuk latar gelap)
+  StatusBar.setStyle({ style: theme === 'dark' ? Style.Dark : Style.Light }).catch(() => {});
+  StatusBar.setBackgroundColor({ color: theme === 'dark' ? '#020617' : '#f1f5f9' }).catch(() => {});
+}
+
 function applyThemeToDocument(theme: Theme) {
   const root = document.documentElement;
   root.classList.remove('light', 'dark');
   root.classList.add(theme);
   localStorage.setItem('theme', theme);
+  applyStatusBarTheme(theme);
 }
 
 if (typeof document !== 'undefined') {
