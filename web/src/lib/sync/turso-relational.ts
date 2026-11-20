@@ -603,10 +603,28 @@ export async function countTursoOperationalRows(client: Client): Promise<{
   };
 }
 
-/** Baca semua tabel entity → bentuk snapshot app. */
+/**
+ * Baca tabel entity → snapshot app.
+ * asramaId terisi = isolasi per asrama: santri/kamar hanya asrama itu
+ * (+ baris tanpa asrama_id untuk kompatibilitas data lama), tabel anak
+ * ikut lewat santri_id/kamar_id. Kelas & kegiatan tetap global.
+ */
 export async function readSnapshotFromTursoTables(
-  client: Client
+  client: Client,
+  asramaId?: string | null
 ): Promise<OfflineDbSnapshot> {
+  const scoped = Boolean(asramaId);
+  const scopeArgs = scoped ? [String(asramaId)] : [];
+  const santriScope = scoped
+    ? `WHERE (s.asrama_id = ? OR s.asrama_id IS NULL)`
+    : '';
+  const childSantriScope = scoped
+    ? `WHERE santri_id IN (SELECT id FROM santri WHERE asrama_id = ? OR asrama_id IS NULL)`
+    : '';
+  const penjadwalanScope = scoped
+    ? `WHERE assignee_santri_id IN (SELECT id FROM santri WHERE asrama_id = ? OR asrama_id IS NULL)
+        OR assignee_kamar_id IN (SELECT id FROM kamar WHERE asrama_id = ? OR asrama_id IS NULL)`
+    : '';
   const [
     kelasRes,
     kamarRes,
@@ -621,25 +639,35 @@ export async function readSnapshotFromTursoTables(
     settingsRes,
   ] = await Promise.all([
     client.execute(`SELECT * FROM kelas ORDER BY nama`),
-    client.execute(
-      `SELECT k.*, s.nama AS ketua_nama FROM kamar k LEFT JOIN santri s ON s.id = k.ketua_santri_id ORDER BY k.nama`
-    ),
-    client.execute(
-      `SELECT s.*, k.nama AS kamar_nama_join, kl.nama AS kelas_nama_join
+    client.execute({
+      sql: `SELECT k.*, s.nama AS ketua_nama FROM kamar k LEFT JOIN santri s ON s.id = k.ketua_santri_id
+            ${scoped ? 'WHERE (k.asrama_id = ? OR k.asrama_id IS NULL)' : ''} ORDER BY k.nama`,
+      args: scopeArgs,
+    }),
+    client.execute({
+      sql: `SELECT s.*, k.nama AS kamar_nama_join, kl.nama AS kelas_nama_join
        FROM santri s
        LEFT JOIN kamar k ON k.id = s.kamar_id
        LEFT JOIN kelas kl ON kl.id = s.kelas_id
-       ORDER BY s.nama`
-    ),
+       ${santriScope}
+       ORDER BY s.nama`,
+      args: scopeArgs,
+    }),
     client.execute(`SELECT * FROM kegiatan ORDER BY urutan, nama`),
     client.execute(`SELECT * FROM penjadwalan_preset`),
-    client.execute(`SELECT * FROM penjadwalan ORDER BY tanggal`),
+    client.execute({ sql: `SELECT * FROM penjadwalan ${penjadwalanScope} ORDER BY tanggal`, args: scoped ? [String(asramaId), String(asramaId)] : [] }),
     client.execute(
-      `SELECT a.*, g.nama AS kegiatan_nama FROM absensi a LEFT JOIN kegiatan g ON g.id = a.kegiatan_id`
+      scoped
+        ? {
+            sql: `SELECT a.*, g.nama AS kegiatan_nama FROM absensi a LEFT JOIN kegiatan g ON g.id = a.kegiatan_id
+                  ${childSantriScope.replace('santri_id', 'a.santri_id')}`,
+            args: scopeArgs,
+          }
+        : `SELECT a.*, g.nama AS kegiatan_nama FROM absensi a LEFT JOIN kegiatan g ON g.id = a.kegiatan_id`
     ),
-    client.execute(`SELECT * FROM izin ORDER BY tanggal_keluar DESC`),
-    client.execute(`SELECT * FROM pembinaan ORDER BY tanggal DESC`),
-    client.execute(`SELECT * FROM riwayat_kamar ORDER BY tanggal DESC`),
+    client.execute({ sql: `SELECT * FROM izin ${childSantriScope} ORDER BY tanggal_keluar DESC`, args: scopeArgs }),
+    client.execute({ sql: `SELECT * FROM pembinaan ${childSantriScope} ORDER BY tanggal DESC`, args: scopeArgs }),
+    client.execute({ sql: `SELECT * FROM riwayat_kamar ${childSantriScope} ORDER BY tanggal DESC`, args: scopeArgs }),
     client.execute(`SELECT payload FROM app_settings WHERE id = 'default' LIMIT 1`),
   ]);
 

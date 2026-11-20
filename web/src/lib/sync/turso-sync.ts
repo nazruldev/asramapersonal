@@ -14,6 +14,7 @@ import {
   writeSnapshotToTursoTables,
 } from '@/lib/sync/turso-relational';
 import { listSyncTombstones } from '@/lib/offline-db';
+import { getSessionUser } from '@/lib/app-auth';
 
 export type SyncStatus = {
   running: boolean;
@@ -199,6 +200,15 @@ async function applyTableSnapshot(
   await reloadClientApiFromStorage();
 }
 
+/** Asrama aktif dari sesi login; null = super admin → tarik semua. */
+function sessionAsramaScope(): string | null {
+  const u = getSessionUser();
+  if (!u) return null;
+  if (u.activeAsramaId) return u.activeAsramaId;
+  if (u.role !== 'super_admin') return u.asramaIds[0] ?? null;
+  return null;
+}
+
 /** Pull dari tabel Turso → lokal. */
 export async function pullFromTurso(): Promise<string> {
   await ensureOnline();
@@ -206,7 +216,7 @@ export async function pullFromTurso(): Promise<string> {
   const counts = await countTursoOperationalRows(client);
 
   if (counts.santri > 0 || counts.kamar > 0 || counts.kelas > 0) {
-    const snap = await readSnapshotFromTursoTables(client);
+    const snap = await readSnapshotFromTursoTables(client, sessionAsramaScope());
     const at = new Date().toISOString();
     await applyTableSnapshot(snap, at);
     return `Pull tabel Turso (santri=${counts.santri}, kamar=${counts.kamar})`;
@@ -261,7 +271,7 @@ export async function bootstrapOnlineSnapshot(): Promise<string> {
   }
 
   if (!tablesEmpty) {
-    const snap = await readSnapshotFromTursoTables(client);
+    const snap = await readSnapshotFromTursoTables(client, sessionAsramaScope());
     const at = new Date().toISOString();
     await applyTableSnapshot(snap, at);
     return `Pull tabel Turso (santri=${counts.santri}, kamar=${counts.kamar})`;
