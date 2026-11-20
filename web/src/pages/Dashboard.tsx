@@ -207,9 +207,9 @@ export default function Dashboard() {
     >
       {/* Hero Welcome Card — full-bleed menempel tepi atas & samping */}
       <div
-        className="relative overflow-hidden p-5 -mx-3 sm:-mx-4 -mt-4 shadow-lg border-b border-emerald-500/40 dark:border-emerald-600/50"
+        className="relative overflow-hidden p-5 -mx-3 sm:-mx-4 -mt-4 shadow-lg border-b border-emerald-500/40 dark:border-emerald-500/25"
       >
-        <div className="absolute inset-0 bg-emerald-700 dark:bg-emerald-950" aria-hidden />
+        <div className="absolute inset-0 bg-emerald-700 dark:bg-gradient-to-br dark:from-slate-950 dark:via-emerald-950 dark:to-teal-950" aria-hidden />
         <svg
           className="absolute inset-0 w-full h-full text-white opacity-[0.07] pointer-events-none"
           aria-hidden

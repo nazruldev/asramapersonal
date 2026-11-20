@@ -336,7 +336,7 @@ export default function Laporan() {
       {/* Pilih tipe laporan — kartu 1 kolom ke bawah */}
       <section className="space-y-2">
         <h3 className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider px-1">
-          Pilih Laporan
+          Pilih Jenis Laporan
         </h3>
         <div className="space-y-2">
           <button
