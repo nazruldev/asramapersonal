@@ -1,0 +1,12 @@
+node_modules
+web/dist
+dist
+release
+.env
+.env.local
+web/.env
+web/.env.local
+.DS_Store
+data.json
+web/data.json
+*.log

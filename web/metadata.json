@@ -1,0 +1,8 @@
+{
+  "name": "AsramaPersonal",
+  "description": "Kelola data santri, absensi, izin, dan catatan pembinaan asrama putra secara praktis melalui satu dasbor pribadi yang simpel.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

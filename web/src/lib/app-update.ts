@@ -1,0 +1,79 @@
+import { Capacitor } from '@capacitor/core';
+import { CapacitorUpdater } from '@capgo/capacitor-updater';
+
+/**
+ * Update OTA untuk Android (Capacitor) dari GitHub Releases — tanpa server.
+ *
+ * Cara kerja: setiap GitHub Release menyertakan asset `dist.zip` (hasil vite
+ * build yang di-zip). App fetch release terbaru lewat GitHub API, bandingkan
+ * tag versi dengan bundle aktif, lalu download + aktifkan bundle baru.
+ * Update berlaku saat app dibuka ulang.
+ */
+const GITHUB_OWNER = 'nazruldev';
+const GITHUB_REPO = 'asramapersonal';
+const BUNDLE_ASSET_NAME = 'dist.zip';
+
+const RELEASES_API = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`;
+
+interface GithubRelease {
+  tag_name: string;
+  assets: { name: string; browser_download_url: string }[];
+}
+
+async function fetchLatestRelease(): Promise<GithubRelease | null> {
+  try {
+    const res = await fetch(RELEASES_API, {
+      headers: { Accept: 'application/vnd.github+json' },
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as GithubRelease;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeVersion(tag: string): string {
+  return tag.replace(/^v/i, '');
+}
+
+/**
+ * Wajib dipanggil sekali saat app selesai render pertama.
+ * Memberi tahu Capgo bahwa bundle aktif berjalan baik; kalau tidak dipanggil,
+ * bundle baru otomatis di-rollback ke versi sebelumnya.
+ */
+export async function notifyAppReady(): Promise<void> {
+  if (!Capacitor.isNativePlatform()) return;
+  try {
+    await CapacitorUpdater.notifyAppReady();
+  } catch (err) {
+    console.warn('notifyAppReady gagal:', err);
+  }
+}
+
+/** Cek GitHub Release terbaru; kalau ada dist.zip lebih baru, download & aktifkan. */
+export async function checkForOtaUpdate(): Promise<void> {
+  if (!Capacitor.isNativePlatform()) return;
+  if (!GITHUB_OWNER) return;
+
+  const release = await fetchLatestRelease();
+  if (!release) return;
+
+  const version = normalizeVersion(release.tag_name);
+  const asset = release.assets.find((a) => a.name === BUNDLE_ASSET_NAME);
+  if (!asset) return;
+
+  try {
+    const current = await CapacitorUpdater.current();
+    if (current?.bundle?.version === version) return;
+
+    const bundle = await CapacitorUpdater.download({
+      url: asset.browser_download_url,
+      version,
+    });
+    // Bundle baru aktif; dipakai mulai launch berikutnya (atau reload manual).
+    await CapacitorUpdater.set(bundle);
+    await CapacitorUpdater.reload();
+  } catch (err) {
+    console.warn('OTA update gagal:', err);
+  }
+}

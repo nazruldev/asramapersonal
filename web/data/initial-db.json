@@ -1,0 +1,35 @@
+{
+  "santri": [],
+  "kamar": [],
+  "kelas": [],
+  "kegiatan": [],
+  "penjadwalan": [],
+  "penjadwalanPreset": [],
+  "absensi": [],
+  "izin": [],
+  "pembinaan": [],
+  "riwayat_kamar": [],
+  "settings": {
+    "namaAsrama": "Asrama Putra",
+    "jenisAsrama": "",
+    "zonaWaktu": "Asia/Makassar",
+    "batasPelanggaran": [
+      3,
+      5,
+      7
+    ],
+    "namaTingkat": [
+      "Peringatan",
+      "Teguran Resmi",
+      "Skors / Pembinaan Khusus"
+    ],
+    "tampilkanPrestasi": false,
+    "passwordHash": "djb2:6d4ef54:5",
+    "securityQuestions": [
+      null,
+      null,
+      null
+    ],
+    "setupSelesai": false
+  }
+}

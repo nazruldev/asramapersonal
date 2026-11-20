@@ -1,0 +1,42 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Build web bundle → zip → asset OTA untuk Android (Capacitor Updater)
+      - name: Build web bundle
+        run: npm run build
+
+      - name: Zip OTA bundle
+        run: Compress-Archive -Path web\dist\* -DestinationPath dist.zip -Force
+        shell: pwsh
+
+      # Build installer Electron + publish ke GitHub Release (latest.yml ikut ter-upload)
+      - name: Build & publish Electron
+        run: npm run electron:release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Upload dist.zip ke release yang sama (dipakai OTA Android)
+      - name: Upload OTA asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist.zip

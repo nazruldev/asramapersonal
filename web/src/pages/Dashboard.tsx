@@ -1,0 +1,694 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMutation } from '@tanstack/react-query';
+import { format } from 'date-fns';
+import { id as localeId } from 'date-fns/locale';
+import { useAppStore, useInitialAppLoading } from '@/store/app-store';
+import { useAppReload } from '@/hooks/use-app-reload';
+import { PageWithPullRefresh } from '@/components/page-with-pull-refresh';
+import { useReloadKeyReady } from '@/hooks/use-reload-key';
+import { ListSkeleton } from '@/components/ui/list-skeleton';
+import { useNavigate } from 'react-router';
+import { toast } from '@/lib/toast';
+import { shareLaporanHarian } from '@/lib/laporan-print';
+import type { LaporanContext } from '@/lib/laporan-reports';
+import { filterKegiatanForAbsensiDate, type KegiatanSchedule } from '@/lib/kegiatan-schedule';
+import {
+  Users,
+  ClockAlert,
+  CheckCircle2,
+  AlertTriangle,
+  CalendarCheck,
+  BedDouble,
+  Share2,
+  ChevronRight,
+  ShieldAlert,
+  Home,
+  CalendarDays,
+  FileText,
+  CalendarRange,
+  Database,
+  Trophy,
+} from 'lucide-react';
+import { EmptyState } from '@/components/ui/empty-state';
+import { KegiatanMark } from '@/components/kegiatan-mark';
+import { appCardClass } from '@/lib/surface-styles';
+import { cn } from '@/lib/utils';
+import { buildKamarSlotRows, sumKamarSlotTotals } from '@/lib/kamar-slots';
+import { KamarSlotStrip } from '@/components/kamar-slot-strip';
+import { kamarDetailPath } from '@/lib/kamar-path';
+import { formatIzinBatasKembali, isIzinBatasBelumPasti, isIzinTerlambat } from '@/lib/izin-group';
+import {
+  buildDashboardAbsensiKegiatan,
+  countIzinTerlambat,
+  countSantriTanpaKamar,
+  totalAbsensiTercatatHariIni,
+} from '@/lib/dashboard-summary';
+import { fetchAbsensiForDay, type AbsensiApiRow } from '@/lib/absensi-api';
+import type { IzinRow } from '@/lib/izin-group';
+
+export default function Dashboard() {
+  const navigate = useNavigate();
+  const reload = useAppReload();
+  const loadingStats = useInitialAppLoading();
+  const dashboardReady = useReloadKeyReady('dashboard');
+  const stats = useAppStore((s) => s.dashboard);
+  const settings = useAppStore((s) => s.settings);
+  const izinList = useAppStore((s) => s.izin);
+  const santriList = useAppStore((s) => s.santri);
+  const kamarList = useAppStore((s) => s.kamar);
+  const pembinaanList = useAppStore((s) => s.pembinaan);
+  const [todayAbsensi, setTodayAbsensi] = useState<AbsensiApiRow[]>([]);
+  const kegiatanRaw = useAppStore((s) => s.kegiatan);
+
+  const todayKey = format(new Date(), 'yyyy-MM-dd');
+
+  useEffect(() => {
+    if (loadingStats) return;
+    void fetchAbsensiForDay({ tanggal: todayKey })
+      .then((rows) => setTodayAbsensi(rows))
+      .catch(() => setTodayAbsensi([]));
+  }, [todayKey, loadingStats, stats?.totalSantri]);
+
+  const dailySchedule = useMemo(
+    () =>
+      filterKegiatanForAbsensiDate(kegiatanRaw as KegiatanSchedule[], todayKey),
+    [kegiatanRaw, todayKey]
+  );
+
+  const kembaliMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/izin/${id}/kembali`, { method: 'PUT' });
+      if (!res.ok) throw new Error('kembali failed');
+    },
+    onSuccess: () => {
+      toast.success('Santri ditandai sudah kembali');
+      void reload(['izin', 'dashboard']);
+    },
+    onError: () => toast.error('Gagal memperbarui status kembali'),
+  });
+
+  const activeIzin = izinList.filter((i: any) => i.status_kembali === 'Belum');
+  const diAsrama =
+    stats?.totalSantri != null
+      ? Math.max(0, stats.totalSantri - activeIzin.length)
+      : Math.max(0, santriList.length - activeIzin.length);
+
+  const laporanCtx = useMemo<LaporanContext>(
+    () => ({
+      namaAsrama: settings.namaAsrama,
+      period: 'today',
+      stats,
+      santri: santriList,
+      kamar: kamarList,
+      absensi: todayAbsensi,
+      izin: izinList,
+      pembinaan: pembinaanList,
+    }),
+    [settings, stats, santriList, kamarList, todayAbsensi, izinList, pembinaanList]
+  );
+
+  const handleKirimLaporanWa = useCallback(() => {
+    void shareLaporanHarian(laporanCtx);
+  }, [laporanCtx]);
+
+  const kamarSlotRows = useMemo(
+    () =>
+      buildKamarSlotRows(
+        kamarList as {
+          id: string;
+          nama: string;
+          kapasitas?: number;
+          terisi?: number;
+          lantai?: string;
+          ketua?: string;
+        }[]
+      ),
+    [kamarList]
+  );
+
+  const slotTotals = useMemo(() => {
+    const fromKamar = sumKamarSlotTotals(kamarSlotRows);
+    if (fromKamar.jumlahKamar > 0) return fromKamar;
+    const kapasitas = stats?.totalKapasitas ?? 0;
+    const terisi = stats?.totalTerisi ?? santriList.length;
+    return {
+      jumlahKamar: 0,
+      kapasitas,
+      terisi,
+      kosong: stats?.sisaRanjang ?? Math.max(0, kapasitas - terisi),
+    };
+  }, [kamarSlotRows, stats, santriList.length]);
+
+  const dashboardKamarPreview = kamarSlotRows.slice(0, 6);
+  const hasMoreKamar = kamarSlotRows.length > dashboardKamarPreview.length;
+
+  const todayLabel = format(new Date(`${todayKey}T12:00:00`), 'EEEE, d MMMM yyyy', {
+    locale: localeId,
+  });
+
+  const izinTerlambat = useMemo(() => countIzinTerlambat(izinList), [izinList]);
+  const santriTanpaKamar = useMemo(() => countSantriTanpaKamar(santriList), [santriList]);
+
+  const absensiKegiatanHari = useMemo(
+    () =>
+      buildDashboardAbsensiKegiatan(
+        todayKey,
+        dailySchedule,
+        todayAbsensi,
+        santriList as { id: string; kamar?: string }[],
+        izinList as IzinRow[]
+      ),
+    [todayKey, dailySchedule, todayAbsensi, santriList, izinList]
+  );
+
+  const absensiRingkas = useMemo(
+    () => totalAbsensiTercatatHariIni(absensiKegiatanHari),
+    [absensiKegiatanHari]
+  );
+
+  const quickActions = [
+    { label: 'Absensi', path: '/laporan/absensi', icon: CalendarCheck, tone: 'bg-emerald-50 text-emerald-700' },
+    { label: 'Izin', path: '/laporan/izin', icon: ClockAlert, tone: 'bg-amber-50 text-amber-700' },
+    { label: 'Catatan BK', path: '/laporan/pembinaan', icon: ShieldAlert, tone: 'bg-rose-50 text-rose-700' },
+    { label: 'Peringkat', path: '/laporan/peringkat', icon: Trophy, tone: 'bg-orange-50 text-orange-700' },
+    { label: 'Santri', path: '/master/santri', icon: Users, tone: 'bg-blue-50 text-blue-700' },
+    { label: 'Kamar', path: '/master/kamar', icon: BedDouble, tone: 'bg-purple-50 text-purple-700' },
+    { label: 'Laporan', path: '/laporan', icon: FileText, tone: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200' },
+    { label: 'Penjadwalan', path: '/penjadwalan', icon: CalendarRange, tone: 'bg-violet-50 text-violet-700' },
+    { label: 'Kelola Data', path: '/master', icon: Database, tone: 'bg-teal-50 text-teal-700' },
+  ];
+
+  const refreshDashboard = useCallback(async () => {
+    await fetchAbsensiForDay({ tanggal: todayKey })
+      .then((rows) => setTodayAbsensi(rows))
+      .catch(() => setTodayAbsensi([]));
+  }, [todayKey]);
+
+  if (!dashboardReady && loadingStats) {
+    return <ListSkeleton rows={10} className="py-2" />;
+  }
+
+  return (
+    <PageWithPullRefresh
+      keys={['dashboard', 'izin', 'santri', 'kamar', 'kegiatan']}
+      extraRefresh={refreshDashboard}
+      className="space-y-4"
+    >
+      {/* Hero Welcome Card */}
+      <div
+        className="relative overflow-hidden rounded-sm p-5 shadow-lg border border-emerald-500/40 dark:border-emerald-600/50"
+      >
+        <div
+          className="absolute inset-0 bg-gradient-to-br from-emerald-600 via-teal-500 to-cyan-500 dark:from-emerald-800 dark:via-teal-800 dark:to-slate-900"
+          aria-hidden
+        />
+        <div
+          className="absolute inset-0 bg-gradient-to-t from-emerald-950/55 via-emerald-900/15 to-transparent dark:from-black/50"
+          aria-hidden
+        />
+        <div
+          className="absolute -right-16 -top-16 w-56 h-56 rounded-full bg-sky-400/45 dark:bg-cyan-500/25 blur-3xl pointer-events-none"
+          aria-hidden
+        />
+        <div
+          className="absolute -left-10 bottom-0 w-44 h-44 rounded-full bg-lime-400/35 dark:bg-emerald-500/20 blur-2xl pointer-events-none"
+          aria-hidden
+        />
+
+        <div className="relative z-10 space-y-3 text-white">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span
+              className="text-[11px] font-bold uppercase tracking-wider text-emerald-950 bg-white px-2.5 py-1 rounded-full border border-white/80 flex items-center gap-1.5 max-w-full shadow-sm"
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-600 shrink-0 animate-pulse" />
+              <span className="truncate">{settings.namaAsrama || 'Beranda Asrama'}</span>
+            </span>
+            <button
+              type="button"
+              onClick={handleKirimLaporanWa}
+              className="text-xs font-bold text-emerald-900 flex items-center gap-1.5 bg-white hover:bg-emerald-50 px-3 py-1.5 rounded-sm shadow-md transition-all active:scale-95 shrink-0"
+            >
+              <Share2 className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Kirim WA</span>
+            </button>
+          </div>
+
+          <div>
+            <h2 className="text-xl font-extrabold tracking-tight text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.45)]">
+              Ringkasan Hari Ini
+            </h2>
+            <p className="text-xs text-emerald-50 mt-1 capitalize drop-shadow-[0_1px_2px_rgba(0,0,0,0.35)]">
+              {todayLabel}
+            </p>
+            <p className="text-[11px] text-white/90 mt-1 leading-relaxed drop-shadow-[0_1px_2px_rgba(0,0,0,0.35)]">
+              Pantau absensi, izin, slot kamar, dan kirim laporan harian ke WhatsApp.
+            </p>
+          </div>
+
+          <div className="pt-1 flex flex-wrap items-center gap-2 text-xs">
+            <div className="rounded-sm px-3 py-1.5 bg-black/25 dark:bg-black/35 border border-white/30 backdrop-blur-sm flex items-center gap-2">
+              <span className="font-black text-sm tabular-nums text-white">{diAsrama}</span>
+              <span className="text-[11px] font-semibold text-emerald-50">Di Asrama</span>
+            </div>
+            <div className="rounded-sm px-3 py-1.5 bg-black/25 dark:bg-black/35 border border-white/30 backdrop-blur-sm flex items-center gap-2">
+              <span className="font-black text-sm tabular-nums text-amber-200">{activeIzin.length}</span>
+              <span className="text-[11px] font-semibold text-emerald-50">Sedang Izin</span>
+            </div>
+            {slotTotals.kapasitas > 0 ? (
+              <div className="rounded-sm px-3 py-1.5 bg-black/25 dark:bg-black/35 border border-white/30 backdrop-blur-sm flex items-center gap-2">
+                <span className="font-black text-sm tabular-nums text-sky-100">
+                  {slotTotals.terisi}/{slotTotals.kapasitas}
+                </span>
+                <span className="text-[11px] font-semibold text-emerald-50">Slot jiwa</span>
+              </div>
+            ) : null}
+            {izinTerlambat > 0 ? (
+              <div className="rounded-sm px-3 py-1.5 bg-rose-500/35 border border-rose-200/40 backdrop-blur-sm flex items-center gap-2">
+                <span className="font-black text-sm tabular-nums text-white">{izinTerlambat}</span>
+                <span className="text-[11px] font-semibold text-rose-50">Izin terlambat</span>
+              </div>
+            ) : null}
+            {santriTanpaKamar > 0 ? (
+              <div className="rounded-sm px-3 py-1.5 bg-amber-500/30 border border-amber-200/40 backdrop-blur-sm flex items-center gap-2">
+                <span className="font-black text-sm tabular-nums text-white">{santriTanpaKamar}</span>
+                <span className="text-[11px] font-semibold text-amber-50">Belum ada kamar</span>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
+      {/* Menu Cepat */}
+      <div className="space-y-2">
+        <h3 className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider px-1">
+          Akses Cepat
+        </h3>
+        <div className="grid grid-cols-4 gap-2">
+          {quickActions.map((action) => {
+            const Icon = action.icon;
+            return (
+              <button
+                key={action.path}
+                type="button"
+                onClick={() => navigate(action.path)}
+                className={cn(
+                  appCardClass,
+                  'flex flex-col items-center justify-center p-2.5 active:scale-95 transition-all text-center min-h-[72px]'
+                )}
+              >
+                <div
+                  className={cn(
+                    'w-9 h-9 rounded-sm flex items-center justify-center mb-1',
+                    action.tone
+                  )}
+                >
+                  <Icon className="w-4 h-4" />
+                </div>
+                <span className="text-[10px] font-bold text-slate-800 dark:text-slate-100 leading-tight">
+                  {action.label}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Status ringkas */}
+      <div className="grid grid-cols-2 gap-3">
+        {/* Total Santri */}
+        <div 
+          onClick={() => navigate('/master/santri')}
+          className={cn(appCardClass, 'p-4 flex flex-col justify-between cursor-pointer active:scale-[0.98] transition-all hover:border-slate-300 dark:hover:border-slate-600')}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-slate-500">Total Santri</span>
+            <div className="w-8 h-8 rounded-sm bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+              <Users className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="mt-3">
+            <div className="flex items-baseline gap-1">
+              <span className="text-2xl font-black text-slate-900 tabular-nums">
+                {loadingStats ? '-' : stats?.totalSantri || santriList.length}
+              </span>
+              <span className="text-xs font-semibold text-slate-400">jiwa</span>
+            </div>
+            <p className="text-[10px] text-slate-400 mt-0.5 truncate">
+              {santriTanpaKamar > 0
+                ? `${santriTanpaKamar} belum punya kamar`
+                : slotTotals.kapasitas > 0
+                  ? `${slotTotals.terisi}/${slotTotals.kapasitas} slot terisi`
+                  : 'Kelola di Data Kamar'}
+            </p>
+          </div>
+        </div>
+
+        {/* Sedang Izin */}
+        <div 
+          onClick={() => navigate('/laporan/izin')}
+          className={cn(appCardClass, 'p-4 flex flex-col justify-between cursor-pointer active:scale-[0.98] transition-all hover:border-slate-300 dark:hover:border-slate-600')}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-slate-500">Sedang Izin</span>
+            <div className="w-8 h-8 rounded-sm bg-amber-50 text-amber-600 flex items-center justify-center font-bold">
+              <ClockAlert className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="mt-3">
+            <div className="flex items-baseline gap-1">
+              <span className="text-2xl font-black text-amber-600 tabular-nums">
+                {loadingStats ? '-' : activeIzin.length}
+              </span>
+              <span className="text-xs font-semibold text-slate-400">santri</span>
+            </div>
+            <p className="text-[10px] text-amber-700/80 mt-0.5 font-medium">
+              {izinTerlambat > 0
+                ? `${izinTerlambat} lewat batas kembali`
+                : activeIzin.length > 0
+                  ? 'Pantau kepulangan'
+                  : 'Semua di asrama'}
+            </p>
+          </div>
+        </div>
+
+        {/* Absensi hari ini */}
+        <div 
+          onClick={() => navigate('/laporan/absensi')}
+          className={cn(appCardClass, 'p-4 flex flex-col justify-between cursor-pointer active:scale-[0.98] transition-all hover:border-slate-300 dark:hover:border-slate-600')}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-slate-500">Absensi Hari Ini</span>
+            <div className="w-8 h-8 rounded-sm bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
+              <CheckCircle2 className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="mt-3">
+            <div className="flex items-baseline gap-1">
+              <span className="text-2xl font-black text-emerald-600 tabular-nums">
+                {loadingStats ? '-' : absensiRingkas.selesai}
+              </span>
+              <span className="text-xs font-semibold text-slate-400">
+                / {absensiRingkas.kegiatan} kegiatan
+              </span>
+            </div>
+            <p className="text-[10px] text-slate-400 mt-0.5 truncate">
+              {absensiRingkas.kegiatan === 0
+                ? 'Belum ada agenda hari ini'
+                : `${absensiRingkas.selesai} agenda selesai dicatat`}
+            </p>
+          </div>
+        </div>
+
+        {/* Slot jiwa kosong */}
+        <div 
+          onClick={() => navigate('/master/kamar')}
+          className={cn(appCardClass, 'p-4 flex flex-col justify-between cursor-pointer active:scale-[0.98] transition-all hover:border-slate-300 dark:hover:border-slate-600')}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-slate-500">Slot Kosong</span>
+            <div className="w-8 h-8 rounded-sm bg-purple-50 text-purple-600 flex items-center justify-center font-bold">
+              <BedDouble className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="mt-3">
+            <div className="flex items-baseline gap-1">
+              <span className="text-2xl font-black text-purple-600 tabular-nums">
+                {loadingStats ? '-' : slotTotals.kosong}
+              </span>
+              <span className="text-xs font-semibold text-slate-400">slot</span>
+            </div>
+            <p className="text-[10px] text-purple-700/80 mt-0.5 font-medium">
+              {slotTotals.kapasitas > 0
+                ? `Dari ${slotTotals.kapasitas} slot jiwa di ${slotTotals.jumlahKamar} kamar`
+                : 'Belum ada data kamar'}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Progress absensi per kegiatan */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between px-1 gap-2">
+          <h3 className="text-xs font-bold text-slate-800 dark:text-slate-100 uppercase tracking-wider">
+            Absensi per Kegiatan
+          </h3>
+          <button
+            type="button"
+            onClick={() => navigate('/laporan/absensi')}
+            className="text-xs font-bold text-emerald-700 dark:text-emerald-400 flex items-center gap-0.5 hover:underline shrink-0"
+          >
+            Input absensi <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+        <div className={cn(appCardClass, 'p-3 space-y-2.5')}>
+          {loadingStats ? (
+            <p className="text-xs text-slate-400 py-1">Memuat absensi…</p>
+          ) : absensiKegiatanHari.length === 0 ? (
+            <EmptyState icon={CalendarDays} title="Tidak ada kegiatan absensi hari ini" variant="minimal">
+              <button
+                type="button"
+                onClick={() => navigate('/master/kegiatan')}
+                className="text-xs font-bold text-emerald-700 dark:text-emerald-400"
+              >
+                Atur jadwal kegiatan
+              </button>
+            </EmptyState>
+          ) : (
+            absensiKegiatanHari.map((row) => {
+              const pct =
+                row.target > 0 ? Math.min(100, (row.tercatat / row.target) * 100) : row.tercatat > 0 ? 100 : 0;
+              return (
+                <button
+                  key={row.id}
+                  type="button"
+                  onClick={() => navigate('/laporan/absensi')}
+                  className="w-full text-left rounded-sm p-2.5 border border-slate-100 dark:border-slate-700 hover:border-emerald-300/80 dark:hover:border-emerald-700 transition-colors"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0 flex items-center gap-2">
+                      <KegiatanMark nama={row.nama} />
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-slate-900 dark:text-slate-50 truncate">{row.nama}</p>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400">{row.waktuLabel}</p>
+                      </div>
+                    </div>
+                    <span
+                      className={cn(
+                        'text-[10px] font-bold tabular-nums shrink-0',
+                        row.selesai ? 'text-emerald-600' : 'text-amber-600'
+                      )}
+                    >
+                      {row.tercatat}/{row.target}
+                    </span>
+                  </div>
+                  <div className="mt-2 h-1.5 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
+                    <div
+                      className={cn('h-full transition-all', row.selesai ? 'bg-emerald-600' : 'bg-amber-500')}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                </button>
+              );
+            })
+          )}
+        </div>
+      </div>
+
+      {/* Slot jiwa per kamar */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between px-1 gap-2">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <h3 className="text-xs font-bold text-slate-800 dark:text-slate-100 uppercase tracking-wider truncate">
+              Slot Kamar
+            </h3>
+            {slotTotals.kapasitas > 0 ? (
+              <span className="px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 dark:bg-purple-950/50 dark:text-purple-200 font-bold text-[10px] tabular-nums shrink-0">
+                {slotTotals.kosong} kosong
+              </span>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            onClick={() => navigate('/master/kamar')}
+            className="text-xs font-bold text-emerald-700 dark:text-emerald-400 flex items-center gap-0.5 hover:underline shrink-0"
+          >
+            Kelola <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        {loadingStats ? (
+          <div className={cn(appCardClass, 'p-4 text-xs text-slate-400')}>Memuat slot kamar…</div>
+        ) : kamarSlotRows.length === 0 ? (
+          <EmptyState icon={BedDouble} title="Belum ada kamar" variant="inline" className="py-5">
+            <button
+              type="button"
+              onClick={() => navigate('/master/kamar')}
+              className="text-xs font-bold text-emerald-700 dark:text-emerald-400"
+            >
+              Tambah kamar & kapasitas slot jiwa
+            </button>
+          </EmptyState>
+        ) : (
+          <div className="space-y-2">
+            {slotTotals.kapasitas > 0 ? (
+              <div className={cn(appCardClass, 'p-3 space-y-2')}>
+                <div className="flex items-center justify-between gap-2 text-[11px]">
+                  <p className="font-bold text-slate-700 dark:text-slate-200">Ringkasan slot jiwa</p>
+                  <p className="font-bold text-slate-600 dark:text-slate-300 tabular-nums">
+                    {slotTotals.terisi}/{slotTotals.kapasitas}
+                  </p>
+                </div>
+                <div
+                  className="h-2 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden"
+                  role="progressbar"
+                  aria-valuenow={slotTotals.terisi}
+                  aria-valuemin={0}
+                  aria-valuemax={slotTotals.kapasitas}
+                >
+                  <div
+                    className="h-full bg-emerald-600 transition-all"
+                    style={{
+                      width: `${Math.min(100, (slotTotals.terisi / slotTotals.kapasitas) * 100)}%`,
+                    }}
+                  />
+                </div>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                  {slotTotals.jumlahKamar} kamar · ikon hijau = terisi · garis putus = kosong
+                </p>
+              </div>
+            ) : null}
+
+            {dashboardKamarPreview.map((row) => (
+              <button
+                key={row.id}
+                type="button"
+                onClick={() => navigate(kamarDetailPath(row.id))}
+                className={cn(
+                  appCardClass,
+                  'w-full p-3 text-left active:scale-[0.99] transition-transform hover:border-emerald-300/80 dark:hover:border-emerald-700'
+                )}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-slate-900 dark:text-slate-50 truncate">{row.nama}</p>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                      {row.lantai || '—'} · {row.terisi}/{row.kapasitas} jiwa
+                      {row.ketua ? ` · Ketua: ${row.ketua}` : ''}
+                    </p>
+                  </div>
+                  {row.isFull ? (
+                    <span className="text-[9px] font-bold uppercase tracking-wide text-rose-700 bg-rose-50 dark:bg-rose-950/40 px-1.5 py-0.5 rounded-sm shrink-0">
+                      Penuh
+                    </span>
+                  ) : row.kosong > 0 ? (
+                    <span className="text-[9px] font-bold text-emerald-700 dark:text-emerald-400 shrink-0 tabular-nums">
+                      +{row.kosong} slot
+                    </span>
+                  ) : null}
+                </div>
+                <div className="mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-700">
+                  <KamarSlotStrip terisi={row.terisi} kapasitas={row.kapasitas} />
+                </div>
+              </button>
+            ))}
+
+            {hasMoreKamar ? (
+              <button
+                type="button"
+                onClick={() => navigate('/master/kamar')}
+                className="w-full py-2 text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:text-emerald-700 dark:hover:text-emerald-400"
+              >
+                Lihat semua {kamarSlotRows.length} kamar
+              </button>
+            ) : null}
+          </div>
+        )}
+      </div>
+
+      {/* Santri Sedang Izin */}
+      <div className="space-y-2.5">
+        <div className="flex items-center justify-between px-1">
+          <div className="flex items-center gap-1.5">
+            <h3 className="text-xs font-bold text-slate-800 dark:text-slate-100 uppercase tracking-wider">
+              Izin Keluar Aktif
+            </h3>
+            <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-bold text-[10px]">
+              {activeIzin.length}
+            </span>
+          </div>
+          <button 
+            type="button"
+            onClick={() => navigate('/laporan/izin')}
+            className="text-xs font-bold text-emerald-700 flex items-center gap-0.5 hover:underline"
+          >
+            Semua Izin <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        {activeIzin.length === 0 ? (
+          <EmptyState
+            icon={Home}
+            title="Alhamdulillah, semua santri di asrama"
+            description="Tidak ada santri yang sedang izin keluar saat ini."
+            className="p-5"
+          />
+        ) : (
+          <div className="space-y-2">
+            {activeIzin.map((item: any) => {
+              const belumPasti = isIzinBatasBelumPasti(String(item.batas_kembali));
+              const isLate = !belumPasti && isIzinTerlambat(item as IzinRow);
+              return (
+                <div 
+                  key={item.id}
+                  className={cn(
+                    appCardClass,
+                    'p-4 space-y-3',
+                    isLate ? 'border-rose-300 dark:border-rose-800 bg-rose-50/20' : ''
+                  )}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-900 leading-snug">{item.santri_nama}</h4>
+                      <p className="text-xs text-slate-500 mt-0.5">{item.alasan}</p>
+                    </div>
+                    {belumPasti ? (
+                      <span className="text-[10px] font-bold text-sky-800 bg-sky-100 border border-sky-200 px-2.5 py-0.5 rounded-full shrink-0">
+                        Belum pasti
+                      </span>
+                    ) : isLate ? (
+                      <span className="text-[10px] font-bold text-rose-700 bg-rose-100 border border-rose-200 px-2.5 py-0.5 rounded-full shrink-0 flex items-center gap-1">
+                        <AlertTriangle className="w-3 h-3" />
+                        Terlambat
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-bold text-amber-700 bg-amber-100 border border-amber-200 px-2.5 py-0.5 rounded-full shrink-0">
+                        Masih Izin
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs">
+                    <span className="text-[11px] text-slate-400 font-medium">
+                      Batas Kembali: <strong className={isLate ? 'text-rose-600' : 'text-slate-700'}>
+                        {formatIzinBatasKembali(String(item.batas_kembali))}
+                      </strong>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => kembaliMutation.mutate(item.id)}
+                      disabled={kembaliMutation.isPending}
+                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-sm text-[11px] font-bold active:scale-95 transition-all shadow-xs"
+                    >
+                      Tandai Kembali
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+    </PageWithPullRefresh>
+  );
+}
