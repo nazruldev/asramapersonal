@@ -159,6 +159,49 @@ export const SCHEMA_V4_SQL = `
     tanggal                 TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS tagihan_jenis (
+    id                  TEXT PRIMARY KEY,
+    nama                TEXT NOT NULL,
+    nominal_default     INTEGER NOT NULL DEFAULT 0,
+    periode_jenis       TEXT NOT NULL DEFAULT 'bulanan'
+      CHECK (periode_jenis IN ('bulanan', 'sekali', 'bebas')),
+    aktif               INTEGER NOT NULL DEFAULT 1 CHECK (aktif IN (0, 1)),
+    created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS tagihan (
+    id              TEXT PRIMARY KEY,
+    santri_id       TEXT NOT NULL REFERENCES santri(id) ON DELETE CASCADE,
+    jenis_id        TEXT REFERENCES tagihan_jenis(id) ON DELETE SET NULL,
+    nama_jenis      TEXT NOT NULL DEFAULT '',
+    periode         TEXT NOT NULL DEFAULT '',
+    nominal         INTEGER NOT NULL DEFAULT 0,
+    terbayar        INTEGER NOT NULL DEFAULT 0,
+    status          TEXT NOT NULL DEFAULT 'belum'
+      CHECK (status IN ('belum', 'sebagian', 'lunas')),
+    jatuh_tempo     TEXT,
+    catatan         TEXT,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (santri_id, jenis_id, periode)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_tagihan_santri ON tagihan (santri_id);
+  CREATE INDEX IF NOT EXISTS idx_tagihan_periode ON tagihan (periode);
+
+  CREATE TABLE IF NOT EXISTS pembayaran (
+    id              TEXT PRIMARY KEY,
+    tagihan_id      TEXT NOT NULL REFERENCES tagihan(id) ON DELETE CASCADE,
+    santri_id       TEXT NOT NULL REFERENCES santri(id) ON DELETE CASCADE,
+    jumlah          INTEGER NOT NULL DEFAULT 0,
+    tanggal         TEXT NOT NULL,
+    catatan         TEXT,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_pembayaran_tagihan ON pembayaran (tagihan_id);
+
   CREATE INDEX IF NOT EXISTS idx_santri_nama ON santri(nama);
   CREATE INDEX IF NOT EXISTS idx_santri_kelas ON santri(kelas_id);
   CREATE INDEX IF NOT EXISTS idx_santri_kamar ON santri(kamar_id);

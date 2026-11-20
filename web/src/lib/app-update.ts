@@ -82,3 +82,14 @@ export async function applyOtaUpdate(info: OtaUpdateInfo): Promise<void> {
   await CapacitorUpdater.set(bundle);
   await CapacitorUpdater.reload();
 }
+
+/** Pesan error yang bisa dibaca user untuk kegagalan OTA. */
+export function otaErrorMessage(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err ?? '');
+  if (!msg) return 'Gagal mengunduh update';
+  const lower = msg.toLowerCase();
+  if (lower.includes('network') || lower.includes('internet') || lower.includes('connect')) {
+    return 'Tidak ada koneksi internet';
+  }
+  return `Gagal: ${msg.slice(0, 120)}`;
+}

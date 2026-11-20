@@ -809,7 +809,7 @@ const SQL_FLUSH_ORDER: SqlEntity[] = SQL_ENTITIES_ALL;
 
 /** Baris izin/BK/absensi yang santri_id-nya sudah tidak ada (sisa hapus lama). */
 async function purgeOrphanSantriChildRows(db: SQLiteDBConnection): Promise<void> {
-  const childTables = ['absensi', 'izin', 'pembinaan', 'riwayat_kamar'] as const;
+  const childTables = ['absensi', 'izin', 'pembinaan', 'riwayat_kamar', 'tagihan', 'pembayaran'] as const;
   for (const table of childTables) {
     await db.run(
       `DELETE FROM ${table} WHERE santri_id IS NOT NULL AND santri_id NOT IN (SELECT id FROM santri)`

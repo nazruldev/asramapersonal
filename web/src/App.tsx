@@ -48,6 +48,7 @@ import Pengaturan from './pages/Pengaturan';
 import PenjadwalanList from './pages/PenjadwalanList';
 import PenjadwalanGenerate from './pages/PenjadwalanGenerate';
 import PenjadwalanDetail from './pages/PenjadwalanDetail';
+import Pembayaran from './pages/Pembayaran';
 import { useKeyboardInset } from './hooks/use-keyboard-inset';
 import { cn } from './lib/utils';
 import {
@@ -291,6 +292,7 @@ function AppShell() {
               },
               { path: '/master/kelas', match: (p) => p === '/master/kelas', element: <Kelas /> },
               { path: '/master/kegiatan', match: (p) => p === '/master/kegiatan', element: <Kegiatan /> },
+              { path: '/master/pembayaran', match: (p) => p === '/master/pembayaran', element: <Pembayaran /> },
               { path: '/laporan', match: (p) => p === '/laporan', element: <Laporan /> },
               { path: '/laporan/absensi', match: (p) => p === '/laporan/absensi', element: <Absensi /> },
               { path: '/laporan/izin', match: (p) => p === '/laporan/izin', element: <Izin /> },

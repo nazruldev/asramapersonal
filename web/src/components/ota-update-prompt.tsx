@@ -2,7 +2,12 @@ import { useEffect, useState } from 'react';
 import { DownloadCloud } from 'lucide-react';
 import { AppModal } from '@/components/ui/app-modal';
 import { Button } from '@/components/ui/button';
-import { applyOtaUpdate, checkOtaUpdateAvailable, type OtaUpdateInfo } from '@/lib/app-update';
+import {
+  applyOtaUpdate,
+  checkOtaUpdateAvailable,
+  otaErrorMessage,
+  type OtaUpdateInfo,
+} from '@/lib/app-update';
 import { toast } from '@/lib/toast';
 
 /**
@@ -32,7 +37,7 @@ export function OtaUpdatePrompt() {
       // reload() membuka bundle baru — kode di bawah jarang tercapai.
     } catch (err) {
       console.warn('OTA update gagal:', err);
-      toast.error('Gagal mengunduh update. Coba lagi nanti.');
+      toast.error(otaErrorMessage(err));
       setBusy(false);
     }
   };

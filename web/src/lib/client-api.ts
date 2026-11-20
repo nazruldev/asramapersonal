@@ -42,6 +42,8 @@ import wilayahBundled from '@/data/wilayah-index.json';
 import type { WilayahIndex } from './wilayah-types';
 import { getWilayahIndexSync, setWilayahIndexCache } from './wilayah-index';
 import { handleWilayahApi } from './wilayah-api-handlers';
+import { handlePembayaranApi } from './pembayaran-api';
+import { clearAllPembayaran, purgePembayaranForSantri } from './pembayaran-store';
 import {
   importLegacyLocalStorageJson,
   initOfflineSqlite,
@@ -726,6 +728,13 @@ async function dispatchApiCore(
     if (wilayahResult) return wilayahResult;
   }
 
+  if (pathname.startsWith('/api/pembayaran')) {
+    const pembayaranResult = await handlePembayaranApi(m, pathname, searchParams, body, {
+      listSantri: () => db.santri,
+    });
+    if (pembayaranResult) return pembayaranResult;
+  }
+
   if (pathname === '/api/auth/login' && m === 'POST' && body) {
     const password = String(body.password ?? '');
     return handleAuthLogin(db.settings, password);
@@ -1056,6 +1065,7 @@ async function dispatchApiCore(
       }
 
       purgeSantriRelatedData(db, normalizedId, rowForPurge);
+      await purgePembayaranForSantri(normalizedId);
       if (shouldPersistToSqlite()) {
         await sqlDeleteSantriCascade(normalizedId);
         db.penjadwalan = (await sqlListPenjadwalanRaw()) as Record<string, unknown>[];
@@ -1602,6 +1612,7 @@ async function dispatchApiCore(
         clearLegacyWebStorage();
         await saveDb(SQL_ENTITIES_ALL);
       }
+      await clearAllPembayaran();
       return { status: 200, body: { success: true } };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Gagal menghapus data';
@@ -1622,6 +1633,7 @@ async function dispatchApiCore(
         clearLegacyWebStorage();
         await saveDb(SQL_ENTITIES_ALL);
       }
+      await clearAllPembayaran();
       return { status: 200, body: { success: true } };
     } catch (err) {
       return sqliteErrorToApiResult(err);

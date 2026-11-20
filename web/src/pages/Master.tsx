@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router';
 import { PageWithPullRefresh } from '@/components/page-with-pull-refresh';
-import { Users, BedDouble, GraduationCap, CalendarDays } from 'lucide-react';
+import { Users, BedDouble, GraduationCap, CalendarDays, Wallet } from 'lucide-react';
 import { appCardClass } from '@/lib/surface-styles';
 import { cn } from '@/lib/utils';
 
@@ -35,6 +35,13 @@ export default function Master() {
       icon: CalendarDays,
       path: '/master/kegiatan',
       color: 'text-orange-500',
+    },
+    {
+      title: 'Pembayaran',
+      description: 'Tagihan, cicilan, dan tunggakan santri',
+      icon: Wallet,
+      path: '/master/pembayaran',
+      color: 'text-rose-500',
     },
   ];
 
