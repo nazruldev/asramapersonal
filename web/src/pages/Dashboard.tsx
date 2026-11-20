@@ -9,8 +9,6 @@ import { useReloadKeyReady } from '@/hooks/use-reload-key';
 import { ListSkeleton } from '@/components/ui/list-skeleton';
 import { useNavigate } from 'react-router';
 import { toast } from '@/lib/toast';
-import { shareLaporanHarian } from '@/lib/laporan-print';
-import type { LaporanContext } from '@/lib/laporan-reports';
 import { filterKegiatanForAbsensiDate, type KegiatanSchedule } from '@/lib/kegiatan-schedule';
 import {
   Users,
@@ -19,7 +17,6 @@ import {
   AlertTriangle,
   CalendarCheck,
   BedDouble,
-  Share2,
   ChevronRight,
   ChevronLeft,
   ShieldAlert,
@@ -103,24 +100,6 @@ export default function Dashboard() {
     stats?.totalSantri != null
       ? Math.max(0, stats.totalSantri - activeIzin.length)
       : Math.max(0, santriList.length - activeIzin.length);
-
-  const laporanCtx = useMemo<LaporanContext>(
-    () => ({
-      namaAsrama: settings.namaAsrama,
-      period: 'today',
-      stats,
-      santri: santriList,
-      kamar: kamarList,
-      absensi: todayAbsensi,
-      izin: izinList,
-      pembinaan: pembinaanList,
-    }),
-    [settings, stats, santriList, kamarList, todayAbsensi, izinList, pembinaanList]
-  );
-
-  const handleKirimLaporanWa = useCallback(() => {
-    void shareLaporanHarian(laporanCtx);
-  }, [laporanCtx]);
 
   const kamarSlotRows = useMemo(
     () =>
@@ -234,23 +213,6 @@ export default function Dashboard() {
         </svg>
 
         <div className="relative z-10 space-y-3 text-white">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span
-              className="text-[11px] font-bold uppercase tracking-wider text-emerald-950 bg-white px-2.5 py-1 rounded-full border border-white/80 flex items-center gap-1.5 max-w-full shadow-sm"
-            >
-              <span className="w-2 h-2 rounded-full bg-emerald-600 shrink-0 animate-pulse" />
-              <span className="truncate">{settings.namaAsrama || 'Beranda Asrama'}</span>
-            </span>
-            <button
-              type="button"
-              onClick={handleKirimLaporanWa}
-              className="text-xs font-bold text-emerald-900 flex items-center gap-1.5 bg-white hover:bg-emerald-50 px-3 py-1.5 rounded-sm shadow-md transition-all active:scale-95 shrink-0"
-            >
-              <Share2 className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Kirim WA</span>
-            </button>
-          </div>
-
           <div>
             <h2 className="text-xl font-extrabold tracking-tight text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.45)]">
               Ringkasan Hari Ini
@@ -259,7 +221,7 @@ export default function Dashboard() {
               {todayLabel}
             </p>
             <p className="text-[11px] text-white/90 mt-1 leading-relaxed drop-shadow-[0_1px_2px_rgba(0,0,0,0.35)]">
-              Pantau absensi, izin, slot kamar, dan kirim laporan harian ke WhatsApp.
+              Pantau absensi, izin, dan slot kamar hari ini.
             </p>
           </div>
 
