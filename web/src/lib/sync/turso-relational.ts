@@ -72,18 +72,33 @@ let tursoSchemaPatched = false;
 /** Patch kolom baru di database Turso lama (aman diulang). */
 export async function ensureTursoSchemaPatches(client: Client): Promise<void> {
   if (tursoSchemaPatched) return;
-  const alters = [`ALTER TABLE santri ADD COLUMN jenis_kelamin TEXT`];
-  for (const t of TOMBSTONE_TABLES_ARR) {
-    alters.push(
-      `ALTER TABLE ${t} ADD COLUMN created_by TEXT`,
-      `ALTER TABLE ${t} ADD COLUMN updated_by TEXT`
-    );
-  }
-  for (const sql of alters) {
+  // Kolom yang dibutuhkan writer per tabel — ALTER hanya yang belum ada.
+  const expected: Record<string, string[]> = {
+    santri: ['jenis_kelamin', 'asrama_id', 'created_by', 'updated_by'],
+    kamar: ['asrama_id', 'created_by', 'updated_by'],
+    kelas: ['created_by', 'updated_by'],
+    kegiatan: ['created_by', 'updated_by'],
+    penjadwalan_preset: ['created_by', 'updated_by'],
+    penjadwalan: ['created_by', 'updated_by'],
+    absensi: ['created_by', 'updated_by'],
+    izin: ['created_by', 'updated_by'],
+    pembinaan: ['created_by', 'updated_by'],
+    riwayat_kamar: ['created_by', 'updated_by'],
+  };
+  for (const [table, cols] of Object.entries(expected)) {
     try {
-      await client.execute(sql);
+      const info = await client.execute(`PRAGMA table_info(${table})`);
+      const have = new Set(info.rows.map((r) => String(r.name)));
+      for (const col of cols) {
+        if (have.has(col)) continue;
+        try {
+          await client.execute(`ALTER TABLE ${table} ADD COLUMN ${col} TEXT`);
+        } catch {
+          /* kolom sudah ada */
+        }
+      }
     } catch {
-      /* kolom sudah ada */
+      /* tabel belum ada — biarkan error muncul di insert */
     }
   }
   tursoSchemaPatched = true;

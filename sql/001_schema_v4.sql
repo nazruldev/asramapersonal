@@ -11,6 +11,8 @@ CREATE TABLE IF NOT EXISTS kelas (
   id          TEXT PRIMARY KEY,
   nama        TEXT NOT NULL,
   tingkat     TEXT NOT NULL CHECK (tingkat IN ('MTS', 'ALIYAH')),
+  created_by          TEXT,
+  updated_by          TEXT,
   updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (tingkat, nama)
 );
@@ -26,6 +28,8 @@ CREATE TABLE IF NOT EXISTS kegiatan (
   urutan              INTEGER NOT NULL DEFAULT 0,
   untuk_absensi       INTEGER NOT NULL DEFAULT 0 CHECK (untuk_absensi IN (0, 1)),
   hari_aktif_json     TEXT,
+  created_by          TEXT,
+  updated_by          TEXT,
   updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -37,6 +41,8 @@ CREATE TABLE IF NOT EXISTS kamar (
   ketua_santri_id     TEXT,
   fasilitas_json      TEXT,
   asrama_id           TEXT,
+  created_by          TEXT,
+  updated_by          TEXT,
   updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -46,6 +52,7 @@ CREATE TABLE IF NOT EXISTS santri (
   kelas_id                TEXT NOT NULL REFERENCES kelas(id),
   kamar_id                TEXT REFERENCES kamar(id) ON DELETE SET NULL,
   nomor_wali              TEXT,
+  jenis_kelamin           TEXT,
   catatan                 TEXT,
   catatan_medis           TEXT,
   foto                    TEXT,
@@ -62,6 +69,8 @@ CREATE TABLE IF NOT EXISTS santri (
   asal_desa_nama          TEXT,
   asrama_id               TEXT,
   created_at              TEXT NOT NULL DEFAULT (datetime('now')),
+  created_by          TEXT,
+  updated_by          TEXT,
   updated_at              TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -77,6 +86,8 @@ CREATE TABLE IF NOT EXISTS penjadwalan (
   catatan             TEXT,
   generated_at        TEXT NOT NULL,
   generate_batch_id   TEXT,
+  created_by          TEXT,
+  updated_by          TEXT,
   updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
   CHECK (length(trim(assignee_nama)) > 0),
   CHECK (
@@ -98,6 +109,8 @@ CREATE TABLE IF NOT EXISTS penjadwalan_preset (
   mode                TEXT NOT NULL CHECK (mode IN ('santri', 'kamar')),
   mulai               TEXT NOT NULL,
   bulan_ke_depan      INTEGER NOT NULL DEFAULT 1 CHECK (bulan_ke_depan BETWEEN 1 AND 24),
+  created_by          TEXT,
+  updated_by          TEXT,
   updated_at          TEXT NOT NULL
 );
 
@@ -108,6 +121,8 @@ CREATE TABLE IF NOT EXISTS absensi (
   tanggal         TEXT NOT NULL,
   status          TEXT NOT NULL CHECK (status IN ('Hadir', 'Alpa', 'Izin', 'Sakit')),
   catatan         TEXT,
+  created_by          TEXT,
+  updated_by          TEXT,
   updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -125,6 +140,8 @@ CREATE TABLE IF NOT EXISTS izin (
   penjemput               TEXT,
   waktu_kembali_aktual    TEXT,
   created_at              TEXT NOT NULL DEFAULT (datetime('now')),
+  created_by          TEXT,
+  updated_by          TEXT,
   updated_at              TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -136,6 +153,8 @@ CREATE TABLE IF NOT EXISTS pembinaan (
   tanggal         TEXT NOT NULL,
   tindak_lanjut   TEXT,
   created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  created_by          TEXT,
+  updated_by          TEXT,
   updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -148,6 +167,8 @@ CREATE TABLE IF NOT EXISTS riwayat_kamar (
   kamar_sebelumnya_nama   TEXT,
   tipe                    TEXT NOT NULL CHECK (tipe IN ('masuk', 'pindah', 'keluar', 'ketua')),
   tanggal                 TEXT NOT NULL,
+  created_by          TEXT,
+  updated_by          TEXT,
   updated_at              TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
