@@ -14,6 +14,7 @@ export type SantriFormState = {
   kelas: string;
   kamar: string;
   nomor_wali: string;
+  jenis_kelamin: string;
   include_wa: boolean;
   catatan: string;
   catatan_medis: string;
@@ -32,6 +33,7 @@ type Props = {
   onTakePhoto: (source: 'camera' | 'gallery') => void;
   onOpenKelasPicker: () => void;
   onOpenKamarPicker: () => void;
+  jenisAsrama?: string;
   includeWaId?: string;
   wilayah?: WilayahFormSlice;
   onWilayahChange?: (next: WilayahFormSlice) => void;
@@ -56,6 +58,7 @@ export function SantriFormFields({
   onTakePhoto,
   onOpenKelasPicker,
   onOpenKamarPicker,
+  jenisAsrama,
   includeWaId = 'include_wa',
   wilayah,
   onWilayahChange,
@@ -66,6 +69,10 @@ export function SantriFormFields({
     formData.kelas ||
     (kelasList.length ? 'Pilih kelas…' : 'Data kelas kosong');
   const kamarDisplay = formData.kamar || 'Pilih kamar… (opsional)';
+  // Jenis kelamin otomatis mengikuti jenis asrama; CAMPUR = wajib pilih manual.
+  const asramaNorm = (jenisAsrama ?? '').trim().toUpperCase();
+  const genderLocked =
+    asramaNorm === 'PUTRA' ? 'Laki-laki' : asramaNorm === 'PUTRI' ? 'Perempuan' : null;
 
   return (
     <div className="grid grid-cols-1 gap-4 w-full">
@@ -154,6 +161,31 @@ export function SantriFormFields({
           </span>
           <ChevronDown className="w-4 h-4 shrink-0 opacity-60" />
         </button>
+      </div>
+
+      <div>
+        {label(genderLocked ? 'Jenis Kelamin' : 'Jenis Kelamin *')}
+        {genderLocked ? (
+          <div
+            className={cn(
+              fieldBase(theme),
+              'flex items-center text-sm opacity-90 cursor-not-allowed'
+            )}
+          >
+            {genderLocked}
+            <span className="ml-2 text-[10px] text-slate-400">(sesuai asrama {asramaNorm.toLowerCase()})</span>
+          </div>
+        ) : (
+          <select
+            value={formData.jenis_kelamin}
+            onChange={(e) => setFormData({ ...formData, jenis_kelamin: e.target.value })}
+            className={fieldBase(theme)}
+          >
+            <option value="">Pilih jenis kelamin…</option>
+            <option value="Laki-laki">Laki-laki</option>
+            <option value="Perempuan">Perempuan</option>
+          </select>
+        )}
       </div>
 
       <div>

@@ -119,9 +119,9 @@ export function sessionUserFromPengguna(p: Pengguna, activeAsramaId?: string | n
     activeAsramaId:
       activeAsramaId !== undefined
         ? activeAsramaId
-        : p.role === 'super_admin'
-          ? null
-          : (asramaIds[0] ?? null),
+        : p.role === 'pengawas'
+          ? (asramaIds[0] ?? null)
+          : null,
   };
 }
 
@@ -150,6 +150,12 @@ export function setSessionUser(user: SessionUser | null): void {
     /* ignore */
   }
   notifySessionChanged();
+}
+
+/** Nama akun yang sedang login untuk kolom audit created_by/updated_by. */
+export function currentActorName(): string | null {
+  const u = getSessionUser();
+  return u?.nama ?? u?.id ?? null;
 }
 
 export function getSessionUser(): SessionUser | null {

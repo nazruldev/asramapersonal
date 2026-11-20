@@ -351,10 +351,8 @@ function activeAsramaId(): string | null {
   const user = getSessionUser();
   if (!user) return defaultAsramaId(db.settings);
   if (user.activeAsramaId) return user.activeAsramaId;
-  if (user.role !== 'super_admin') {
-    // Pengawas tanpa tugas asrama = boleh semua asrama
-    return user.asramaIds.length ? user.asramaIds[0] : null;
-  }
+  if (user.role === 'pengawas') return user.asramaIds[0] ?? null;
+  // super_admin & bendahara: semua asrama kecuali dipilih di switcher
   return null;
 }
 
@@ -1042,6 +1040,7 @@ async function dispatchApiCore(
             kelas: s.kelas,
             kamar: s.kamar,
             nomor_wali: s.nomor_wali ?? '',
+            jenis_kelamin: s.jenis_kelamin ?? '',
             include_wa: s.include_wa === false || s.include_wa === 0 ? false : true,
             asal_provinsi_code: s.asal_provinsi_code,
             asal_provinsi_nama: s.asal_provinsi_nama,
@@ -1114,6 +1113,71 @@ async function dispatchApiCore(
       }
       return { status: 200, body: newSantri };
     }
+  }
+
+  if (pathname === '/api/santri/kenaikan-kelas' && m === 'POST' && body) {
+    const ids = Array.isArray(body.santri_ids)
+      ? (body.santri_ids as unknown[]).map((v) => String(v))
+      : [];
+    const aksi =
+      body.aksi === 'lulus' ? 'lulus' : body.aksi === 'keluar' ? 'keluar' : 'naik';
+    const targetKelas = typeof body.kelas === 'string' ? body.kelas.trim() : '';
+    if (!ids.length) {
+      return { status: 400, body: { error: 'Tidak ada santri yang dipilih.' } };
+    }
+    if (aksi === 'naik' && !targetKelas) {
+      return { status: 400, body: { error: 'Pilih kelas tujuan terlebih dahulu.' } };
+    }
+    const statusKelas =
+      aksi === 'lulus'
+        ? { nama: 'Alumni', tingkat: 'ALUMNI' }
+        : aksi === 'keluar'
+          ? { nama: 'Keluar', tingkat: 'KELUAR' }
+          : null;
+    if (statusKelas && !db.kelas.some((k) => k.nama === statusKelas.nama)) {
+      db.kelas.push({ id: newId(), ...statusKelas });
+      await saveDb(SQL_SCOPE.kelas);
+    }
+    const scoped = scopedSantriIds();
+    const riBefore = db.riwayat_kamar.length;
+    const now = new Date().toISOString();
+    let updated = 0;
+    let skipped = 0;
+    for (const id of ids) {
+      if (!scoped.has(id)) {
+        skipped++;
+        continue;
+      }
+      const santri = await ensureSantriInMemory(id);
+      if (!santri) {
+        skipped++;
+        continue;
+      }
+      if (statusKelas) {
+        const kamarResult = await applySantriKamarAssignment(
+          santri as { id: string; nama?: string; kamar?: string; masuk_kamar_sejak?: string },
+          '',
+          { moveKamar: true }
+        );
+        if (kamarResult && 'error' in kamarResult) {
+          skipped++;
+          continue;
+        }
+        santri.kelas = statusKelas.nama;
+      } else {
+        santri.kelas = targetKelas;
+      }
+      santri.updated_at = now;
+      if (shouldPersistToSqlite()) await persistSantriRow(santri);
+      updated++;
+    }
+    if (shouldPersistToSqlite()) {
+      await saveDb(['kamar']);
+      await persistRiwayatAppended(riBefore);
+    } else {
+      await saveDb(SQL_SCOPE.santri);
+    }
+    return { status: 200, body: { updated, skipped } };
   }
 
   const santriRiwayatKamarMatch = pathname.match(/^\/api\/santri\/([^/]+)\/riwayat-kamar$/);

@@ -64,14 +64,22 @@ export async function bootstrapFromCloud(): Promise<CloudBootstrapResult> {
     return { cloudMode: false, appliedRemote: false };
   }
 
-  if (typeof navigator !== 'undefined' && !navigator.onLine) {
-    throw new Error('Tidak ada koneksi internet. Mode full online Turso wajib online.');
-  }
-
   markOnboardingComplete();
 
-  const { runTursoSync } = await import('@/lib/sync/turso-sync');
-  await runTursoSync();
+  // Offline-first: kalau tidak ada koneksi / sync gagal, tetap buka dengan data lokal.
+  // Auto-sync akan mengejar saat online lagi.
+  let syncOk = true;
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    syncOk = false;
+  } else {
+    const { runTursoSync } = await import('@/lib/sync/turso-sync');
+    try {
+      await runTursoSync();
+    } catch (err) {
+      console.warn('[boot] sync cloud gagal, lanjut offline lokal:', err);
+      syncOk = false;
+    }
+  }
 
   const remote = await pullRemoteSettings();
   if (remote) {
@@ -80,5 +88,5 @@ export async function bootstrapFromCloud(): Promise<CloudBootstrapResult> {
   }
 
   await applySettingsFromCloud(mergeAppSettings({ setupSelesai: true }));
-  return { cloudMode: true, appliedRemote: false };
+  return { cloudMode: true, appliedRemote: false, error: syncOk ? undefined : 'offline' };
 }

@@ -8,10 +8,12 @@ import {
 import { mergeAppSettings, markOnboardingComplete } from '@/lib/app-settings';
 import type { OfflineDbSnapshot } from '@/lib/db/snapshot-types';
 import {
+  applyTombstonesToTurso,
   countTursoOperationalRows,
   readSnapshotFromTursoTables,
   writeSnapshotToTursoTables,
 } from '@/lib/sync/turso-relational';
+import { listSyncTombstones } from '@/lib/offline-db';
 
 export type SyncStatus = {
   running: boolean;
@@ -163,7 +165,11 @@ async function writeLocalToTursoTables(
   const at = pushAt || local.updatedAt || new Date().toISOString();
   const snap = local.snapshot as unknown as OfflineDbSnapshot;
   // Sumber utama: tabel entity (santri, kamar, kelas, …)
-  await writeSnapshotToTursoTables(client, snap);
+  // Upsert per baris — tidak wipe, jadi data device lain aman.
+  await writeSnapshotToTursoTables(client, snap, 'upsert');
+  // Propagasi penghapusan lokal: hapus baris remote + catat tombstone.
+  const tombstones = await listSyncTombstones();
+  await applyTombstonesToTurso(client, tombstones);
 
   // Cadangan JSON (kompatibilitas lama) — tetap diisi agar tidak kosong di dashboard lama
   const payload = JSON.stringify({
@@ -321,9 +327,20 @@ async function runWithStatus(fn: () => Promise<string>): Promise<SyncStatus> {
   }
 }
 
-/** Boot / reconnect: bootstrap online (seed atau pull). */
+/**
+ * Sync penuh satu putaran: push (upsert + tombstone) lalu pull.
+ * Push dulu agar data offline lokal ikut terkirim sebelum lokal diganti remote.
+ * Kalau push gagal → pull tidak jalan → perubahan lokal yang belum terkirim aman.
+ */
+async function syncRound(): Promise<string> {
+  const pushMsg = await pushToTurso();
+  const pullMsg = await pullFromTurso();
+  return `${pushMsg} • ${pullMsg}`;
+}
+
+/** Boot / reconnect / berkala: push lalu pull. */
 export async function runTursoSync(): Promise<SyncStatus> {
-  return runWithStatus(() => bootstrapOnlineSnapshot());
+  return runWithStatus(() => syncRound());
 }
 
 /** Manual refresh dari cloud. */
@@ -379,16 +396,17 @@ export function startAutoSync(): void {
   autoStarted = true;
   void refreshConfiguredFlag();
 
-  const maybePull = () => {
+  const maybeSync = () => {
     if (!readTursoConfig()) return;
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+    if (cloudPushPaused) return;
     if (!navigator.onLine) {
       status.online = false;
       emit();
       return;
     }
-    void runTursoPull().catch((err) => {
-      console.warn('Auto pull skipped/failed:', err);
+    void runTursoSync().catch((err) => {
+      console.warn('Auto sync skipped/failed:', err);
     });
   };
 
@@ -406,7 +424,7 @@ export function startAutoSync(): void {
     emit();
   });
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') maybePull();
+    if (document.visibilityState === 'visible') maybeSync();
   });
 
   void Network.addListener('networkStatusChange', (s) => {
@@ -421,6 +439,6 @@ export function startAutoSync(): void {
     /* web/Electron tanpa plugin */
   });
 
-  window.setInterval(maybePull, 2 * 60 * 1000);
-  console.info('[sync] mode=full-online-turso-snapshot');
+  window.setInterval(maybeSync, 2 * 60 * 1000);
+  console.info('[sync] mode=offline-first-delta-sync');
 }

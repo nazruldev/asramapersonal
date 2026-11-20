@@ -13,6 +13,7 @@ export function mapSantriSqlRow(r: Record<string, unknown>): Record<string, unkn
     kamar: kamarNama,
     kamar_id: r.kamar_id ?? undefined,
     nomor_wali: r.nomor_wali ?? '',
+    jenis_kelamin: r.jenis_kelamin ?? '',
     include_wa: r.include_wa === 0 ? false : true,
     catatan: r.catatan ?? '',
     catatan_medis: r.catatan_medis ?? '',
@@ -115,7 +116,7 @@ export async function sqlListSantriSummary(asramaId?: string): Promise<Record<st
   return runSqlExclusive(async (db) => {
     const res = await db.query(
       `SELECT s.id, s.nama, kl.nama AS kelas, k.nama AS kamar,
-      s.nomor_wali, s.include_wa, s.created_at,
+      s.nomor_wali, s.jenis_kelamin, s.include_wa, s.created_at,
       s.asal_provinsi_code, s.asal_provinsi_nama, s.asal_kota_code, s.asal_kota_nama,
       s.asal_kecamatan_code, s.asal_kecamatan_nama, s.asal_desa_code, s.asal_desa_nama,
       s.jumlah_pelanggaran, s.masuk_kamar_sejak, s.asrama_id
@@ -132,6 +133,7 @@ export async function sqlListSantriSummary(asramaId?: string): Promise<Record<st
         kelas: r.kelas ?? '',
         kamar: r.kamar ?? '',
         nomor_wali: r.nomor_wali ?? '',
+        jenis_kelamin: r.jenis_kelamin ?? '',
         include_wa: r.include_wa === 0 ? false : true,
         created_at: r.created_at ?? undefined,
         asal_provinsi_code: r.asal_provinsi_code,

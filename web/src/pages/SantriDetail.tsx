@@ -79,6 +79,7 @@ const emptyForm = {
   kelas: '',
   kamar: '',
   nomor_wali: '',
+  jenis_kelamin: '',
   include_wa: true,
   catatan: '',
   catatan_medis: '',
@@ -152,6 +153,8 @@ export default function SantriDetail() {
   const izinList = useAppStore((s) => s.izin) as IzinRow[];
   const pembinaanList = useAppStore((s) => s.pembinaan) as PembinaanRow[];
   const settings = useAppStore((s) => s.settings);
+  const jenisAsrama = String(settings.jenisAsrama ?? '').toUpperCase();
+  const autoGender = jenisAsrama === 'PUTRA' ? 'Laki-laki' : jenisAsrama === 'PUTRI' ? 'Perempuan' : '';
   const dashboardStats = useAppStore((s) => s.dashboard);
   const kegiatanMaster = useAppStore((s) => s.kegiatan) as KegiatanSchedule[];
 
@@ -263,6 +266,7 @@ export default function SantriDetail() {
       kelas: santri.kelas || '',
       kamar: santri.kamar || '',
       nomor_wali: santri.nomor_wali || '',
+      jenis_kelamin: santri.jenis_kelamin || autoGender,
       include_wa: santri.include_wa !== false,
       catatan: santri.catatan || '',
       catatan_medis: santri.catatan_medis || '',
@@ -270,7 +274,7 @@ export default function SantriDetail() {
     });
     setWilayahForm(wilayahFromSantri(santri));
     setShowEditModal(true);
-  }, [santri]);
+  }, [santri, autoGender]);
 
   const openLaporanSheet = useCallback(() => {
     setReportSheetOpen(true);
@@ -368,9 +372,15 @@ export default function SantriDetail() {
       toast.error('Nama dan kelas harus diisi');
       return;
     }
+    const resolvedGender = autoGender || formData.jenis_kelamin;
+    if (!resolvedGender) {
+      toast.error('Jenis kelamin wajib dipilih');
+      return;
+    }
     saveMutation.mutate({
       ...formData,
       ...wilayahForm,
+      jenis_kelamin: resolvedGender,
       include_wa: formData.include_wa,
     });
   };
@@ -642,6 +652,7 @@ export default function SantriDetail() {
         description="Perbarui data santri"
       >
         <SantriFormFields
+          jenisAsrama={jenisAsrama}
           formData={formData}
           setFormData={setFormData}
           theme={theme}

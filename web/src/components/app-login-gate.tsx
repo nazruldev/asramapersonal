@@ -16,7 +16,7 @@ import { appSelectClass } from '@/lib/form-styles';
 import { cn } from '@/lib/utils';
 import { toast } from '@/lib/toast';
 import { attemptAccountLogin, listLoginAccounts, type AccountOption } from '@/lib/app-login';
-import type { Pengguna } from '@/lib/app-settings';
+import { penggunaRoleLabel, type Pengguna } from '@/lib/app-settings';
 
 type Mode = 'login' | 'forgot';
 
@@ -159,7 +159,7 @@ export function AppLoginGate({ onSuccess }: { onSuccess: () => void }) {
                           {a.nama}
                         </span>
                         <span className="block text-[10px] text-slate-400">
-                          {a.role === 'super_admin' ? 'Super Admin' : 'Pengawas'}
+                          {penggunaRoleLabel(a.role)}
                         </span>
                       </span>
                     </button>

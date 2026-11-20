@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router';
 import { PageWithPullRefresh } from '@/components/page-with-pull-refresh';
-import { Users, BedDouble, GraduationCap, CalendarDays, Wallet, Building2, UserCog } from 'lucide-react';
+import { Users, BedDouble, GraduationCap, CalendarDays, Wallet, Building2, UserCog, ArrowUpCircle } from 'lucide-react';
 import { appCardClass } from '@/lib/surface-styles';
 import { cn } from '@/lib/utils';
 import { getSessionUser, hasModuleAccess } from '@/lib/app-auth';
@@ -34,6 +34,14 @@ export default function Master() {
       icon: GraduationCap,
       path: '/master/kelas',
       color: 'text-purple-500',
+      modul: 'kelas' as ModulAkses,
+    },
+    {
+      title: 'Kenaikan Kelas',
+      description: 'Naik kelas, tinggal, atau lulus massal',
+      icon: ArrowUpCircle,
+      path: '/master/kenaikan-kelas',
+      color: 'text-indigo-500',
       modul: 'kelas' as ModulAkses,
     },
     {

@@ -27,7 +27,7 @@ import {
   setActiveAsramaId,
   subscribeSessionUser,
 } from '@/lib/app-auth';
-import type { Asrama, ModulAkses } from '@/lib/app-settings';
+import { penggunaRoleLabel, type Asrama, type ModulAkses } from '@/lib/app-settings';
 import { appSelectClass } from '@/lib/form-styles';
 import { useAppStore } from '@/store/app-store';
 
@@ -172,12 +172,14 @@ export function AppMenuSidebar({ open, onClose, theme, namaAsrama, activeIzinCou
   }, [open]);
 
   const isAdmin = !sessionUser || sessionUser.role === 'super_admin';
-  const asramaOptions = isAdmin
+  // Super admin & bendahara melihat semua asrama; pengawas terkunci ke 1 asrama tugasnya.
+  const lihatSemuaAsrama = !sessionUser || sessionUser.role !== 'pengawas';
+  const asramaOptions = lihatSemuaAsrama
     ? asramaList
     : asramaList.filter((a) => sessionUser?.asramaIds.includes(a.id));
   const activeAsrama =
     sessionUser?.activeAsramaId ??
-    (isAdmin ? null : (asramaOptions[0]?.id ?? sessionUser?.asramaIds[0] ?? null));
+    (lihatSemuaAsrama ? null : (asramaOptions[0]?.id ?? null));
 
   const sections = buildSections(activeIzinCount)
     .map((section) => ({
@@ -321,7 +323,7 @@ export function AppMenuSidebar({ open, onClose, theme, namaAsrama, activeIzinCou
             theme === 'dark' ? 'border-slate-500' : 'border-slate-200'
           )}
         >
-          {asramaOptions.length > 1 || (isAdmin && asramaOptions.length >= 1) ? (
+          {asramaOptions.length > 1 || (lihatSemuaAsrama && asramaOptions.length >= 1) ? (
             <div className="space-y-1">
               <p
                 className={cn(
@@ -337,7 +339,7 @@ export function AppMenuSidebar({ open, onClose, theme, namaAsrama, activeIzinCou
                 value={activeAsrama ?? ''}
                 onChange={(e) => switchAsrama(e.target.value)}
               >
-                {isAdmin && <option value="">Semua asrama</option>}
+                {lihatSemuaAsrama && <option value="">Semua asrama</option>}
                 {asramaOptions.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.nama}
@@ -360,7 +362,7 @@ export function AppMenuSidebar({ open, onClose, theme, namaAsrama, activeIzinCou
                 {sessionUser?.nama ?? 'Administrator'}
               </p>
               <p className="text-[9px] text-slate-400 leading-tight">
-                {isAdmin ? 'Super Admin' : 'Pengawas'}
+                {sessionUser ? penggunaRoleLabel(sessionUser.role) : 'Super Admin'}
               </p>
             </div>
             <button

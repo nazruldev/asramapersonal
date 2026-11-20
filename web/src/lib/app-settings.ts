@@ -21,7 +21,17 @@ export function normalizeJenisAsrama(value: string): JenisAsrama | '' {
 }
 
 /** Role akun pengguna aplikasi. */
-export type PenggunaRole = 'super_admin' | 'pengawas';
+export type PenggunaRole = 'super_admin' | 'bendahara' | 'pengawas';
+
+export const PENGGUNA_ROLE_OPTIONS: { id: PenggunaRole; label: string }[] = [
+  { id: 'super_admin', label: 'Super Admin' },
+  { id: 'bendahara', label: 'Bendahara' },
+  { id: 'pengawas', label: 'Pengawas' },
+];
+
+export function penggunaRoleLabel(role: PenggunaRole): string {
+  return PENGGUNA_ROLE_OPTIONS.find((r) => r.id === role)?.label ?? role;
+}
 
 /** Kunci modul untuk hak akses pengawas (checklist per modul). */
 export type ModulAkses =

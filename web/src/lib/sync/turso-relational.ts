@@ -4,6 +4,7 @@
  */
 import type { Client, InArgs, InStatement } from '@libsql/client/web';
 import type { OfflineDbSnapshot } from '@/lib/db/snapshot-types';
+import { currentActorName } from '@/lib/app-auth';
 import { mergeAppSettings, type AppSettings } from '@/lib/app-settings';
 import { penjadwalanRowToEntry, penjadwalanInsertParams } from '@/lib/db/penjadwalan-storage';
 import { normalizeDateKey } from '@/lib/db/date-normalize';
@@ -66,10 +67,38 @@ function stmt(sql: string, args: InArgs = []): InStatement {
 }
 
 /** Hapus isi tabel entity (urutan aman FK), lalu isi ulang dari snapshot RAM. */
+let tursoSchemaPatched = false;
+
+/** Patch kolom baru di database Turso lama (aman diulang). */
+export async function ensureTursoSchemaPatches(client: Client): Promise<void> {
+  if (tursoSchemaPatched) return;
+  const alters = [`ALTER TABLE santri ADD COLUMN jenis_kelamin TEXT`];
+  for (const t of TOMBSTONE_TABLES_ARR) {
+    alters.push(
+      `ALTER TABLE ${t} ADD COLUMN created_by TEXT`,
+      `ALTER TABLE ${t} ADD COLUMN updated_by TEXT`
+    );
+  }
+  for (const sql of alters) {
+    try {
+      await client.execute(sql);
+    } catch {
+      /* kolom sudah ada */
+    }
+  }
+  tursoSchemaPatched = true;
+}
+
+/**
+ * mode 'replace': wipe lalu isi ulang (migrasi satu arah).
+ * mode 'upsert' : upsert per baris tanpa wipe — aman multi-device.
+ */
 export async function writeSnapshotToTursoTables(
   client: Client,
-  snapshot: OfflineDbSnapshot
+  snapshot: OfflineDbSnapshot,
+  mode: 'replace' | 'upsert' = 'replace'
 ): Promise<void> {
+  await ensureTursoSchemaPatches(client);
   const kelas = (snapshot.kelas ?? []) as Record<string, unknown>[];
   const kamar = (snapshot.kamar ?? []) as Record<string, unknown>[];
   const santri = (snapshot.santri ?? []) as Record<string, unknown>[];
@@ -95,7 +124,9 @@ export async function writeSnapshotToTursoTables(
     stmt(`DELETE FROM kegiatan`),
     stmt(`DELETE FROM kelas`),
   ];
-  await execMany(client, clear);
+  if (mode === 'replace') {
+    await execMany(client, clear);
+  }
 
   const inserts: InStatement[] = [];
 
@@ -103,7 +134,7 @@ export async function writeSnapshotToTursoTables(
     inserts.push(
       stmt(
         `INSERT INTO kelas (id, nama, tingkat, updated_at) VALUES (?, ?, ?, ?)`,
-        [String(row.id), str(row, 'nama'), normalizeTingkat(row.tingkat), now]
+        [String(row.id), str(row, 'nama'), normalizeTingkat(row.tingkat), opt(row, 'updated_at') ?? now]
       )
     );
   }
@@ -125,7 +156,7 @@ export async function writeSnapshotToTursoTables(
           Number(row.urutan) || 0,
           row.untuk_absensi === false ? 0 : 1,
           JSON.stringify(row.hari_aktif ?? []),
-          now,
+          opt(row, 'updated_at') ?? now,
         ]
       )
     );
@@ -144,7 +175,7 @@ export async function writeSnapshotToTursoTables(
           opt(row, 'lantai'),
           JSON.stringify(row.fasilitas ?? []),
           opt(row, 'asrama_id'),
-          now,
+          opt(row, 'updated_at') ?? now,
         ]
       )
     );
@@ -164,18 +195,19 @@ export async function writeSnapshotToTursoTables(
     inserts.push(
       stmt(
         `INSERT INTO santri (
-          id, nama, kelas_id, kamar_id, nomor_wali, include_wa, catatan, catatan_medis, foto,
+          id, nama, kelas_id, kamar_id, nomor_wali, jenis_kelamin, include_wa, catatan, catatan_medis, foto,
           jumlah_pelanggaran, masuk_kamar_sejak,
           asal_provinsi_code, asal_provinsi_nama, asal_kota_code, asal_kota_nama,
           asal_kecamatan_code, asal_kecamatan_nama, asal_desa_code, asal_desa_nama,
           asrama_id, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           String(row.id),
           str(row, 'nama'),
           kelasId,
           kamarId,
           opt(row, 'nomor_wali'),
+          opt(row, 'jenis_kelamin'),
           row.include_wa === false ? 0 : 1,
           opt(row, 'catatan'),
           opt(row, 'catatan_medis'),
@@ -250,7 +282,7 @@ export async function writeSnapshotToTursoTables(
           assignee_santri_id, assignee_kamar_id, assignee_nama, assignee_detail,
           catatan, generated_at, generate_batch_id, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [...params, now]
+        [...params, opt(row, 'updated_at') ?? now]
       )
     );
   }
@@ -275,7 +307,7 @@ export async function writeSnapshotToTursoTables(
           normalizeDateKey(row.tanggal),
           str(row, 'status'),
           opt(row, 'catatan'),
-          now,
+          opt(row, 'updated_at') ?? now,
         ]
       )
     );
@@ -300,7 +332,7 @@ export async function writeSnapshotToTursoTables(
           opt(row, 'penjemput'),
           opt(row, 'waktu_kembali_aktual'),
           opt(row, 'created_at') ?? now,
-          now,
+          opt(row, 'updated_at') ?? now,
         ]
       )
     );
@@ -322,7 +354,7 @@ export async function writeSnapshotToTursoTables(
           str(row, 'tanggal'),
           opt(row, 'tindak_lanjut'),
           opt(row, 'created_at') ?? now,
-          now,
+          opt(row, 'updated_at') ?? now,
         ]
       )
     );
@@ -355,7 +387,7 @@ export async function writeSnapshotToTursoTables(
           row.kamar_sebelumnya_nama ?? null,
           row.tipe,
           row.tanggal,
-          now,
+          opt(row, 'updated_at') ?? now,
         ]
       )
     );
@@ -372,7 +404,120 @@ export async function writeSnapshotToTursoTables(
     )
   );
 
+  if (mode === 'upsert') {
+    // INSERT OR REPLACE = delete+insert → melanggar FK. Pakai upsert murni.
+    // + LWW per baris: versi lama device lain tidak menimpa data yang lebih baru.
+    for (const st of inserts) {
+      if (typeof st === 'string') continue;
+      if (/ON CONFLICT/i.test(st.sql)) continue;
+      const mm = /^INSERT\s+(?:OR\s+IGNORE\s+)?INTO\s+(\w+)\s*\(([^)]+)\)/i.exec(st.sql);
+      if (!mm) continue;
+      const table = mm[1];
+      const cols = mm[2].split(',').map((c) => c.trim()).filter((c) => c && c !== 'id');
+      if (!cols.length) continue;
+      let sql = ` ON CONFLICT(id) DO UPDATE SET ${cols
+        .map((c) => `${c} = excluded.${c}`)
+        .join(', ')}`;
+      if (cols.includes('updated_at')) {
+        sql += ` WHERE datetime(excluded.updated_at) > datetime(${table}.updated_at)`;
+      }
+      st.sql += sql;
+    }
+  }
   await execMany(client, inserts);
+
+  // Audit remote: isi created_by/updated_by untuk baris yang belum punya.
+  const actor = currentActorName();
+  if (actor) {
+    for (const t of TOMBSTONE_TABLES_ARR) {
+      await client
+        .execute({
+          sql: `UPDATE ${t} SET created_by = COALESCE(created_by, ?), updated_by = COALESCE(updated_by, ?)`,
+          args: [actor, actor],
+        })
+        .catch(() => undefined);
+    }
+  }
+}
+
+/** Tabel entity yang boleh menerima tombstone hapus. */
+const TOMBSTONE_TABLES_ARR = [
+  'kelas',
+  'kamar',
+  'kegiatan',
+  'santri',
+  'absensi',
+  'izin',
+  'pembinaan',
+  'riwayat_kamar',
+  'penjadwalan',
+  'penjadwalan_preset',
+] as const;
+const TOMBSTONE_TABLES = new Set<string>(TOMBSTONE_TABLES_ARR);
+
+/** Pembersih anak sebelum parent dihapus di cloud (hindari FK gagal). */
+const CHILD_CLEANUP: Record<string, string[]> = {
+  santri: [
+    `DELETE FROM absensi WHERE santri_id = ?`,
+    `DELETE FROM izin WHERE santri_id = ?`,
+    `DELETE FROM pembinaan WHERE santri_id = ?`,
+    `DELETE FROM riwayat_kamar WHERE santri_id = ?`,
+    `UPDATE kamar SET ketua_santri_id = NULL WHERE ketua_santri_id = ?`,
+  ],
+  kamar: [
+    `UPDATE santri SET kamar_id = NULL WHERE kamar_id = ?`,
+    `DELETE FROM riwayat_kamar WHERE kamar_id = ?`,
+  ],
+  kegiatan: [
+    `DELETE FROM absensi WHERE kegiatan_id = ?`,
+    `DELETE FROM penjadwalan WHERE kegiatan_id = ?`,
+  ],
+};
+
+export async function ensureTursoTombstoneTable(client: Client): Promise<void> {
+  await client.execute(`CREATE TABLE IF NOT EXISTS sync_tombstone (
+    table_name TEXT NOT NULL,
+    row_id TEXT NOT NULL,
+    deleted_at TEXT NOT NULL,
+    PRIMARY KEY (table_name, row_id)
+  )`);
+}
+
+/** Terapkan tombstone lokal ke cloud: hapus baris remote + catat. Idempotent. */
+export async function applyTombstonesToTurso(
+  client: Client,
+  tombstones: { table_name: string; row_id: string; deleted_at: string }[]
+): Promise<number> {
+  if (tombstones.length === 0) return 0;
+  await ensureTursoTombstoneTable(client);
+  let applied = 0;
+  for (const t of tombstones) {
+    if (!TOMBSTONE_TABLES.has(t.table_name)) continue;
+    try {
+      const stmts: InStatement[] = (CHILD_CLEANUP[t.table_name] ?? []).map((sql) =>
+        stmt(sql, [t.row_id])
+      );
+      stmts.push(
+        stmt(`DELETE FROM ${t.table_name} WHERE id = ?`, [t.row_id]),
+        stmt(
+          `INSERT OR REPLACE INTO sync_tombstone (table_name, row_id, deleted_at) VALUES (?, ?, ?)`,
+          [t.table_name, t.row_id, t.deleted_at]
+        )
+      );
+      await client.batch(stmts, 'write');
+      applied += 1;
+    } catch {
+      try {
+        await client.execute(
+          `INSERT OR REPLACE INTO sync_tombstone (table_name, row_id, deleted_at) VALUES (?, ?, ?)`,
+          [t.table_name, t.row_id, t.deleted_at]
+        );
+      } catch {
+        /* coba lagi sync berikutnya */
+      }
+    }
+  }
+  return applied;
 }
 
 export async function countTursoOperationalRows(client: Client): Promise<{
@@ -465,6 +610,7 @@ export async function readSnapshotFromTursoTables(
     kamar: r.kamar_nama_join ? String(r.kamar_nama_join) : '',
     kamar_id: r.kamar_id ? String(r.kamar_id) : undefined,
     nomor_wali: r.nomor_wali ? String(r.nomor_wali) : '',
+    jenis_kelamin: r.jenis_kelamin ? String(r.jenis_kelamin) : '',
     include_wa: r.include_wa === 0 || r.include_wa === 0n ? false : true,
     catatan: r.catatan ? String(r.catatan) : '',
     catatan_medis: r.catatan_medis ? String(r.catatan_medis) : '',
@@ -482,6 +628,8 @@ export async function readSnapshotFromTursoTables(
     asrama_id: r.asrama_id ? String(r.asrama_id) : undefined,
     created_at: r.created_at ? String(r.created_at) : undefined,
     updated_at: r.updated_at ? String(r.updated_at) : undefined,
+    created_by: r.created_by ? String(r.created_by) : undefined,
+    updated_by: r.updated_by ? String(r.updated_by) : undefined,
   }));
 
   const kegiatan = kegiatanRes.rows.map((r) => {

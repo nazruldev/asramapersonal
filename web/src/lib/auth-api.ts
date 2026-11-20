@@ -165,6 +165,10 @@ function normalizeAsramaIds(settings: AppSettings, value: unknown): string[] {
   return Array.isArray(value) ? (value as string[]).filter((id) => valid.has(id)) : [];
 }
 
+function normalizeRole(value: unknown): Pengguna['role'] {
+  return value === 'super_admin' || value === 'bendahara' ? value : 'pengawas';
+}
+
 export function handlePenggunaCreate(
   settings: AppSettings,
   body: PenggunaBody,
@@ -174,6 +178,11 @@ export function handlePenggunaCreate(
   const pin = String(body.pin ?? '').trim();
   if (!nama) return { status: 400, body: { error: 'Nama pengguna wajib diisi' } };
   if (pin.length < 4) return { status: 400, body: { error: 'PIN minimal 4 karakter' } };
+  const role = normalizeRole(body.role);
+  const asramaIds = normalizeAsramaIds(settings, body.asramaIds);
+  if (role === 'pengawas' && asramaIds.length !== 1) {
+    return { status: 400, body: { error: 'Pengawas wajib ditugaskan ke tepat 1 asrama' } };
+  }
   const pinHash = hashSecretSync(pin);
   if (pinTaken(settings, pinHash)) {
     return { status: 400, body: { error: 'PIN sudah dipakai akun lain. Gunakan PIN berbeda.' } };
@@ -181,9 +190,9 @@ export function handlePenggunaCreate(
   const item: Pengguna = {
     id: newId(),
     nama,
-    role: body.role === 'super_admin' ? 'super_admin' : 'pengawas',
+    role,
     pinHash,
-    asramaIds: normalizeAsramaIds(settings, body.asramaIds),
+    asramaIds: role === 'pengawas' ? asramaIds : [],
     akses: normalizeAkses(body.akses),
     aktif: body.aktif !== false,
   };
@@ -203,12 +212,17 @@ export function handlePenggunaUpdate(
     if (!nama) return { status: 400, body: { error: 'Nama pengguna wajib diisi' } };
     item.nama = nama;
   }
-  if (body.role !== undefined && item.role === 'pengawas') {
-    item.role = body.role === 'super_admin' ? 'super_admin' : 'pengawas';
+  const nextRole =
+    item.role === 'super_admin' ? 'super_admin' : normalizeRole(body.role ?? item.role);
+  const nextAsramaIds =
+    body.asramaIds !== undefined
+      ? normalizeAsramaIds(settings, body.asramaIds)
+      : item.asramaIds;
+  if (nextRole === 'pengawas' && nextAsramaIds.length !== 1) {
+    return { status: 400, body: { error: 'Pengawas wajib ditugaskan ke tepat 1 asrama' } };
   }
-  if (body.asramaIds !== undefined) {
-    item.asramaIds = normalizeAsramaIds(settings, body.asramaIds);
-  }
+  item.role = nextRole;
+  item.asramaIds = nextRole === 'pengawas' ? nextAsramaIds : [];
   if (body.akses !== undefined) item.akses = normalizeAkses(body.akses);
   if (body.aktif !== undefined) item.aktif = body.aktif !== false;
   if (body.pin !== undefined && String(body.pin).trim()) {

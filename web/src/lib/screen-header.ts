@@ -96,6 +96,10 @@ export function getScreenHeader(pathname: string): ScreenHeaderMeta | null {
       title: 'Data Kelas',
       backTo: '/master',
     },
+    '/master/kenaikan-kelas': {
+      title: 'Kenaikan Kelas',
+      backTo: '/master',
+    },
     '/master/kegiatan': {
       title: 'Data Kegiatan',
       backTo: '/master',

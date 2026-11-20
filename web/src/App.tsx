@@ -43,6 +43,7 @@ import Peringkat from './pages/Peringkat';
 import WilayahSebaran from './pages/WilayahSebaran';
 import DatabasePage from './pages/Database';
 import Kelas from './pages/Kelas';
+import KenaikanKelas from './pages/KenaikanKelas';
 import Kegiatan from './pages/Kegiatan';
 import Pengaturan from './pages/Pengaturan';
 import PenjadwalanList from './pages/PenjadwalanList';
@@ -303,6 +304,11 @@ function AppShell() {
                 element: <KamarDetail />,
               },
               { path: '/master/kelas', match: (p) => p === '/master/kelas', element: <Kelas /> },
+              {
+                path: '/master/kenaikan-kelas',
+                match: (p) => p === '/master/kenaikan-kelas',
+                element: <KenaikanKelas />,
+              },
               { path: '/master/kegiatan', match: (p) => p === '/master/kegiatan', element: <Kegiatan /> },
               { path: '/master/pembayaran', match: (p) => p === '/master/pembayaran', element: <Pembayaran /> },
               { path: '/master/asrama', match: (p) => p === '/master/asrama', element: <Asrama /> },

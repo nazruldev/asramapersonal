@@ -11,6 +11,7 @@ import {
   filterSnapshotChildRows,
 } from './sqlite-fk';
 import { SCHEMA_V4_SQL, DROP_ENTITY_TABLES_V4_SQL } from './db/schema-v4';
+import { currentActorName } from './app-auth';
 import { transformOfflineSnapshotToV4 } from './db/migrate-v4-snapshot';
 import { resolveKelasId, kelasNamaById } from './db/kelas-resolve';
 import { normalizeDateKey } from './db/date-normalize';
@@ -447,6 +448,7 @@ async function loadV3Snapshot(includeHeavy = true): Promise<OfflineDbSnapshot | 
       kamar: kamarNama,
       kamar_id: r.kamar_id ?? undefined,
       nomor_wali: r.nomor_wali ?? '',
+      jenis_kelamin: r.jenis_kelamin ?? '',
       include_wa: r.include_wa === 0 ? false : true,
       catatan: r.catatan ?? '',
       catatan_medis: r.catatan_medis ?? '',
@@ -463,6 +465,8 @@ async function loadV3Snapshot(includeHeavy = true): Promise<OfflineDbSnapshot | 
       asal_desa_nama: r.asal_desa_nama ?? undefined,
       created_at: r.created_at ?? undefined,
       updated_at: r.updated_at ?? undefined,
+      created_by: r.created_by ?? undefined,
+      updated_by: r.updated_by ?? undefined,
     };
   });
   }
@@ -637,6 +641,7 @@ async function loadV4Snapshot(includeHeavy = true): Promise<OfflineDbSnapshot | 
         kamar: kamarNama,
         kamar_id: r.kamar_id ?? undefined,
         nomor_wali: r.nomor_wali ?? '',
+      jenis_kelamin: r.jenis_kelamin ?? '',
         include_wa: r.include_wa === 0 ? false : true,
         catatan: r.catatan ?? '',
         catatan_medis: r.catatan_medis ?? '',
@@ -653,6 +658,8 @@ async function loadV4Snapshot(includeHeavy = true): Promise<OfflineDbSnapshot | 
         asal_desa_nama: r.asal_desa_nama ?? undefined,
         created_at: r.created_at ?? undefined,
         updated_at: r.updated_at ?? undefined,
+        created_by: r.created_by ?? undefined,
+        updated_by: r.updated_by ?? undefined,
         asrama_id: r.asrama_id ?? undefined,
       };
     });
@@ -832,6 +839,32 @@ const SYNC_META_SQL = `
   );
 `;
 
+const AUDIT_TABLES = [
+  'kelas',
+  'kamar',
+  'kegiatan',
+  'santri',
+  'penjadwalan_preset',
+  'penjadwalan',
+  'absensi',
+  'izin',
+  'pembinaan',
+  'riwayat_kamar',
+] as const;
+
+const AUDIT_BY_ENTITY: Record<string, string> = {
+  kelas: 'kelas',
+  kamar: 'kamar',
+  kegiatan: 'kegiatan',
+  santri: 'santri',
+  penjadwalanPreset: 'penjadwalan_preset',
+  penjadwalan: 'penjadwalan',
+  absensi: 'absensi',
+  izin: 'izin',
+  pembinaan: 'pembinaan',
+  riwayat_kamar: 'riwayat_kamar',
+};
+
 const UPDATED_AT_TABLES = [
   'kelas',
   'kegiatan',
@@ -858,6 +891,17 @@ async function ensureSchemaPatches(): Promise<void> {
   }
   if (!(await tableHasColumn('santri', 'asrama_id'))) {
     await db.execute(`ALTER TABLE santri ADD COLUMN asrama_id TEXT`);
+  }
+  if (!(await tableHasColumn('santri', 'jenis_kelamin'))) {
+    await db.execute(`ALTER TABLE santri ADD COLUMN jenis_kelamin TEXT`);
+  }
+  for (const table of AUDIT_TABLES) {
+    if (!(await tableHasColumn(table, 'created_by'))) {
+      await db.execute(`ALTER TABLE ${table} ADD COLUMN created_by TEXT`);
+    }
+    if (!(await tableHasColumn(table, 'updated_by'))) {
+      await db.execute(`ALTER TABLE ${table} ADD COLUMN updated_by TEXT`);
+    }
   }
   await db.execute(SYNC_META_SQL);
   for (const table of UPDATED_AT_TABLES) {
@@ -897,6 +941,25 @@ export async function recordSyncTombstones(
         [tableName, rowId]
       );
     }
+  });
+}
+
+export async function listSyncTombstones(): Promise<
+  { table_name: string; row_id: string; deleted_at: string }[]
+> {
+  await initOfflineSqlite();
+  return runSqlExclusive(async (db) => {
+    const result = await db.query(
+      `SELECT table_name, row_id, deleted_at FROM sync_tombstone`
+    );
+    return (result.values ?? []).map((r) => {
+      const row = r as { table_name: string; row_id: string; deleted_at: string };
+      return {
+        table_name: String(row.table_name),
+        row_id: String(row.row_id),
+        deleted_at: String(row.deleted_at),
+      };
+    });
   });
 }
 
@@ -1081,18 +1144,19 @@ async function flushSantriTable(
     const now = new Date().toISOString();
     await db.run(
       `INSERT INTO santri (
-        id, nama, kelas_id, kamar_id, nomor_wali, include_wa, catatan, catatan_medis, foto,
+        id, nama, kelas_id, kamar_id, nomor_wali, jenis_kelamin, include_wa, catatan, catatan_medis, foto,
         jumlah_pelanggaran, masuk_kamar_sejak,
         asal_provinsi_code, asal_provinsi_nama, asal_kota_code, asal_kota_nama,
         asal_kecamatan_code, asal_kecamatan_nama, asal_desa_code, asal_desa_nama,
         asrama_id, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         String(row.id),
         strField(row, 'nama'),
         kelasId,
         kamarId,
         optStr(row, 'nomor_wali'),
+        optStr(row, 'jenis_kelamin'),
         boolToInt(row, 'include_wa'),
         optStr(row, 'catatan'),
         optStr(row, 'catatan_medis'),
@@ -1367,6 +1431,17 @@ async function commitSqlTablesCore(
         case 'settings':
           await flushSettingsMeta(db, safe.settings);
           break;
+      }
+    }
+    // Stempel audit: isi created_by/updated_by untuk baris yang belum punya.
+    const actor = currentActorName();
+    if (actor) {
+      for (const [entity, table] of Object.entries(AUDIT_BY_ENTITY)) {
+        if (!selected.has(entity as SqlEntity)) continue;
+        await db.run(
+          `UPDATE ${table} SET created_by = COALESCE(created_by, ?), updated_by = COALESCE(updated_by, ?)`,
+          [actor, actor]
+        );
       }
     }
     await db.execute('PRAGMA foreign_keys = ON;', false);

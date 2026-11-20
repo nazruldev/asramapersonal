@@ -6,7 +6,9 @@ export const SCHEMA_V4_SQL = `
     nama        TEXT NOT NULL,
     tingkat     TEXT NOT NULL CHECK (tingkat IN ('MTS', 'ALIYAH')),
     UNIQUE (tingkat, nama)
-  );
+  
+    created_by          TEXT,
+    updated_by          TEXT,);
 
   CREATE TABLE IF NOT EXISTS kegiatan (
     id                  TEXT PRIMARY KEY,
@@ -19,7 +21,9 @@ export const SCHEMA_V4_SQL = `
     urutan              INTEGER NOT NULL DEFAULT 0,
     untuk_absensi       INTEGER NOT NULL DEFAULT 0 CHECK (untuk_absensi IN (0, 1)),
     hari_aktif_json     TEXT
-  );
+  
+    created_by          TEXT,
+    updated_by          TEXT,);
 
   CREATE TABLE IF NOT EXISTS kamar (
     id                  TEXT PRIMARY KEY,
@@ -29,7 +33,9 @@ export const SCHEMA_V4_SQL = `
     ketua_santri_id     TEXT,
     fasilitas_json      TEXT,
     asrama_id           TEXT
-  );
+  
+    created_by          TEXT,
+    updated_by          TEXT,);
 
   CREATE TABLE IF NOT EXISTS santri (
     id                      TEXT PRIMARY KEY,
@@ -37,6 +43,7 @@ export const SCHEMA_V4_SQL = `
     kelas_id                TEXT NOT NULL REFERENCES kelas(id),
     kamar_id                TEXT REFERENCES kamar(id) ON DELETE SET NULL,
     nomor_wali              TEXT,
+    jenis_kelamin           TEXT,
     catatan                 TEXT,
     catatan_medis           TEXT,
     foto                    TEXT,
@@ -53,6 +60,8 @@ export const SCHEMA_V4_SQL = `
     asal_desa_nama          TEXT,
     asrama_id               TEXT,
     created_at              TEXT NOT NULL DEFAULT (datetime('now')),
+    created_by          TEXT,
+    updated_by          TEXT,
     updated_at              TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -98,7 +107,9 @@ export const SCHEMA_V4_SQL = `
       OR
       (mode = 'kamar' AND assignee_kamar_id IS NOT NULL AND assignee_santri_id IS NULL)
     )
-  );
+  
+    created_by          TEXT,
+    updated_by          TEXT,);
 
   CREATE UNIQUE INDEX IF NOT EXISTS uq_penjadwalan_slot
     ON penjadwalan (jenis, tanggal, mode);
@@ -112,6 +123,8 @@ export const SCHEMA_V4_SQL = `
     mode                TEXT NOT NULL CHECK (mode IN ('santri', 'kamar')),
     mulai               TEXT NOT NULL,
     bulan_ke_depan      INTEGER NOT NULL DEFAULT 1 CHECK (bulan_ke_depan BETWEEN 1 AND 24),
+    created_by          TEXT,
+    updated_by          TEXT,
     updated_at          TEXT NOT NULL
   );
 
@@ -122,7 +135,9 @@ export const SCHEMA_V4_SQL = `
     tanggal         TEXT NOT NULL,
     status          TEXT NOT NULL CHECK (status IN ('Hadir', 'Alpa', 'Izin', 'Sakit')),
     catatan         TEXT
-  );
+  
+    created_by          TEXT,
+    updated_by          TEXT,);
 
   CREATE UNIQUE INDEX IF NOT EXISTS uq_absensi_hari
     ON absensi (santri_id, kegiatan_id, tanggal);
@@ -137,6 +152,8 @@ export const SCHEMA_V4_SQL = `
       CHECK (status_kembali IN ('Belum', 'Sudah')),
     penjemput               TEXT,
     waktu_kembali_aktual    TEXT,
+    created_by          TEXT,
+    updated_by          TEXT,
     created_at              TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -147,6 +164,8 @@ export const SCHEMA_V4_SQL = `
     keterangan      TEXT NOT NULL,
     tanggal         TEXT NOT NULL,
     tindak_lanjut   TEXT,
+    created_by          TEXT,
+    updated_by          TEXT,
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -159,7 +178,9 @@ export const SCHEMA_V4_SQL = `
     kamar_sebelumnya_nama   TEXT,
     tipe                    TEXT NOT NULL CHECK (tipe IN ('masuk', 'pindah', 'keluar', 'ketua')),
     tanggal                 TEXT NOT NULL
-  );
+  
+    created_by          TEXT,
+    updated_by          TEXT,);
 
   CREATE TABLE IF NOT EXISTS tagihan_jenis (
     id                  TEXT PRIMARY KEY,

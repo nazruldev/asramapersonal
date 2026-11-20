@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import {
   getSyncStatus,
   pushToTursoNow,
-  runTursoPull,
+  runTursoSync,
   subscribeSyncStatus,
   type SyncStatus,
 } from '@/lib/sync/turso-sync';
@@ -63,7 +63,8 @@ export function TursoSyncPanel() {
   const onPull = async () => {
     setBusy('pull');
     try {
-      const result = await runTursoPull();
+      // Push dulu baru pull — data lokal yang belum terkirim tidak hilang.
+      const result = await runTursoSync();
       await afterCloud(result);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Gagal muat dari cloud');
@@ -94,11 +95,11 @@ export function TursoSyncPanel() {
         )}
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
-            Turso Cloud (full online)
+            Sinkronisasi Cloud
           </h3>
           <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed mt-0.5">
             {status.configured
-              ? `Data di tabel Turso: santri, kamar, kelas, … (${Capacitor.getPlatform()}). Wajib online.`
+              ? `Offline-first: semua data di SQLite lokal, disinkronkan otomatis ke Turso (${Capacitor.getPlatform()}).`
               : 'Belum terhubung ke Turso. Isi kredensial cloud di web/.env.'}
           </p>
           {status.configured && host ? (
@@ -116,8 +117,8 @@ export function TursoSyncPanel() {
             {!status.configured
               ? 'Belum dikonfigurasi'
               : status.online
-                ? 'Terhubung Turso'
-                : 'Offline'}
+                ? 'Terhubung'
+                : 'Offline (sinkron nanti)'}
           </dd>
         </div>
         <div className="rounded-sm bg-slate-50 dark:bg-slate-900/50 p-2">
@@ -137,8 +138,8 @@ export function TursoSyncPanel() {
         </p>
       ) : (
         <p className="text-[11px] text-slate-600 dark:text-slate-300">
-          Setiap simpan data langsung dikirim ke Turso. Tombol di bawah untuk muat ulang atau
-          kirim ulang ke tabel Turso (santri, kamar, …).
+          Perubahan disimpan lokal lalu dikirim otomatis. "Sinkronkan" = kirim lalu
+          tarik data terbaru dari cloud.
         </p>
       )}
 
@@ -155,7 +156,7 @@ export function TursoSyncPanel() {
             <RefreshCw className="w-4 h-4" />
           )}
           <span className="ml-2">
-            {busy === 'pull' ? 'Memuat…' : 'Muat ulang dari cloud'}
+            {busy === 'pull' ? 'Menyinkronkan…' : 'Sinkronkan sekarang'}
           </span>
         </Button>
         <Button

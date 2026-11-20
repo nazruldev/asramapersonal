@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router';
-import { Edit2, Trash2, Save, UserCog, ShieldCheck, KeyRound } from 'lucide-react';
+import { Edit2, Trash2, Save, UserCog, ShieldCheck, KeyRound, Wallet } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useScreenAddAction } from '@/lib/screen-header-actions';
 import { PageWithPullRefresh } from '@/components/page-with-pull-refresh';
@@ -15,9 +15,12 @@ import { useConfirmDialog } from '@/lib/use-confirm-dialog';
 import { toast } from '@/lib/toast';
 import {
   MODUL_AKSES_OPTIONS,
+  PENGGUNA_ROLE_OPTIONS,
+  penggunaRoleLabel,
   type Asrama,
   type ModulAkses,
   type Pengguna,
+  type PenggunaRole,
 } from '@/lib/app-settings';
 
 type PenggunaPublic = Omit<Pengguna, 'pinHash'>;
@@ -25,7 +28,7 @@ type PenggunaPublic = Omit<Pengguna, 'pinHash'>;
 type FormState = {
   nama: string;
   pin: string;
-  role: 'pengawas' | 'super_admin';
+  role: PenggunaRole;
   asramaIds: string[];
   akses: ModulAkses[];
   aktif: boolean;
@@ -84,6 +87,10 @@ export default function PenggunaPage() {
     }
     if (!editing && form.pin.trim().length < 4) {
       toast.error('PIN minimal 4 karakter');
+      return;
+    }
+    if (form.role === 'pengawas' && form.asramaIds.length !== 1) {
+      toast.error('Pengawas wajib ditugaskan ke tepat 1 asrama');
       return;
     }
     setSaving(true);
@@ -183,6 +190,8 @@ export default function PenggunaPage() {
             <div key={p.id} className={cn(appCardClass, 'p-3 flex items-start gap-3')}>
               {p.role === 'super_admin' ? (
                 <ShieldCheck className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />
+              ) : p.role === 'bendahara' ? (
+                <Wallet className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
               ) : (
                 <UserCog className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
               )}
@@ -196,15 +205,15 @@ export default function PenggunaPage() {
                   )}
                 </p>
                 <p className="text-[11px] text-slate-500">
-                  {p.role === 'super_admin' ? 'Super Admin' : 'Pengawas'}
+                  {penggunaRoleLabel(p.role)}
                   {' · '}
-                  {p.role === 'super_admin'
-                    ? 'Semua asrama'
-                    : p.asramaIds.length
+                  {p.role === 'pengawas'
+                    ? p.asramaIds.length
                       ? p.asramaIds.map(asramaName).join(', ')
-                      : 'Semua asrama'}
+                      : 'Belum ada asrama'
+                    : 'Semua asrama'}
                 </p>
-                {p.role === 'pengawas' && (
+                {p.role !== 'super_admin' && (
                   <p className="text-[10px] text-slate-400 truncate">
                     {p.akses.length
                       ? p.akses
@@ -288,28 +297,39 @@ export default function PenggunaPage() {
                 setForm((f) => ({ ...f, role: e.target.value as FormState['role'] }))
               }
             >
-              <option value="pengawas">Pengawas</option>
-              <option value="super_admin">Super Admin</option>
-            </select>
-          </div>
-          <div className="space-y-1">
-            <label className={appLabelClass}>Tugas asrama (kosong = semua asrama)</label>
-            <div className="space-y-1">
-              {asramaList.map((a) => (
-                <label key={a.id} className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-200">
-                  <input
-                    type="checkbox"
-                    checked={form.asramaIds.includes(a.id)}
-                    onChange={() =>
-                      setForm((f) => ({ ...f, asramaIds: toggleInList(f.asramaIds, a.id) }))
-                    }
-                  />
-                  {a.nama}
-                </label>
+              {PENGGUNA_ROLE_OPTIONS.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.label}
+                </option>
               ))}
-            </div>
+            </select>
+            <p className="text-[10px] text-slate-400 leading-snug">
+              Pengawas hanya mengelola 1 asrama. Bendahara mengontrol semua asrama.
+            </p>
           </div>
           {form.role === 'pengawas' && (
+            <div className="space-y-1">
+              <label className={appLabelClass}>Tugas asrama (wajib 1)</label>
+              <select
+                className={appSelectClass}
+                value={form.asramaIds[0] ?? ''}
+                onChange={(e) =>
+                  setForm((f) => ({
+                    ...f,
+                    asramaIds: e.target.value ? [e.target.value] : [],
+                  }))
+                }
+              >
+                <option value="">Pilih asrama…</option>
+                {asramaList.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.nama}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          {form.role !== 'super_admin' && (
             <div className="space-y-1">
               <label className={appLabelClass}>Hak akses modul</label>
               <div className="grid grid-cols-2 gap-1">

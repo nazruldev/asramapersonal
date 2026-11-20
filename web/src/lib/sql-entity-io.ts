@@ -1,4 +1,5 @@
 import type { PenjadwalanEntry } from './penjadwalan';
+import { currentActorName } from './app-auth';
 import {
   resolveRiwayatKamarSebelumnyaFields,
   type SantriKamarRiwayatRow,
@@ -569,17 +570,19 @@ export async function sqlUpsertSantriRow(
     kelasList[0]?.id ??
     '';
   const now = new Date().toISOString();
+  const actor = currentActorName();
   await db.run(
     `INSERT INTO santri (
-      id, nama, kelas_id, kamar_id, nomor_wali, include_wa, catatan, catatan_medis, foto,
+      id, nama, kelas_id, kamar_id, nomor_wali, jenis_kelamin, include_wa, catatan, catatan_medis, foto,
       jumlah_pelanggaran, masuk_kamar_sejak,
       asal_provinsi_code, asal_provinsi_nama, asal_kota_code, asal_kota_nama,
       asal_kecamatan_code, asal_kecamatan_nama, asal_desa_code, asal_desa_nama,
-      asrama_id, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      asrama_id, created_by, updated_by, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       nama=excluded.nama, kelas_id=excluded.kelas_id, kamar_id=excluded.kamar_id,
-      nomor_wali=excluded.nomor_wali, include_wa=excluded.include_wa,
+      nomor_wali=excluded.nomor_wali, jenis_kelamin=excluded.jenis_kelamin, include_wa=excluded.include_wa,
+      updated_by=excluded.updated_by,
       catatan=excluded.catatan, catatan_medis=excluded.catatan_medis, foto=excluded.foto,
       jumlah_pelanggaran=excluded.jumlah_pelanggaran, masuk_kamar_sejak=excluded.masuk_kamar_sejak,
       asal_provinsi_code=excluded.asal_provinsi_code, asal_provinsi_nama=excluded.asal_provinsi_nama,
@@ -594,6 +597,7 @@ export async function sqlUpsertSantriRow(
       kelasId,
       resolved,
       optStr(row, 'nomor_wali'),
+      optStr(row, 'jenis_kelamin'),
       boolToInt(row, 'include_wa'),
       optStr(row, 'catatan'),
       optStr(row, 'catatan_medis'),
@@ -609,6 +613,8 @@ export async function sqlUpsertSantriRow(
       optStr(row, 'asal_desa_code'),
       optStr(row, 'asal_desa_nama'),
       optStr(row, 'asrama_id'),
+      optStr(row, 'created_by') ?? actor,
+      optStr(row, 'updated_by') ?? actor,
       optStr(row, 'created_at') ?? now,
       optStr(row, 'updated_at') ?? now,
     ]
