@@ -207,11 +207,13 @@ export default function PenggunaPage() {
                 <p className="text-[11px] text-slate-500">
                   {penggunaRoleLabel(p.role)}
                   {' · '}
-                  {p.role === 'pengawas'
-                    ? p.asramaIds.length
+                  {p.role === 'super_admin'
+                    ? 'Semua asrama'
+                    : p.asramaIds.length
                       ? p.asramaIds.map(asramaName).join(', ')
-                      : 'Belum ada asrama'
-                    : 'Semua asrama'}
+                      : p.role === 'bendahara'
+                        ? 'Semua asrama'
+                        : 'Belum ada asrama'}
                 </p>
                 {p.role !== 'super_admin' && (
                   <p className="text-[10px] text-slate-400 truncate">
@@ -304,7 +306,8 @@ export default function PenggunaPage() {
               ))}
             </select>
             <p className="text-[10px] text-slate-400 leading-snug">
-              Pengawas hanya mengelola 1 asrama. Bendahara mengontrol semua asrama.
+              Pengawas hanya mengelola 1 asrama. Bendahara bebas: 1, beberapa, atau
+              semua asrama (kosongkan = semua).
             </p>
           </div>
           {form.role === 'pengawas' && (
@@ -327,6 +330,33 @@ export default function PenggunaPage() {
                   </option>
                 ))}
               </select>
+            </div>
+          )}
+          {form.role === 'bendahara' && (
+            <div className="space-y-1">
+              <label className={appLabelClass}>
+                Tugas asrama (kosongkan = semua asrama)
+              </label>
+              <div className="grid grid-cols-2 gap-1">
+                {asramaList.map((a) => (
+                  <label
+                    key={a.id}
+                    className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-200"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={form.asramaIds.includes(a.id)}
+                      onChange={() =>
+                        setForm((f) => ({
+                          ...f,
+                          asramaIds: toggleInList(f.asramaIds, a.id),
+                        }))
+                      }
+                    />
+                    {a.nama}
+                  </label>
+                ))}
+              </div>
             </div>
           )}
           {form.role !== 'super_admin' && (

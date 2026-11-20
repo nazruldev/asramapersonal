@@ -192,7 +192,7 @@ export function handlePenggunaCreate(
     nama,
     role,
     pinHash,
-    asramaIds: role === 'pengawas' ? asramaIds : [],
+    asramaIds: role === 'super_admin' ? [] : asramaIds,
     akses: normalizeAkses(body.akses),
     aktif: body.aktif !== false,
   };
@@ -222,7 +222,7 @@ export function handlePenggunaUpdate(
     return { status: 400, body: { error: 'Pengawas wajib ditugaskan ke tepat 1 asrama' } };
   }
   item.role = nextRole;
-  item.asramaIds = nextRole === 'pengawas' ? nextAsramaIds : [];
+  item.asramaIds = nextRole === 'super_admin' ? [] : nextAsramaIds;
   if (body.akses !== undefined) item.akses = normalizeAkses(body.akses);
   if (body.aktif !== undefined) item.aktif = body.aktif !== false;
   if (body.pin !== undefined && String(body.pin).trim()) {

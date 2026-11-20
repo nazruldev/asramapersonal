@@ -172,14 +172,17 @@ export function AppMenuSidebar({ open, onClose, theme, namaAsrama, activeIzinCou
   }, [open]);
 
   const isAdmin = !sessionUser || sessionUser.role === 'super_admin';
-  // Super admin & bendahara melihat semua asrama; pengawas terkunci ke 1 asrama tugasnya.
-  const lihatSemuaAsrama = !sessionUser || sessionUser.role !== 'pengawas';
-  const asramaOptions = lihatSemuaAsrama
-    ? asramaList
-    : asramaList.filter((a) => sessionUser?.asramaIds.includes(a.id));
+  // Pengawas & bendahara dengan tugas terbatas hanya melihat asrama tugasnya;
+  // super admin & bendahara tanpa batas melihat semua asrama.
+  const dibatasiTugas =
+    sessionUser && sessionUser.role !== 'super_admin' && sessionUser.asramaIds.length > 0;
+  const asramaOptions = dibatasiTugas
+    ? asramaList.filter((a) => sessionUser.asramaIds.includes(a.id))
+    : asramaList;
+  const bisaPilihSemua = !sessionUser || sessionUser.role !== 'pengawas';
   const activeAsrama =
     sessionUser?.activeAsramaId ??
-    (lihatSemuaAsrama ? null : (asramaOptions[0]?.id ?? null));
+    (asramaOptions.length === 1 ? (asramaOptions[0]?.id ?? null) : null);
 
   const sections = buildSections(activeIzinCount)
     .map((section) => ({
@@ -323,7 +326,7 @@ export function AppMenuSidebar({ open, onClose, theme, namaAsrama, activeIzinCou
             theme === 'dark' ? 'border-slate-500' : 'border-slate-200'
           )}
         >
-          {asramaOptions.length > 1 || (lihatSemuaAsrama && asramaOptions.length >= 1) ? (
+          {asramaOptions.length > 1 || (bisaPilihSemua && asramaOptions.length >= 1) ? (
             <div className="space-y-1">
               <p
                 className={cn(
@@ -339,7 +342,7 @@ export function AppMenuSidebar({ open, onClose, theme, namaAsrama, activeIzinCou
                 value={activeAsrama ?? ''}
                 onChange={(e) => switchAsrama(e.target.value)}
               >
-                {lihatSemuaAsrama && <option value="">Semua asrama</option>}
+                {bisaPilihSemua && <option value="">Semua asrama</option>}
                 {asramaOptions.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.nama}

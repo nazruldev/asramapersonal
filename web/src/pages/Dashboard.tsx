@@ -47,6 +47,7 @@ import {
   totalAbsensiTercatatHariIni,
 } from '@/lib/dashboard-summary';
 import { fetchAbsensiForDay, type AbsensiApiRow } from '@/lib/absensi-api';
+import { AsramaSwitcher } from '@/components/asrama-switcher';
 import type { IzinRow } from '@/lib/izin-group';
 
 /** Tombol panah geser daftar horizontal — tampil di header section, hanya ≥sm. */
@@ -256,10 +257,13 @@ export default function Dashboard() {
         </svg>
 
         <div className="relative z-10 space-y-3 text-white">
-          <div>
+          <div className="flex items-start justify-between gap-2">
             <h2 className="text-xl font-extrabold tracking-tight text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.45)]">
               Ringkasan Hari Ini
             </h2>
+            <AsramaSwitcher />
+          </div>
+          <div>
             <p className="text-xs text-emerald-50 mt-1 capitalize drop-shadow-[0_1px_2px_rgba(0,0,0,0.35)]">
               {todayLabel}
             </p>
@@ -302,13 +306,8 @@ export default function Dashboard() {
       </div>
 
       {/* Menu Cepat — grid ala aplikasi umum, ujung kanan "Lainnya" buka semua menu */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between px-1">
-          <h3 className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-            Akses Cepat
-          </h3>
-        </div>
-        <div className="grid grid-cols-4 gap-2">
+      <div>
+        <div className="grid grid-cols-4 gap-2 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 pb-2">
           {quickActions.map((action) => {
             const Icon = action.icon;
             return (

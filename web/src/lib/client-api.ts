@@ -346,13 +346,29 @@ const loadDbAsync = async () => {
   }
 };
 
-/** Asrama aktif sesuai sesi login; null = lihat semua (super admin tanpa pilihan). */
+/** Asrama aktif untuk menandai data baru; null = tidak terkunci satu asrama. */
 function activeAsramaId(): string | null {
   const user = getSessionUser();
   if (!user) return defaultAsramaId(db.settings);
   if (user.activeAsramaId) return user.activeAsramaId;
   if (user.role === 'pengawas') return user.asramaIds[0] ?? null;
-  // super_admin & bendahara: semua asrama kecuali dipilih di switcher
+  if (user.role === 'bendahara' && user.asramaIds.length === 1) return user.asramaIds[0];
+  // super_admin & bendahara multi/semua: tidak terkunci satu asrama
+  return null;
+}
+
+/** Set asrama yang boleh dilihat sesi ini; null = semua asrama. */
+function scopeAsramaIds(): Set<string> | null {
+  const user = getSessionUser();
+  if (!user) return null;
+  if (user.role === 'pengawas') {
+    const id = user.activeAsramaId ?? user.asramaIds[0];
+    return id ? new Set([id]) : null;
+  }
+  if (user.activeAsramaId) return new Set([user.activeAsramaId]);
+  if (user.role === 'bendahara' && user.asramaIds.length > 0) {
+    return new Set(user.asramaIds);
+  }
   return null;
 }
 
@@ -364,16 +380,22 @@ function assignDefaultAsramaToRows(): void {
   for (const k of db.kamar) if (!k.asrama_id) k.asrama_id = fallback;
 }
 
+/** Daftar id asrama scope untuk query SQL; undefined = semua. */
+function scopeAsramaList(): string[] | undefined {
+  const scope = scopeAsramaIds();
+  return scope ? [...scope] : undefined;
+}
+
 function santriInScope(): Record<string, unknown>[] {
-  const aid = activeAsramaId();
-  if (!aid) return db.santri;
-  return db.santri.filter((s) => !s.asrama_id || s.asrama_id === aid);
+  const scope = scopeAsramaIds();
+  if (!scope) return db.santri;
+  return db.santri.filter((s) => !s.asrama_id || scope.has(String(s.asrama_id)));
 }
 
 function kamarInScope(): Record<string, unknown>[] {
-  const aid = activeAsramaId();
-  if (!aid) return db.kamar;
-  return db.kamar.filter((k) => !k.asrama_id || k.asrama_id === aid);
+  const scope = scopeAsramaIds();
+  if (!scope) return db.kamar;
+  return db.kamar.filter((k) => !k.asrama_id || scope.has(String(k.asrama_id)));
 }
 
 function scopedSantriIds(): Set<string> {
@@ -961,7 +983,7 @@ async function dispatchApiCore(
   if (pathname === '/api/dashboard' && m === 'GET') {
     const sIds = scopedSantriIds();
     const totalSantri = shouldPersistToSqlite()
-      ? await sqlCountSantri(activeAsramaId() ?? undefined)
+      ? await sqlCountSantri(scopeAsramaList())
       : sIds.size;
     const sedangIzin = shouldPersistToSqlite()
       ? (await sqlListIzinEnriched()).filter(
@@ -1029,7 +1051,7 @@ async function dispatchApiCore(
       const { page, limit, q, kamar, summary } = parsePageParams(searchParams);
       if (summary) {
         if (shouldPersistToSqlite()) {
-          const items = await sqlListSantriSummary(activeAsramaId() ?? undefined);
+          const items = await sqlListSantriSummary(scopeAsramaList());
           return { status: 200, body: items };
         }
         return {
@@ -1067,7 +1089,7 @@ async function dispatchApiCore(
             limit,
             q,
             kamar: kamar === 'Semua' ? '' : kamar,
-            asramaId: activeAsramaId() ?? undefined,
+            asramaIds: scopeAsramaList(),
           });
           return { status: 200, body: paged };
         }

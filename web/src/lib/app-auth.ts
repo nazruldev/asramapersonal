@@ -119,7 +119,7 @@ export function sessionUserFromPengguna(p: Pengguna, activeAsramaId?: string | n
     activeAsramaId:
       activeAsramaId !== undefined
         ? activeAsramaId
-        : p.role === 'pengawas'
+        : p.role === 'pengawas' || (p.role === 'bendahara' && asramaIds.length === 1)
           ? (asramaIds[0] ?? null)
           : null,
   };

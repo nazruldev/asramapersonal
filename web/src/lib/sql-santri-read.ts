@@ -43,13 +43,13 @@ const SANTRI_FROM = `FROM santri s
 function buildSantriWhere(
   q: string,
   kamar: string,
-  asramaId?: string
+  asramaIds?: string[]
 ): { clause: string; params: string[] } {
   const parts: string[] = [];
   const params: string[] = [];
-  if (asramaId) {
-    parts.push(`s.asrama_id = ?`);
-    params.push(asramaId);
+  if (asramaIds?.length) {
+    parts.push(`s.asrama_id IN (${asramaIds.map(() => '?').join(',')})`);
+    params.push(...asramaIds);
   }
   if (q) {
     const like = `%${q}%`;
@@ -71,7 +71,7 @@ export async function sqlQuerySantriPage(opts: {
   limit?: number;
   q?: string;
   kamar?: string;
-  asramaId?: string;
+  asramaIds?: string[];
 }): Promise<PagedResponse<Record<string, unknown>>> {
   if (!shouldPersistToSqlite()) {
     return { items: [], total: 0, page: 1, limit: DEFAULT_LIST_PAGE_SIZE };
@@ -81,7 +81,7 @@ export async function sqlQuerySantriPage(opts: {
   const offset = (page - 1) * limit;
   const q = (opts.q ?? '').trim();
   const kamar = (opts.kamar ?? '').trim();
-  const { clause, params } = buildSantriWhere(q, kamar, opts.asramaId);
+  const { clause, params } = buildSantriWhere(q, kamar, opts.asramaIds);
 
   return runSqlExclusive(async (db) => {
     const countRes = await db.query(
@@ -113,7 +113,9 @@ export async function sqlGetSantriById(id: string): Promise<Record<string, unkno
   });
 }
 
-export async function sqlListSantriSummary(asramaId?: string): Promise<Record<string, unknown>[]> {
+export async function sqlListSantriSummary(
+  asramaIds?: string[]
+): Promise<Record<string, unknown>[]> {
   if (!shouldPersistToSqlite()) return [];
   return runSqlExclusive(async (db) => {
     const res = await db.query(
@@ -123,9 +125,9 @@ export async function sqlListSantriSummary(asramaId?: string): Promise<Record<st
       s.asal_kecamatan_code, s.asal_kecamatan_nama, s.asal_desa_code, s.asal_desa_nama,
       s.jumlah_pelanggaran, s.masuk_kamar_sejak, s.asrama_id
      ${SANTRI_FROM}
-     ${asramaId ? 'WHERE s.asrama_id = ?' : ''}
+     ${asramaIds?.length ? `WHERE s.asrama_id IN (${asramaIds.map(() => '?').join(',')})` : ''}
      ORDER BY s.nama COLLATE NOCASE`,
-      asramaId ? [asramaId] : []
+      asramaIds?.length ? [...asramaIds] : []
     );
     return (res.values ?? []).map((row) => {
       const r = row as Record<string, unknown>;
@@ -164,12 +166,12 @@ export async function sqlCountIzinBelum(): Promise<number> {
   });
 }
 
-export async function sqlCountSantri(asramaId?: string): Promise<number> {
+export async function sqlCountSantri(asramaIds?: string[]): Promise<number> {
   if (!shouldPersistToSqlite()) return 0;
   return runSqlExclusive(async (db) => {
     const res = await db.query(
-      `SELECT COUNT(*) AS c FROM santri${asramaId ? ' WHERE asrama_id = ?' : ''}`,
-      asramaId ? [asramaId] : []
+      `SELECT COUNT(*) AS c FROM santri${asramaIds?.length ? ` WHERE asrama_id IN (${asramaIds.map(() => '?').join(',')})` : ''}`,
+      asramaIds?.length ? [...asramaIds] : []
     );
     return Number((res.values?.[0] as { c?: number })?.c ?? 0);
   });
