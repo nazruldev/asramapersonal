@@ -11,12 +11,12 @@ function nativeStorageNote(): string {
   const tursoOn = isTursoConfigured();
 
   if (tursoOn) {
-    const cache =
+    const local =
       shouldPersistToSqlite() || platform === 'android'
-        ? 'Cache sesi di SQLite lokal (bukan sumber kebenaran).'
-        : 'Cache sesi di browser (bukan sumber kebenaran).';
+        ? 'Tulis dulu ke SQLite lokal; sync ke Turso saat online.'
+        : 'Tulis dulu ke penyimpanan browser; sync ke Turso saat online.';
     return (
-      `Mode full online Turso. Data masuk ke tabel cloud (santri, kamar, kelas, …); wajib internet. ${cache} ` +
+      `Mode offline-first + Turso. ${local} ` +
       'Web, PC, dan Android memakai database Turso yang sama.'
     );
   }
@@ -29,7 +29,7 @@ function nativeStorageNote(): string {
   }
 
   return (
-    'Mode lokal browser (localStorage). Isi VITE_TURSO_* di web/.env untuk full online Turso.'
+    'Mode lokal browser (localStorage). Isi VITE_TURSO_* di web/.env untuk sync cloud.'
   );
 }
 
@@ -44,7 +44,7 @@ export default function DatabasePage() {
           <FileJson className="w-5 h-5 text-blue-600 dark:text-blue-300 flex-shrink-0 mt-0.5" />
           <div>
             <h3 className="text-sm font-bold text-blue-900 dark:text-blue-100 mb-1">
-              {isTursoConfigured() ? 'Full online Turso' : 'Satu sumber data'}
+              {isTursoConfigured() ? 'Offline-first + Turso' : 'Satu sumber data'}
             </h3>
             <p className="text-[11px] text-blue-700 dark:text-blue-200 leading-relaxed">
               {nativeStorageNote()}

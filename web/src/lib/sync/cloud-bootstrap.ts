@@ -56,8 +56,8 @@ export type CloudBootstrapResult = {
 };
 
 /**
- * Full-online boot: wajib berhasil pull/seed Turso.
- * Tidak ada fallback offline / login lokal jika cloud gagal.
+ * Offline-first boot: sync Turso best-effort.
+ * Gagal/offline → lanjut data lokal; auto-sync mengejar saat online.
  */
 export async function bootstrapFromCloud(): Promise<CloudBootstrapResult> {
   if (!isTursoConfigured()) {
@@ -66,8 +66,6 @@ export async function bootstrapFromCloud(): Promise<CloudBootstrapResult> {
 
   markOnboardingComplete();
 
-  // Offline-first: kalau tidak ada koneksi / sync gagal, tetap buka dengan data lokal.
-  // Auto-sync akan mengejar saat online lagi.
   let syncOk = true;
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
     syncOk = false;

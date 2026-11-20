@@ -25,9 +25,14 @@ jobs:
       - name: Build web bundle
         run: npm run build
 
-      - name: Zip OTA bundle
-        run: Compress-Archive -Path web\dist\* -DestinationPath dist.zip -Force
-        shell: pwsh
+      # WAJIB pakai Capgo CLI — Compress-Archive/PowerShell menghasilkan zip
+      # dengan EXT descriptor yang gagal di-unzip Java/Android (Capgo known issue).
+      # --name harus dist.zip (bukan "dist") karena folder ./dist sudah ada di repo.
+      - name: Zip OTA bundle (Capgo CLI)
+        shell: bash
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          npx @capgo/cli@latest bundle zip com.asramapersonal.app --path web/dist --name dist.zip --bundle "$VER"
 
       # Build installer Electron TANPA publish (upload digabung di step bawah)
       - name: Build Electron installer

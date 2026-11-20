@@ -1,4 +1,3 @@
-import { Capacitor } from '@capacitor/core';
 import type { ModulAkses, Pengguna, PenggunaRole } from './app-settings';
 
 export const DEFAULT_APP_PASSWORD = '12345';
@@ -97,7 +96,38 @@ export function verifySecurityAnswers(
 export const AUTH_SESSION_KEY = 'asrama_manager_authenticated';
 const SESSION_USER_KEY = 'asrama_manager_session_user';
 
-/** Akun yang sedang login (disimpan di sessionStorage). */
+/**
+ * Storage persisten untuk sesi login.
+ * sessionStorage hilang tiap tutup tab/WebView/Electron → user harus login terus.
+ * localStorage bertahan sampai logout eksplisit.
+ */
+function authStore(): Storage | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** Pindahkan sisa sesi lama dari sessionStorage → localStorage (sekali). */
+function migrateSessionStorageAuth(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const ss = window.sessionStorage;
+    const ls = window.localStorage;
+    const flag = ss.getItem(AUTH_SESSION_KEY);
+    if (flag && !ls.getItem(AUTH_SESSION_KEY)) ls.setItem(AUTH_SESSION_KEY, flag);
+    const user = ss.getItem(SESSION_USER_KEY);
+    if (user && !ls.getItem(SESSION_USER_KEY)) ls.setItem(SESSION_USER_KEY, user);
+    ss.removeItem(AUTH_SESSION_KEY);
+    ss.removeItem(SESSION_USER_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Akun yang sedang login (disimpan di localStorage agar tahan buka ulang app). */
 export type SessionUser = {
   id: string;
   nama: string;
@@ -144,8 +174,10 @@ function notifySessionChanged(): void {
 
 export function setSessionUser(user: SessionUser | null): void {
   try {
-    if (user) sessionStorage.setItem(SESSION_USER_KEY, JSON.stringify(user));
-    else sessionStorage.removeItem(SESSION_USER_KEY);
+    const store = authStore();
+    if (!store) return;
+    if (user) store.setItem(SESSION_USER_KEY, JSON.stringify(user));
+    else store.removeItem(SESSION_USER_KEY);
   } catch {
     /* ignore */
   }
@@ -160,7 +192,8 @@ export function currentActorName(): string | null {
 
 export function getSessionUser(): SessionUser | null {
   try {
-    const raw = sessionStorage.getItem(SESSION_USER_KEY);
+    migrateSessionStorageAuth();
+    const raw = authStore()?.getItem(SESSION_USER_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as SessionUser;
     if (!parsed || !parsed.id || !parsed.role) return null;
@@ -211,21 +244,17 @@ export function requiredModuleForPath(pathname: string): ModulAkses | null {
   return null;
 }
 
-/** Hapus flag login lama di localStorage (rilis sebelumnya menyimpan di sana di APK). */
-function purgeLegacyPersistentAuthFlag(): void {
-  if (!Capacitor.isNativePlatform()) return;
-  try {
-    localStorage.removeItem(AUTH_SESSION_KEY);
-  } catch {
-    /* ignore */
-  }
-}
-
 export function markAuthenticated(): void {
   try {
-    if (typeof window === 'undefined') return;
-    sessionStorage.setItem(AUTH_SESSION_KEY, '1');
-    purgeLegacyPersistentAuthFlag();
+    const store = authStore();
+    if (!store) return;
+    store.setItem(AUTH_SESSION_KEY, '1');
+    // Bersihkan sisa sessionStorage lama jika ada.
+    try {
+      sessionStorage.removeItem(AUTH_SESSION_KEY);
+    } catch {
+      /* ignore */
+    }
   } catch {
     /* ignore */
   }
@@ -233,8 +262,10 @@ export function markAuthenticated(): void {
 
 export function clearAuthenticated(): void {
   try {
+    authStore()?.removeItem(AUTH_SESSION_KEY);
+    authStore()?.removeItem(SESSION_USER_KEY);
     sessionStorage.removeItem(AUTH_SESSION_KEY);
-    localStorage.removeItem(AUTH_SESSION_KEY);
+    sessionStorage.removeItem(SESSION_USER_KEY);
   } catch {
     /* ignore */
   }
@@ -243,8 +274,10 @@ export function clearAuthenticated(): void {
 
 export function isAuthenticatedSession(): boolean {
   try {
-    purgeLegacyPersistentAuthFlag();
-    return sessionStorage.getItem(AUTH_SESSION_KEY) === '1';
+    migrateSessionStorageAuth();
+    if (authStore()?.getItem(AUTH_SESSION_KEY) !== '1') return false;
+    // Flag saja tidak cukup — harus ada akun sesi yang valid.
+    return getSessionUser() !== null;
   } catch {
     return false;
   }

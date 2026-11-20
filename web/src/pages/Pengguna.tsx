@@ -1,6 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router';
-import { Edit2, Trash2, Save, UserCog, ShieldCheck, KeyRound, Wallet } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
+import {
+  Camera,
+  Edit2,
+  ImagePlus,
+  Trash2,
+  Save,
+  UserCog,
+  ShieldCheck,
+  KeyRound,
+  Wallet,
+  X,
+} from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useScreenAddAction } from '@/lib/screen-header-actions';
 import { PageWithPullRefresh } from '@/components/page-with-pull-refresh';
@@ -8,6 +20,13 @@ import { ListSkeleton } from '@/components/ui/list-skeleton';
 import { AppModal } from '@/components/ui/app-modal';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Button } from '@/components/ui/button';
+import {
+  avatarInitials,
+  fileToAvatarDataUrl,
+  getAvatar,
+  setAvatar,
+  subscribeAvatar,
+} from '@/lib/app-avatar';
 import { appFieldClass, appLabelClass, appSelectClass } from '@/lib/form-styles';
 import { appCardClass } from '@/lib/surface-styles';
 import { cn } from '@/lib/utils';
@@ -43,16 +62,33 @@ const emptyForm: FormState = {
   aktif: true,
 };
 
+function PenggunaListAvatar({ id, nama }: { id: string; nama: string }) {
+  const [src, setSrc] = useState<string | null>(() => getAvatar(id));
+  useEffect(() => subscribeAvatar(() => setSrc(getAvatar(id))), [id]);
+  return (
+    <span className="w-10 h-10 rounded-full overflow-hidden shrink-0 bg-emerald-600 text-white flex items-center justify-center text-sm font-black">
+      {src ? (
+        <img src={src} alt={nama} className="w-full h-full object-cover" />
+      ) : (
+        avatarInitials(nama)
+      )}
+    </span>
+  );
+}
+
 export default function PenggunaPage() {
   const location = useLocation();
   const isScreen = location.pathname === '/master/pengguna';
   const confirmDialog = useConfirmDialog();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const isNative = Capacitor.isNativePlatform();
 
   const [items, setItems] = useState<PenggunaPublic[] | null>(null);
   const [asramaList, setAsramaList] = useState<Asrama[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<PenggunaPublic | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
+  const [fotoDraft, setFotoDraft] = useState('');
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
@@ -75,10 +111,43 @@ export default function PenggunaPage() {
     setShowModal(false);
     setEditing(null);
     setForm(emptyForm);
+    setFotoDraft('');
   };
 
   const toggleInList = <T,>(list: T[], value: T): T[] =>
     list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
+
+  const pickFotoNative = async (source: 'camera' | 'gallery') => {
+    try {
+      const { Camera: CapCamera, CameraResultType, CameraSource } = await import(
+        '@capacitor/camera'
+      );
+      const photo = await CapCamera.getPhoto({
+        quality: 85,
+        allowEditing: false,
+        resultType: CameraResultType.DataUrl,
+        source: source === 'camera' ? CameraSource.Camera : CameraSource.Photos,
+      });
+      if (photo.dataUrl) {
+        // Kompres ulang lewat canvas agar ukuran seragam dengan avatar profil.
+        const blob = await (await fetch(photo.dataUrl)).blob();
+        const file = new File([blob], 'avatar.jpg', { type: blob.type || 'image/jpeg' });
+        setFotoDraft(await fileToAvatarDataUrl(file));
+      }
+    } catch (err) {
+      // User batal / izin ditolak — diam.
+      console.warn('Ambil foto gagal:', err);
+    }
+  };
+
+  const pickFotoFile = async (file: File | null) => {
+    if (!file) return;
+    try {
+      setFotoDraft(await fileToAvatarDataUrl(file));
+    } catch {
+      toast.error('Gagal memproses foto');
+    }
+  };
 
   const handleSave = async () => {
     if (!form.nama.trim()) {
@@ -108,11 +177,13 @@ export default function PenggunaPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      const data = (await res.json().catch(() => ({}))) as { error?: string; id?: string };
       if (!res.ok) {
         toast.error(data.error || 'Gagal menyimpan akun');
         return;
       }
+      const savedId = editing?.id ?? data.id;
+      if (savedId) setAvatar(savedId, fotoDraft.trim() ? fotoDraft : null);
       toast.success(editing ? 'Akun diperbarui' : 'Akun ditambahkan');
       closeModal();
       void load();
@@ -156,6 +227,7 @@ export default function PenggunaPage() {
             toast.error(data.error || 'Gagal menghapus akun');
             return;
           }
+          setAvatar(item.id, null);
           toast.success('Akun dihapus');
           void load();
         } catch {
@@ -167,7 +239,12 @@ export default function PenggunaPage() {
 
   const asramaName = (id: string) => asramaList.find((a) => a.id === id)?.nama ?? '?';
 
-  const openAdd = useCallback(() => setShowModal(true), []);
+  const openAdd = useCallback(() => {
+    setEditing(null);
+    setForm(emptyForm);
+    setFotoDraft('');
+    setShowModal(true);
+  }, []);
   const headerAddAction = useMemo(
     () => ({ onClick: openAdd, label: 'Tambah akun' }),
     [openAdd]
@@ -188,18 +265,19 @@ export default function PenggunaPage() {
         ) : (
           items.map((p) => (
             <div key={p.id} className={cn(appCardClass, 'p-3 flex items-start gap-3')}>
-              {p.role === 'super_admin' ? (
-                <ShieldCheck className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />
-              ) : p.role === 'bendahara' ? (
-                <Wallet className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
-              ) : (
-                <UserCog className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
-              )}
+              <PenggunaListAvatar id={p.id} nama={p.nama} />
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-bold text-slate-900 dark:text-slate-50 truncate">
-                  {p.nama}
+                <p className="text-sm font-bold text-slate-900 dark:text-slate-50 truncate flex items-center gap-1.5">
+                  {p.role === 'super_admin' ? (
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                  ) : p.role === 'bendahara' ? (
+                    <Wallet className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                  ) : (
+                    <UserCog className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                  )}
+                  <span className="truncate">{p.nama}</span>
                   {!p.aktif && (
-                    <span className="ml-2 text-[9px] font-bold uppercase text-rose-500">
+                    <span className="ml-1 text-[9px] font-bold uppercase text-rose-500">
                       nonaktif
                     </span>
                   )}
@@ -246,6 +324,7 @@ export default function PenggunaPage() {
                     akses: [...p.akses],
                     aktif: p.aktif,
                   });
+                  setFotoDraft(getAvatar(p.id) ?? '');
                   setShowModal(true);
                 }}
                 className="p-2 text-slate-400 hover:text-emerald-600"
@@ -268,6 +347,72 @@ export default function PenggunaPage() {
 
       <AppModal open={showModal} onClose={closeModal} title={editing ? 'Edit Akun' : 'Tambah Akun'}>
         <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
+          <div className="space-y-1">
+            <label className={appLabelClass}>Foto akun</label>
+            <div className="flex items-center gap-3">
+              <span className="w-14 h-14 rounded-full overflow-hidden shrink-0 bg-emerald-600 text-white flex items-center justify-center text-lg font-black">
+                {fotoDraft ? (
+                  <img src={fotoDraft} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  avatarInitials(form.nama || 'A')
+                )}
+              </span>
+              <div className="flex flex-wrap items-center gap-2 min-w-0 flex-1">
+                {isNative ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => void pickFotoNative('camera')}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-sm text-xs font-semibold border border-emerald-200 text-emerald-700 bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400 dark:bg-emerald-950/40"
+                    >
+                      <Camera className="w-4 h-4" />
+                      Kamera
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void pickFotoNative('gallery')}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-sm text-xs font-semibold border border-slate-200 text-slate-600 bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:bg-slate-800"
+                    >
+                      <ImagePlus className="w-4 h-4" />
+                      Galeri
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-sm text-xs font-semibold border border-slate-200 text-slate-600 bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:bg-slate-800"
+                  >
+                    <ImagePlus className="w-4 h-4" />
+                    Unggah foto
+                  </button>
+                )}
+                {fotoDraft ? (
+                  <button
+                    type="button"
+                    onClick={() => setFotoDraft('')}
+                    className="p-2 rounded-sm text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                    aria-label="Hapus foto"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                void pickFotoFile(e.target.files?.[0] ?? null);
+                e.target.value = '';
+              }}
+            />
+            <p className="text-[10px] text-slate-400">
+              Foto tersimpan di perangkat (sama seperti foto profil).
+            </p>
+          </div>
           <div className="space-y-1">
             <label className={appLabelClass}>Nama pengguna</label>
             <input

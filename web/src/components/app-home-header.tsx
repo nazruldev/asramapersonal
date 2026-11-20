@@ -1,6 +1,7 @@
 import { Moon, Sun } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { AppLogo } from '@/components/app-logo';
+import { AsramaSwitcher } from '@/components/asrama-switcher';
 
 type Props = {
   namaAsrama: string;
@@ -17,6 +18,13 @@ export function AppHomeHeader({
   isScrolled,
   onToggleTheme,
 }: Props) {
+  const iconBtnClass = cn(
+    'p-2.5 rounded-full shrink-0 active:scale-95 transition-all',
+    theme === 'dark'
+      ? 'text-slate-300 hover:bg-slate-700'
+      : 'text-slate-600 hover:bg-slate-200/80'
+  );
+
   return (
     <header
       className={cn(
@@ -42,20 +50,23 @@ export function AppHomeHeader({
         </div>
       </div>
 
-      <button
-        type="button"
-        onClick={onToggleTheme}
+      <div
         className={cn(
-          'p-2.5 rounded-full shrink-0 active:scale-95 transition-all',
-          theme === 'dark'
-            ? 'text-slate-300 hover:bg-slate-800'
-            : 'text-slate-600 hover:bg-slate-100'
+          'flex items-center shrink-0 rounded-full p-0.5',
+          theme === 'dark' ? 'bg-slate-800' : 'bg-slate-100'
         )}
-        title={theme === 'light' ? 'Mode gelap' : 'Mode terang'}
-        aria-label={theme === 'light' ? 'Mode gelap' : 'Mode terang'}
       >
-        {theme === 'light' ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
-      </button>
+        <AsramaSwitcher variant="icon" theme={theme} />
+        <button
+          type="button"
+          onClick={onToggleTheme}
+          className={iconBtnClass}
+          title={theme === 'light' ? 'Mode gelap' : 'Mode terang'}
+          aria-label={theme === 'light' ? 'Mode gelap' : 'Mode terang'}
+        >
+          {theme === 'light' ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
+        </button>
+      </div>
     </header>
   );
 }

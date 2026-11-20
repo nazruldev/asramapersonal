@@ -167,7 +167,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           new Promise<void>((resolve) => setTimeout(resolve, HYDRATE_CRITICAL_TIMEOUT_MS)),
         ]);
 
-        // Full online: bootstrap Turso wajib sukses (tanpa fallback offline).
+        // Offline-first: sync cloud best-effort; gagal → lanjut data lokal.
         const { isTursoConfigured } = await import('@/lib/sync/cloud-bootstrap');
         if (isTursoConfigured()) {
           await bootstrapFromCloud();
@@ -200,12 +200,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         console.error('Hydrate failed:', err);
         const message =
           err instanceof Error ? err.message : 'Gagal memuat data. Coba buka ulang aplikasi.';
-        const { isTursoConfigured } = await import('@/lib/sync/cloud-bootstrap');
-        const blockCloud = isTursoConfigured();
+        // Offline-first: jangan kunci UI — tampilkan error, tetap pakai data lokal.
         set({
           hydrated: true,
           hydrateError: message,
-          cloudBlocked: blockCloud,
+          cloudBlocked: false,
         });
       } finally {
         pauseCloudPush(false);

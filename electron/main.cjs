@@ -90,10 +90,16 @@ function waitForDevServer(url, attempts = 60) {
 
 async function createWindow() {
   const win = new BrowserWindow({
-    width: 1280,
-    height: 840,
-    minWidth: 960,
-    minHeight: 640,
+    // Model HP portrait: lebar tetap, tidak bisa resize/maximize/fullscreen.
+    frame: false,
+    thickFrame: false,
+    autoHideMenuBar: true,
+    useContentSize: true,
+    width: 430,
+    height: 860,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
     title: 'AsramaPersonal',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),

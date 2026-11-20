@@ -64,7 +64,6 @@ import {
 import { HeaderAddButton } from './components/header-action-button';
 import { Plus } from 'lucide-react';
 import { AppBootLoading } from './components/app-boot-loading';
-import { AppOnlineGate } from './components/app-online-gate';
 import { toast } from './lib/toast';
 import { useAndroidBackButton } from './hooks/use-android-back-button';
 import { subscribeSyncStatus } from './lib/sync/turso-sync';
@@ -78,34 +77,39 @@ function AppShell() {
   const { theme, toggleTheme } = useTheme();
   const [isScrolled, setIsScrolled] = useState(false);
   const [unlocked, setUnlocked] = useState(() => isAuthenticatedSession());
-  const [retryingCloud, setRetryingCloud] = useState(false);
-  const [wentOffline, setWentOffline] = useState(false);
   const mainContentRef = useRef<HTMLDivElement>(null);
   const hydrate = useAppStore((s) => s.hydrate);
-  const retryCloudHydrate = useAppStore((s) => s.retryCloudHydrate);
   const reload = useAppStore((s) => s.reload);
   const reloadAll = useAppStore((s) => s.reloadAll);
   const hydrated = useAppStore((s) => s.hydrated);
   const settings = useAppStore((s) => s.settings);
   const initialLoading = useInitialAppLoading();
   const hydrateError = useAppStore((s) => s.hydrateError);
-  const cloudBlocked = useAppStore((s) => s.cloudBlocked);
   const izinList = useAppStore((s) => s.izin);
+  const offlineToastShown = useRef(false);
 
   useEffect(() => {
     void hydrate();
   }, [hydrate]);
 
   useEffect(() => {
-    if (hydrateError && !cloudBlocked) {
+    if (hydrateError) {
       toast.error(hydrateError);
     }
-  }, [hydrateError, cloudBlocked]);
+  }, [hydrateError]);
 
+  // Offline-first: jangan blokir UI — cukup toast sekali + badge di header.
   useEffect(() => {
     if (!isTursoConfigured()) return;
     return subscribeSyncStatus((s) => {
-      setWentOffline(s.configured && !s.online);
+      if (s.configured && !s.online) {
+        if (!offlineToastShown.current) {
+          offlineToastShown.current = true;
+          toast.message('Mode offline — data lokal dipakai, sync saat online.');
+        }
+      } else if (s.online) {
+        offlineToastShown.current = false;
+      }
     });
   }, []);
 
@@ -189,21 +193,6 @@ function AppShell() {
     return <AppBootLoading message="Memuat aplikasi…" />;
   }
 
-  if (isTursoConfigured() && (cloudBlocked || wentOffline)) {
-    return (
-      <AppOnlineGate
-        message={hydrateError || (wentOffline ? 'Koneksi terputus.' : null)}
-        retrying={retryingCloud}
-        onRetry={() => {
-          setRetryingCloud(true);
-          void retryCloudHydrate()
-            .then(() => setWentOffline(false))
-            .finally(() => setRetryingCloud(false));
-        }}
-      />
-    );
-  }
-
   if (!setupDone) {
     return (
       <AppSetupWizard
@@ -232,7 +221,7 @@ function AppShell() {
   return (
     <div className={`h-[100dvh] max-h-[100dvh] overflow-hidden selection:bg-emerald-500 selection:text-white font-sans antialiased ${theme === 'dark' ? 'bg-slate-950' : 'bg-slate-100'}`}>
       {/* Responsive shell: phone → tablet → desktop */}
-      <div className={`w-full h-full max-h-[100dvh] flex flex-col relative mx-auto overflow-hidden ${theme === 'dark' ? 'bg-slate-900' : 'bg-slate-50'} max-w-full sm:max-w-xl md:max-w-2xl lg:max-w-4xl xl:max-w-5xl`}>
+      <div className={`w-full h-full max-h-[100dvh] flex flex-col relative mx-auto overflow-hidden ${theme === 'dark' ? 'bg-slate-900' : 'bg-slate-50'} ${/Electron/.test(navigator.userAgent) ? 'max-w-none' : 'max-w-full sm:max-w-xl md:max-w-2xl lg:max-w-4xl xl:max-w-5xl'}`}>
         
         {isHome ? (
           <AppHomeHeader
@@ -274,7 +263,13 @@ function AppShell() {
             showBottomNav
               ? 'pb-[calc(5.5rem+env(safe-area-inset-bottom))]'
               : 'pb-[calc(1rem+env(safe-area-inset-bottom))]'
-          } ${addAction || headerRight ? 'max-sm:pb-[calc(10.5rem+env(safe-area-inset-bottom))]' : ''}`}
+          } ${
+            addAction || headerRight
+              ? showBottomNav
+                ? 'max-sm:pb-[calc(10.5rem+env(safe-area-inset-bottom))]'
+                : 'max-sm:pb-[calc(5.5rem+env(safe-area-inset-bottom))]'
+              : ''
+          }`}
         >
           <RequireAkses>
           <KeepAlivePages

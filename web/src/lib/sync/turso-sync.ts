@@ -136,7 +136,7 @@ async function ensureOnline(): Promise<void> {
   status.online = online;
   emit();
   if (!online) {
-    throw new Error('Tidak ada koneksi internet. Mode full online Turso wajib online.');
+    throw new Error('Tidak ada koneksi internet. Perubahan tetap di lokal; sync saat online.');
   }
 }
 
@@ -438,15 +438,15 @@ export async function pushToTursoNow(): Promise<SyncStatus> {
 }
 
 /**
- * Setelah CRUD: antre push singkat (debounce kecil agar batch tulis berdekatan).
- * Full online: tidak menunggu lama; tetap push, bukan sync LWW offline.
+ * Setelah CRUD: antre push singkat (debounce agar batch tulis berdekatan).
+ * Offline-first: kalau offline, biarkan lokal; push saat online lagi.
  */
 export function scheduleSyncSoon(delayMs = 400): void {
   if (!readTursoConfig()) return;
   if (cloudPushPaused) return;
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
     status.online = false;
-    status.lastError = 'Offline — perubahan belum terkirim ke Turso';
+    status.lastError = 'Offline — tersimpan lokal, belum sync ke Turso';
     emit();
     return;
   }
@@ -470,7 +470,7 @@ export async function awaitCloudPushAfterSave(): Promise<void> {
   await pushToTursoNow();
 }
 
-/** Auto pull berkala + online/offline listeners (full online). */
+/** Auto sync berkala + online/offline listeners (offline-first). */
 export function startAutoSync(): void {
   if (autoStarted || typeof window === 'undefined') return;
   if (!readTursoConfig()) {

@@ -17,3 +17,4 @@ auth-wal
 backups/
 dump-turso.mjs
 tmp-*.ts
+NUL

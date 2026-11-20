@@ -10,11 +10,22 @@ import {
   subscribeSessionUser,
 } from '@/lib/app-auth';
 
+type AsramaSwitcherProps = {
+  className?: string;
+  /** `icon` = tombol ikon di header (sebelah dark mode). */
+  variant?: 'default' | 'icon';
+  theme?: 'light' | 'dark';
+};
+
 /**
  * Tombol ganti asrama — hanya tampil jika akun bisa memilih >1 asrama
  * (super admin / bendahara multi-asrama / bendahara semua asrama).
  */
-export function AsramaSwitcher({ className }: { className?: string }) {
+export function AsramaSwitcher({
+  className,
+  variant = 'default',
+  theme = 'light',
+}: AsramaSwitcherProps) {
   const reloadAll = useAppStore((s) => s.reloadAll);
   const [sessionUser, setSessionUserState] = useState(() => getSessionUser());
   const [asramaList, setAsramaList] = useState<Asrama[] | null>(null);
@@ -58,8 +69,24 @@ export function AsramaSwitcher({ className }: { className?: string }) {
     void reloadAll();
   };
 
-  return (
-    <>
+  const trigger =
+    variant === 'icon' ? (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className={cn(
+          'p-2.5 rounded-full shrink-0 active:scale-95 transition-all',
+          theme === 'dark'
+            ? 'text-slate-300 hover:bg-slate-700'
+            : 'text-slate-600 hover:bg-slate-200/80',
+          className
+        )}
+        title={`Ganti asrama (${activeName})`}
+        aria-label={`Ganti asrama: ${activeName}`}
+      >
+        <Building2 className="w-5 h-5" />
+      </button>
+    ) : (
       <button
         type="button"
         onClick={() => setOpen(true)}
@@ -74,6 +101,11 @@ export function AsramaSwitcher({ className }: { className?: string }) {
         <span className="max-w-[10rem] truncate">{activeName}</span>
         <ChevronDown className="w-3.5 h-3.5 opacity-80" />
       </button>
+    );
+
+  return (
+    <>
+      {trigger}
 
       <AppModal open={open} onClose={() => setOpen(false)} title="Pilih Asrama">
         <div className="space-y-1">

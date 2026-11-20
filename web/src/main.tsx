@@ -14,6 +14,11 @@ import { Toaster } from './components/ui/sonner';
 
 const queryClient = new QueryClient();
 
+// Tandai runtime Electron — dipakai CSS (mis. sembunyikan scrollbar).
+if (/Electron/.test(navigator.userAgent)) {
+  document.documentElement.classList.add('electron-app');
+}
+
 async function bootstrap() {
   // Web/Electron: localStorage. Android: Capacitor SQLite.
   // Sync penuh semua platform lewat Turso snapshot.

@@ -66,8 +66,10 @@ const APP_HUB_PATHS = new Set([
   '/profil',
 ]);
 
-/** Bottom navigation tampil konsisten di semua halaman. */
-export function showBottomNavigation(_pathname: string): boolean {
+/** Bottom navigation — disembunyikan di layar ganti akun (diganti sticky Tambah Akun). */
+export function showBottomNavigation(pathname: string): boolean {
+  const path = normalizeAppPathname(pathname);
+  if (path === '/ganti-akun') return false;
   return true;
 }
 

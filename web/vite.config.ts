@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import { defineConfig, loadEnv } from 'vite';
 import { fileURLToPath } from 'url';
+import pkg from '../package.json';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const sqlJsWasm = path.resolve(__dirname, '../node_modules/sql.js/dist/sql-wasm.js');
@@ -13,6 +14,9 @@ export default defineConfig(({ mode }) => {
     root: __dirname,
     base: './',
     plugins: [react(), tailwindcss()],
+    define: {
+      __APP_VERSION__: JSON.stringify(pkg.version),
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),

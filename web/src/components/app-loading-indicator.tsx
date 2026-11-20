@@ -12,34 +12,54 @@ export function AppLoadingIndicator({
   message = 'Memuat data…',
   fullscreen = false,
 }: Props) {
-  const ring = (size: 'sm' | 'lg' = 'sm') => (
-    <div
-      className={
-        size === 'lg'
-          ? 'relative flex items-center justify-center w-32 h-32'
-          : 'relative flex items-center justify-center w-20 h-20'
-      }
-    >
-      <div
-        className="absolute inset-0 rounded-full border-2 border-slate-200/70 dark:border-slate-700/80 border-t-emerald-600 dark:border-t-emerald-500 animate-spin"
-        aria-hidden
-      />
-      <div
-        className={
-          size === 'lg'
-            ? 'relative w-20 h-20 rounded-2xl overflow-hidden shadow-md ring-1 ring-black/5 dark:ring-white/10'
-            : 'relative w-10 h-10 rounded-lg overflow-hidden shadow-md ring-1 ring-black/5 dark:ring-white/10'
-        }
-      >
-        <img
-          src={APP_ICON_URL}
-          alt=""
-          className="w-full h-full object-cover"
-          decoding="async"
-        />
+  const ring = (size: 'sm' | 'lg' = 'sm') => {
+    const box = size === 'lg' ? 'w-32 h-32' : 'w-20 h-20';
+    const logo =
+      size === 'lg'
+        ? 'relative w-20 h-20 rounded-2xl overflow-hidden shadow-md ring-1 ring-black/5 dark:ring-white/10'
+        : 'relative w-10 h-10 rounded-lg overflow-hidden shadow-md ring-1 ring-black/5 dark:ring-white/10';
+    const stroke = size === 'lg' ? 3.5 : 3;
+
+    return (
+      <div className={`relative flex items-center justify-center ${box}`}>
+        {/* Track + arc mengisi lingkaran */}
+        <svg
+          className="absolute inset-0 w-full h-full -rotate-90 animate-spin"
+          viewBox="0 0 100 100"
+          aria-hidden
+        >
+          <circle
+            cx="50"
+            cy="50"
+            r="46"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={stroke}
+            className="text-slate-200 dark:text-slate-700"
+          />
+          <circle
+            cx="50"
+            cy="50"
+            r="46"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={stroke}
+            strokeLinecap="round"
+            strokeDasharray="90 200"
+            className="text-emerald-600 dark:text-emerald-500"
+          />
+        </svg>
+        <div className={logo}>
+          <img
+            src={APP_ICON_URL}
+            alt=""
+            className="w-full h-full object-cover"
+            decoding="async"
+          />
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   if (fullscreen) {
     return (

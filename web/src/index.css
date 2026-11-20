@@ -706,3 +706,26 @@ html.dark .dark #root,
 html.dark #root {
   color: rgb(255 255 255);
 }
+
+/* Electron: scrollbar disembunyikan (nuansa app HP) tapi tetap bisa scroll. */
+html.electron-app ::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+html.electron-app * {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+/* Electron frameless: header app jadi area drag jendela. */
+html.electron-app header,
+html.electron-app [data-window-drag] {
+  -webkit-app-region: drag;
+}
+html.electron-app header button,
+html.electron-app header a,
+html.electron-app header input,
+html.electron-app header [role="button"] {
+  -webkit-app-region: no-drag;
+}
