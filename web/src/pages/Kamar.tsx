@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useMutation } from '@tanstack/react-query';
 import { useAppStore } from '@/store/app-store';
@@ -8,8 +8,8 @@ import { ListSkeleton } from '@/components/ui/list-skeleton';
 import { PageWithPullRefresh } from '@/components/page-with-pull-refresh';
 import { BedDouble, Edit2, Filter, Info, Save, Trash2 } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
-import { HeaderAddButton } from '@/components/header-action-button';
-import { useScreenHeaderActions } from '@/lib/screen-header-actions';
+import { useScreenAddAction } from '@/lib/screen-header-actions';
+import { ScrollNavButtons } from '@/components/scroll-nav-buttons';
 import { AppModal } from '@/components/ui/app-modal';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Button } from '@/components/ui/button';
@@ -167,20 +167,22 @@ export default function Kamar() {
     [kamarList, selectedLantaiFilter]
   );
 
+  const lantaiScrollRef = useRef<HTMLDivElement>(null);
   const openAddKamarModal = useCallback(() => setShowModal(true), []);
 
   const headerAddAction = useMemo(
-    () => <HeaderAddButton onClick={openAddKamarModal} label="Tambah kamar" />,
+    () => ({ onClick: openAddKamarModal, label: 'Tambah kamar' }),
     [openAddKamarModal]
   );
 
-  useScreenHeaderActions(isKamarScreen ? headerAddAction : null, [isKamarScreen, headerAddAction]);
+  useScreenAddAction(isKamarScreen ? headerAddAction : null, [isKamarScreen, headerAddAction]);
 
   return (
     <>
     <PageWithPullRefresh keys={['kamar', 'santri']} className="space-y-3">
       {lantaiFilters.length > 1 ? (
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar">
+        <div className="flex items-center gap-1">
+        <div ref={lantaiScrollRef} className="flex-1 min-w-0 flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar">
           {lantaiFilters.map((lantai) => {
             const isSelected = selectedLantaiFilter === lantai;
             return (
@@ -200,6 +202,8 @@ export default function Kamar() {
               </button>
             );
           })}
+        </div>
+        <ScrollNavButtons target={lantaiScrollRef} />
         </div>
       ) : null}
 

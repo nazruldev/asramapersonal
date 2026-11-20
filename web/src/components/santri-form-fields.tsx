@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction } from 'react';
-import { Camera, ChevronDown, User, X } from 'lucide-react';
+import { Camera, ChevronDown, ImagePlus, User, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   appFieldThemed,
@@ -29,7 +29,7 @@ type Props = {
   theme: 'light' | 'dark';
   kelasList: KelasRow[];
   kamarList: KamarRow[];
-  onTakePhoto: () => void;
+  onTakePhoto: (source: 'camera' | 'gallery') => void;
   onOpenKelasPicker: () => void;
   onOpenKamarPicker: () => void;
   includeWaId?: string;
@@ -87,7 +87,7 @@ export function SantriFormFields({
           <div className="flex flex-wrap items-center gap-2 min-w-0 flex-1">
             <button
               type="button"
-              onClick={onTakePhoto}
+              onClick={() => onTakePhoto('camera')}
               className={cn(
                 'inline-flex items-center gap-1.5 px-3 py-2 rounded-sm text-xs font-semibold border',
                 theme === 'dark'
@@ -96,7 +96,20 @@ export function SantriFormFields({
               )}
             >
               <Camera className="w-4 h-4" />
-              Ambil Foto
+              Kamera
+            </button>
+            <button
+              type="button"
+              onClick={() => onTakePhoto('gallery')}
+              className={cn(
+                'inline-flex items-center gap-1.5 px-3 py-2 rounded-sm text-xs font-semibold border',
+                theme === 'dark'
+                  ? 'border-slate-600 text-slate-300 bg-slate-800'
+                  : 'border-slate-200 text-slate-600 bg-slate-50'
+              )}
+            >
+              <ImagePlus className="w-4 h-4" />
+              Galeri
             </button>
             {formData.foto && (
               <button

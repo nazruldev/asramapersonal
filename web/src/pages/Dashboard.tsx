@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { id as localeId } from 'date-fns/locale';
@@ -21,9 +21,8 @@ import {
   BedDouble,
   Share2,
   ChevronRight,
+  ChevronLeft,
   ShieldAlert,
-  Home,
-  CalendarDays,
   FileText,
   CalendarRange,
   Database,
@@ -46,6 +45,10 @@ import {
 import { fetchAbsensiForDay, type AbsensiApiRow } from '@/lib/absensi-api';
 import type { IzinRow } from '@/lib/izin-group';
 
+/** Tombol panah geser daftar horizontal — tampil di header section, hanya ≥sm. */
+const scrollNavBtnClass =
+  'hidden sm:inline-flex w-6 h-6 rounded-sm border border-slate-300 dark:border-slate-500 bg-card items-center justify-center text-slate-500 hover:text-emerald-700 hover:border-emerald-400 active:scale-95 transition-all shrink-0';
+
 export default function Dashboard() {
   const navigate = useNavigate();
   const reload = useAppReload();
@@ -58,6 +61,14 @@ export default function Dashboard() {
   const kamarList = useAppStore((s) => s.kamar);
   const pembinaanList = useAppStore((s) => s.pembinaan);
   const [todayAbsensi, setTodayAbsensi] = useState<AbsensiApiRow[]>([]);
+  const quickScrollRef = useRef<HTMLDivElement>(null);
+  const kamarScrollRef = useRef<HTMLDivElement>(null);
+  const scrollRow = useCallback(
+    (ref: React.RefObject<HTMLDivElement | null>, dir: 1 | -1) => {
+      ref.current?.scrollBy({ left: dir * 260, behavior: 'smooth' });
+    },
+    []
+  );
   const kegiatanRaw = useAppStore((s) => s.kegiatan);
 
   const todayKey = format(new Date(), 'yyyy-MM-dd');
@@ -167,15 +178,15 @@ export default function Dashboard() {
   );
 
   const quickActions = [
-    { label: 'Absensi', path: '/laporan/absensi', icon: CalendarCheck, tone: 'bg-emerald-50 text-emerald-700' },
-    { label: 'Izin', path: '/laporan/izin', icon: ClockAlert, tone: 'bg-amber-50 text-amber-700' },
-    { label: 'Catatan BK', path: '/laporan/pembinaan', icon: ShieldAlert, tone: 'bg-rose-50 text-rose-700' },
-    { label: 'Peringkat', path: '/laporan/peringkat', icon: Trophy, tone: 'bg-orange-50 text-orange-700' },
-    { label: 'Santri', path: '/master/santri', icon: Users, tone: 'bg-blue-50 text-blue-700' },
-    { label: 'Kamar', path: '/master/kamar', icon: BedDouble, tone: 'bg-purple-50 text-purple-700' },
-    { label: 'Laporan', path: '/laporan', icon: FileText, tone: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200' },
-    { label: 'Penjadwalan', path: '/penjadwalan', icon: CalendarRange, tone: 'bg-violet-50 text-violet-700' },
-    { label: 'Kelola Data', path: '/master', icon: Database, tone: 'bg-teal-50 text-teal-700' },
+    { label: 'Absensi', path: '/laporan/absensi', icon: CalendarCheck, tone: 'text-emerald-700' },
+    { label: 'Izin', path: '/laporan/izin', icon: ClockAlert, tone: 'text-amber-700' },
+    { label: 'Catatan BK', path: '/laporan/pembinaan', icon: ShieldAlert, tone: 'text-rose-700' },
+    { label: 'Peringkat', path: '/laporan/peringkat', icon: Trophy, tone: 'text-orange-700' },
+    { label: 'Santri', path: '/master/santri', icon: Users, tone: 'text-blue-700' },
+    { label: 'Kamar', path: '/master/kamar', icon: BedDouble, tone: 'text-purple-700' },
+    { label: 'Laporan', path: '/laporan', icon: FileText, tone: 'text-slate-700 dark:text-slate-200' },
+    { label: 'Penjadwalan', path: '/penjadwalan', icon: CalendarRange, tone: 'text-violet-700' },
+    { label: 'Kelola Data', path: '/master', icon: Database, tone: 'text-teal-700' },
   ];
 
   const refreshDashboard = useCallback(async () => {
@@ -194,26 +205,33 @@ export default function Dashboard() {
       extraRefresh={refreshDashboard}
       className="space-y-4"
     >
-      {/* Hero Welcome Card */}
+      {/* Hero Welcome Card — full-bleed menempel tepi atas & samping */}
       <div
-        className="relative overflow-hidden rounded-sm p-5 shadow-lg border border-emerald-500/40 dark:border-emerald-600/50"
+        className="relative overflow-hidden p-5 -mx-3 sm:-mx-4 -mt-4 shadow-lg border-b border-emerald-500/40 dark:border-emerald-600/50"
       >
-        <div
-          className="absolute inset-0 bg-gradient-to-br from-emerald-600 via-teal-500 to-cyan-500 dark:from-emerald-800 dark:via-teal-800 dark:to-slate-900"
+        <div className="absolute inset-0 bg-emerald-700 dark:bg-emerald-950" aria-hidden />
+        <svg
+          className="absolute inset-0 w-full h-full text-white opacity-[0.07] pointer-events-none"
           aria-hidden
-        />
-        <div
-          className="absolute inset-0 bg-gradient-to-t from-emerald-950/55 via-emerald-900/15 to-transparent dark:from-black/50"
-          aria-hidden
-        />
-        <div
-          className="absolute -right-16 -top-16 w-56 h-56 rounded-full bg-sky-400/45 dark:bg-cyan-500/25 blur-3xl pointer-events-none"
-          aria-hidden
-        />
-        <div
-          className="absolute -left-10 bottom-0 w-44 h-44 rounded-full bg-lime-400/35 dark:bg-emerald-500/20 blur-2xl pointer-events-none"
-          aria-hidden
-        />
+        >
+          <defs>
+            <pattern
+              id="hero-geo-pattern"
+              width="44"
+              height="44"
+              patternUnits="userSpaceOnUse"
+            >
+              <path
+                d="M22 2 L42 22 L22 42 L2 22 Z M22 10 L34 22 L22 34 L10 22 Z"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.2"
+              />
+              <circle cx="22" cy="22" r="2" fill="currentColor" />
+            </pattern>
+          </defs>
+          <rect width="100%" height="100%" fill="url(#hero-geo-pattern)" />
+        </svg>
 
         <div className="relative z-10 space-y-3 text-white">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -280,10 +298,30 @@ export default function Dashboard() {
 
       {/* Menu Cepat */}
       <div className="space-y-2">
-        <h3 className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider px-1">
-          Akses Cepat
-        </h3>
-        <div className="grid grid-cols-4 gap-2">
+        <div className="flex items-center justify-between px-1">
+          <h3 className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+            Akses Cepat
+          </h3>
+          <div className="hidden sm:flex items-center gap-1">
+            <button
+              type="button"
+              aria-label="Geser ke kiri"
+              onClick={() => scrollRow(quickScrollRef, -1)}
+              className={scrollNavBtnClass}
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              aria-label="Geser ke kanan"
+              onClick={() => scrollRow(quickScrollRef, 1)}
+              className={scrollNavBtnClass}
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+        <div ref={quickScrollRef} className="flex gap-2 overflow-x-auto no-scrollbar snap-x -mx-1 px-1 pb-1">
           {quickActions.map((action) => {
             const Icon = action.icon;
             return (
@@ -293,18 +331,11 @@ export default function Dashboard() {
                 onClick={() => navigate(action.path)}
                 className={cn(
                   appCardClass,
-                  'flex flex-col items-center justify-center p-2.5 active:scale-95 transition-all text-center min-h-[72px]'
+                  'flex items-center gap-2 px-3 py-2.5 shrink-0 snap-start active:scale-95 transition-all'
                 )}
               >
-                <div
-                  className={cn(
-                    'w-9 h-9 rounded-sm flex items-center justify-center mb-1',
-                    action.tone
-                  )}
-                >
-                  <Icon className="w-4 h-4" />
-                </div>
-                <span className="text-[10px] font-bold text-slate-800 dark:text-slate-100 leading-tight">
+                <Icon className={cn('w-4 h-4 shrink-0', action.tone)} />
+                <span className="text-[11px] font-bold text-slate-800 dark:text-slate-100 whitespace-nowrap">
                   {action.label}
                 </span>
               </button>
@@ -322,9 +353,7 @@ export default function Dashboard() {
         >
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-500">Total Santri</span>
-            <div className="w-8 h-8 rounded-sm bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
-              <Users className="w-4 h-4" />
-            </div>
+            <Users className="w-5 h-5 text-blue-600" />
           </div>
           <div className="mt-3">
             <div className="flex items-baseline gap-1">
@@ -350,9 +379,7 @@ export default function Dashboard() {
         >
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-500">Sedang Izin</span>
-            <div className="w-8 h-8 rounded-sm bg-amber-50 text-amber-600 flex items-center justify-center font-bold">
-              <ClockAlert className="w-4 h-4" />
-            </div>
+            <ClockAlert className="w-5 h-5 text-amber-600" />
           </div>
           <div className="mt-3">
             <div className="flex items-baseline gap-1">
@@ -378,9 +405,7 @@ export default function Dashboard() {
         >
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-500">Absensi Hari Ini</span>
-            <div className="w-8 h-8 rounded-sm bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
-              <CheckCircle2 className="w-4 h-4" />
-            </div>
+            <CheckCircle2 className="w-5 h-5 text-emerald-600" />
           </div>
           <div className="mt-3">
             <div className="flex items-baseline gap-1">
@@ -406,9 +431,7 @@ export default function Dashboard() {
         >
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-500">Slot Kosong</span>
-            <div className="w-8 h-8 rounded-sm bg-purple-50 text-purple-600 flex items-center justify-center font-bold">
-              <BedDouble className="w-4 h-4" />
-            </div>
+            <BedDouble className="w-5 h-5 text-purple-600" />
           </div>
           <div className="mt-3">
             <div className="flex items-baseline gap-1">
@@ -427,6 +450,7 @@ export default function Dashboard() {
       </div>
 
       {/* Progress absensi per kegiatan */}
+      {(loadingStats || absensiKegiatanHari.length > 0) && (
       <div className="space-y-2">
         <div className="flex items-center justify-between px-1 gap-2">
           <h3 className="text-xs font-bold text-slate-800 dark:text-slate-100 uppercase tracking-wider">
@@ -443,16 +467,6 @@ export default function Dashboard() {
         <div className={cn(appCardClass, 'p-3 space-y-2.5')}>
           {loadingStats ? (
             <p className="text-xs text-slate-400 py-1">Memuat absensi…</p>
-          ) : absensiKegiatanHari.length === 0 ? (
-            <EmptyState icon={CalendarDays} title="Tidak ada kegiatan absensi hari ini" variant="minimal">
-              <button
-                type="button"
-                onClick={() => navigate('/master/kegiatan')}
-                className="text-xs font-bold text-emerald-700 dark:text-emerald-400"
-              >
-                Atur jadwal kegiatan
-              </button>
-            </EmptyState>
           ) : (
             absensiKegiatanHari.map((row) => {
               const pct =
@@ -493,6 +507,7 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+      )}
 
       {/* Slot jiwa per kamar */}
       <div className="space-y-2">
@@ -507,13 +522,31 @@ export default function Dashboard() {
               </span>
             ) : null}
           </div>
-          <button
-            type="button"
-            onClick={() => navigate('/master/kamar')}
-            className="text-xs font-bold text-emerald-700 dark:text-emerald-400 flex items-center gap-0.5 hover:underline shrink-0"
-          >
-            Kelola <ChevronRight className="w-3.5 h-3.5" />
-          </button>
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              aria-label="Geser kamar ke kiri"
+              onClick={() => scrollRow(kamarScrollRef, -1)}
+              className={scrollNavBtnClass}
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              aria-label="Geser kamar ke kanan"
+              onClick={() => scrollRow(kamarScrollRef, 1)}
+              className={scrollNavBtnClass}
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/master/kamar')}
+              className="text-xs font-bold text-emerald-700 dark:text-emerald-400 flex items-center gap-0.5 hover:underline ml-1"
+            >
+              Kelola <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
 
         {loadingStats ? (
@@ -558,14 +591,15 @@ export default function Dashboard() {
               </div>
             ) : null}
 
-            {dashboardKamarPreview.map((row) => (
+            <div ref={kamarScrollRef} className="flex gap-2 overflow-x-auto no-scrollbar snap-x snap-mandatory -mx-1 px-1 pb-1">
+              {kamarSlotRows.map((row) => (
               <button
                 key={row.id}
                 type="button"
                 onClick={() => navigate(kamarDetailPath(row.id))}
                 className={cn(
                   appCardClass,
-                  'w-full p-3 text-left active:scale-[0.99] transition-transform hover:border-emerald-300/80 dark:hover:border-emerald-700'
+                  'w-56 shrink-0 snap-start p-3 text-left active:scale-[0.99] transition-transform hover:border-emerald-300/80 dark:hover:border-emerald-700'
                 )}
               >
                 <div className="flex items-start justify-between gap-2">
@@ -590,7 +624,8 @@ export default function Dashboard() {
                   <KamarSlotStrip terisi={row.terisi} kapasitas={row.kapasitas} />
                 </div>
               </button>
-            ))}
+              ))}
+            </div>
 
             {hasMoreKamar ? (
               <button
@@ -606,6 +641,7 @@ export default function Dashboard() {
       </div>
 
       {/* Santri Sedang Izin */}
+      {activeIzin.length > 0 && (
       <div className="space-y-2.5">
         <div className="flex items-center justify-between px-1">
           <div className="flex items-center gap-1.5">
@@ -625,15 +661,7 @@ export default function Dashboard() {
           </button>
         </div>
 
-        {activeIzin.length === 0 ? (
-          <EmptyState
-            icon={Home}
-            title="Alhamdulillah, semua santri di asrama"
-            description="Tidak ada santri yang sedang izin keluar saat ini."
-            className="p-5"
-          />
-        ) : (
-          <div className="space-y-2">
+        <div className="space-y-2">
             {activeIzin.map((item: any) => {
               const belumPasti = isIzinBatasBelumPasti(String(item.batas_kembali));
               const isLate = !belumPasti && isIzinTerlambat(item as IzinRow);
@@ -686,8 +714,8 @@ export default function Dashboard() {
               );
             })}
           </div>
-        )}
       </div>
+      )}
 
     </PageWithPullRefresh>
   );

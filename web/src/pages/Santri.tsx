@@ -40,8 +40,8 @@ import { SantriFormFields } from '@/components/santri-form-fields';
 import { emptyWilayahForm, wilayahFromSantri } from '@/components/wilayah-asal-fields';
 import { formatAsalWilayahShort } from '@/lib/wilayah-types';
 import { useTheme } from '../lib/theme';
-import { useScreenHeaderActions } from '@/lib/screen-header-actions';
-import { HeaderAddButton } from '@/components/header-action-button';
+import { useScreenAddAction } from '@/lib/screen-header-actions';
+import { ScrollNavButtons } from '@/components/scroll-nav-buttons';
 import { toast } from '@/lib/toast';
 import { fetchSantriPage } from '@/lib/santri-api';
 
@@ -98,6 +98,7 @@ export default function Santri() {
   const [listPage, setListPage] = useState(1);
   const [listLoading, setListLoading] = useState(true);
   const listRequestRef = useRef(0);
+  const kamarFilterScrollRef = useRef<HTMLDivElement>(null);
   const confirmDialog = useConfirmDialog();
 
   const loadPage = useCallback(
@@ -195,13 +196,16 @@ export default function Santri() {
       toast.error(err instanceof Error ? err.message : 'Gagal menghapus santri'),
   });
 
-  const handleTakePhoto = async () => {
+  const handleTakePhoto = async (source: 'camera' | 'gallery') => {
     try {
-      const { Camera: CapacitorCamera, CameraResultType } = await import('@capacitor/camera');
+      const { Camera: CapacitorCamera, CameraResultType, CameraSource } = await import(
+        '@capacitor/camera'
+      );
       const photo = await CapacitorCamera.getPhoto({
         quality: 90,
         allowEditing: false,
         resultType: CameraResultType.DataUrl,
+        source: source === 'camera' ? CameraSource.Camera : CameraSource.Photos,
       });
 
       setFormData({ ...formData, foto: photo.dataUrl || '' });
@@ -373,11 +377,11 @@ export default function Santri() {
   }, []);
 
   const headerAddAction = useMemo(
-    () => <HeaderAddButton onClick={openAddModal} label="Tambah santri" />,
+    () => ({ onClick: openAddModal, label: 'Tambah santri' }),
     [openAddModal]
   );
 
-  useScreenHeaderActions(isSantriScreen ? headerAddAction : null, [isSantriScreen, headerAddAction]);
+  useScreenAddAction(isSantriScreen ? headerAddAction : null, [isSantriScreen, headerAddAction]);
 
   const refreshSantriList = useCallback(async () => {
     await loadPage(1, false);
@@ -412,7 +416,8 @@ export default function Santri() {
         )}
       </div>
 
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar -mx-3 sm:-mx-4 px-3 sm:px-4 scroll-px-3 sm:scroll-px-4">
+      <div className="flex items-center gap-1">
+      <div ref={kamarFilterScrollRef} className="flex-1 min-w-0 flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar -mx-3 sm:-mx-4 px-3 sm:px-4 scroll-px-3 sm:scroll-px-4">
         {availableRooms.map((room) => {
           const isSelected = selectedKamarFilter === room;
           return (
@@ -432,6 +437,8 @@ export default function Santri() {
             </button>
           );
         })}
+      </div>
+      <ScrollNavButtons target={kamarFilterScrollRef} />
       </div>
 
       <div className="space-y-1.5">

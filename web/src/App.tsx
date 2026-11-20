@@ -49,10 +49,14 @@ import PenjadwalanList from './pages/PenjadwalanList';
 import PenjadwalanGenerate from './pages/PenjadwalanGenerate';
 import PenjadwalanDetail from './pages/PenjadwalanDetail';
 import { useKeyboardInset } from './hooks/use-keyboard-inset';
+import { cn } from './lib/utils';
 import {
   ScreenHeaderActionsProvider,
   useScreenHeaderActionsSlot,
+  useScreenAddActionSlot,
 } from './lib/screen-header-actions';
+import { HeaderAddButton } from './components/header-action-button';
+import { Plus } from 'lucide-react';
 import { AppBootLoading } from './components/app-boot-loading';
 import { AppOnlineGate } from './components/app-online-gate';
 import { toast } from './lib/toast';
@@ -62,6 +66,7 @@ import { subscribeSyncStatus } from './lib/sync/turso-sync';
 function AppShell() {
   useKeyboardInset();
   const headerRight = useScreenHeaderActionsSlot();
+  const addAction = useScreenAddActionSlot();
   const location = useLocation();
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
@@ -234,7 +239,19 @@ function AppShell() {
                 navigateScreenBack(navigate, location, screenHeader.backTo);
               }
             }}
-            right={headerRight}
+            right={
+              <>
+                {addAction ? (
+                  <HeaderAddButton
+                    onClick={addAction.onClick}
+                    label={addAction.label}
+                    withLabel
+                    className="hidden sm:inline-flex"
+                  />
+                ) : null}
+                {headerRight}
+              </>
+            }
           />
         ) : null}
 
@@ -245,7 +262,7 @@ function AppShell() {
             showBottomNav
               ? 'pb-[calc(5.5rem+env(safe-area-inset-bottom))]'
               : 'pb-[calc(1rem+env(safe-area-inset-bottom))]'
-          }`}
+          } ${addAction || headerRight ? 'max-sm:pb-[calc(10.5rem+env(safe-area-inset-bottom))]' : ''}`}
         >
           <KeepAlivePages
             routes={[
@@ -306,6 +323,39 @@ function AppShell() {
             ]}
           />
         </main>
+
+        {/* Aksi kanan header (tambah/filter/dll) -> bar sticky bawah, khusus mobile */}
+        {(addAction || headerRight) && !isHome && screenHeader ? (
+          <div
+            className={cn(
+              'sm:hidden absolute inset-x-0 z-50 px-3 py-2.5 border-t border-slate-300 dark:border-slate-500 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl flex items-center gap-2',
+              showBottomNav
+                ? 'bottom-[calc(4rem+env(safe-area-inset-bottom))]'
+                : 'bottom-0 pb-[max(0.75rem,env(safe-area-inset-bottom))]'
+            )}
+          >
+            {addAction ? (
+              <button
+                type="button"
+                onClick={addAction.onClick}
+                className="flex-1 min-w-0 flex items-center justify-center gap-2 rounded-sm bg-emerald-600 hover:bg-emerald-700 text-white py-3 px-3 text-xs font-bold shadow-lg active:scale-[0.98] transition-all"
+              >
+                <Plus className="w-4 h-4 shrink-0" strokeWidth={2.5} />
+                <span className="truncate">{addAction.label}</span>
+              </button>
+            ) : null}
+            {headerRight ? (
+              <div
+                className={cn(
+                  'flex items-center gap-0.5 [&_button]:text-slate-700 dark:[&_button]:text-slate-200 [&_button]:justify-center',
+                  addAction ? 'shrink-0' : 'flex-1 justify-center'
+                )}
+              >
+                {headerRight}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         {showBottomNav ? (
           <nav

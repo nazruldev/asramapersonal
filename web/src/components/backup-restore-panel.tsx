@@ -226,7 +226,7 @@ export function BackupRestorePanel({ compact }: BackupRestorePanelProps) {
     compact ? 'p-3' : 'p-4 gap-4 active:scale-[0.98] hover:shadow-md dark:hover:shadow-none'
   );
 
-  const iconBox = compact ? 'w-10 h-10 rounded-sm text-white flex items-center justify-center shrink-0' : 'w-12 h-12 rounded-sm text-white flex items-center justify-center flex-shrink-0';
+  const iconClass = compact ? 'w-5 h-5 shrink-0 mt-0.5' : 'w-6 h-6 shrink-0 mt-0.5';
 
   const exportHint = shouldPersistToSqlite()
     ? 'Unduh cadangan SQL (seluruh tabel SQLite) ke folder Unduhan'
@@ -243,9 +243,7 @@ export function BackupRestorePanel({ compact }: BackupRestorePanelProps) {
   return (
     <div className="space-y-3">
       <button type="button" onClick={handleExport} disabled={loading} className={btnClass}>
-        <div className={`${iconBox} bg-emerald-500`}>
-          <Download className={compact ? 'w-5 h-5' : 'w-6 h-6'} />
-        </div>
+        <Download className={`${iconClass} text-emerald-600`} />
         <div className="flex-1 min-w-0">
           <h3 className="text-sm font-bold text-slate-900 dark:text-slate-50 mb-0.5">Ekspor cadangan</h3>
           <p className="text-[11px] text-slate-500 leading-snug">{exportHint}</p>
@@ -253,9 +251,7 @@ export function BackupRestorePanel({ compact }: BackupRestorePanelProps) {
       </button>
 
       <button type="button" onClick={requestRestoreInitial} disabled={loading} className={btnClass}>
-        <div className={`${iconBox} bg-amber-500`}>
-          <RefreshCw className={compact ? 'w-5 h-5' : 'w-6 h-6'} />
-        </div>
+        <RefreshCw className={`${iconClass} text-amber-600`} />
         <div className="flex-1 min-w-0">
           <h3 className="text-sm font-bold text-slate-900 dark:text-slate-50 mb-0.5">Reset data operasional</h3>
           <p className="text-[11px] text-slate-500 leading-snug">Kosongkan santri/kamar; kelas default tetap diisi</p>
@@ -296,9 +292,7 @@ export function BackupRestorePanel({ compact }: BackupRestorePanelProps) {
       </div>
 
       <label className={`${btnClass} cursor-pointer block`}>
-        <div className={`${iconBox} bg-blue-500`}>
-          <Upload className={compact ? 'w-5 h-5' : 'w-6 h-6'} />
-        </div>
+        <Upload className={`${iconClass} text-blue-600`} />
         <div className="flex-1 min-w-0">
           <h3 className="text-sm font-bold text-slate-900 dark:text-slate-50 mb-0.5">Impor cadangan</h3>
           <p className="text-[11px] text-slate-500 leading-snug">{importHint}</p>
@@ -307,9 +301,7 @@ export function BackupRestorePanel({ compact }: BackupRestorePanelProps) {
       </label>
 
       <button type="button" onClick={requestClearAll} disabled={loading} className={btnClass}>
-        <div className={`${iconBox} bg-red-500`}>
-          <Trash2 className={compact ? 'w-5 h-5' : 'w-6 h-6'} />
-        </div>
+        <Trash2 className={`${iconClass} text-red-600`} />
         <div className="flex-1 min-w-0">
           <h3 className="text-sm font-bold text-slate-900 dark:text-slate-50 mb-0.5">Hapus semua data</h3>
           <p className="text-[11px] text-slate-500 leading-snug">Kosongkan data operasional</p>

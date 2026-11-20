@@ -129,9 +129,7 @@ export function AppSetupWizard({ onComplete }: Props) {
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-100 dark:bg-slate-950 p-4 overflow-y-auto">
       <div className="w-full max-w-sm rounded-sm border border-slate-200/80 bg-white dark:bg-slate-900 dark:border-slate-700 shadow-lg p-5 space-y-4 my-auto">
         <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-sm bg-emerald-600 text-white flex items-center justify-center">
-            <Sparkles className="w-5 h-5" />
-          </div>
+          <Sparkles className="w-6 h-6 text-emerald-600 shrink-0" />
           <div className="flex-1 min-w-0">
             <h1 className="text-base font-bold text-slate-900 dark:text-white">Atur aplikasi</h1>
             <p className="text-[11px] text-slate-500">

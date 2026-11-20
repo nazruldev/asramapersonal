@@ -19,9 +19,7 @@ export function AppOnlineGate({
         <div className="flex justify-center">
           <AppLogo size="md" />
         </div>
-        <div className="mx-auto w-12 h-12 rounded-sm bg-rose-100 text-rose-700 flex items-center justify-center">
-          <CloudOff className="w-6 h-6" />
-        </div>
+        <CloudOff className="mx-auto w-8 h-8 text-rose-600 dark:text-rose-400" />
         <div className="space-y-2">
           <h1 className="text-lg font-bold text-slate-900 dark:text-slate-100">
             Butuh koneksi internet

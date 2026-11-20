@@ -231,18 +231,13 @@ export function AppMenuSidebar({ open, onClose, theme, namaAsrama, activeIzinCou
                               : 'text-slate-700 hover:bg-slate-50'
                         )}
                       >
-                        <span
+                        <Icon
                           className={cn(
-                            'w-7 h-7 rounded-sm flex items-center justify-center shrink-0',
-                            active
-                              ? 'bg-emerald-600 text-white'
-                              : theme === 'dark'
-                                ? 'bg-slate-800 text-slate-400'
-                                : 'bg-slate-100 text-slate-500'
+                            'w-4 h-4 shrink-0',
+                            !active && (theme === 'dark' ? 'text-slate-400' : 'text-slate-500')
                           )}
-                        >
-                          <Icon className="w-3.5 h-3.5" strokeWidth={2.25} />
-                        </span>
+                          strokeWidth={2.25}
+                        />
                         <span className="flex-1 min-w-0 truncate leading-tight">{item.label}</span>
                         {item.badge != null && item.badge > 0 && (
                           <span className="min-w-[1.125rem] h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center shrink-0">

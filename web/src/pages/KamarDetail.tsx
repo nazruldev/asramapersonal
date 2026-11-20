@@ -38,8 +38,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { AppModal } from '@/components/ui/app-modal';
 import { useConfirmDialog } from '@/lib/use-confirm-dialog';
 import { useTheme } from '@/lib/theme';
-import { useScreenHeaderActions } from '@/lib/screen-header-actions';
-import { HeaderAddButton } from '@/components/header-action-button';
+import { useScreenAddAction } from '@/lib/screen-header-actions';
 import { toast } from '@/lib/toast';
 import { formatLamaDiKamar, parseKamarIdFromPath } from '@/lib/kamar-path';
 
@@ -391,15 +390,15 @@ export default function KamarDetail() {
   const headerAddAction = useMemo(() => {
     if (!kamar) return null;
     if (detailTab === 'penempatan' && !isFull) {
-      return <HeaderAddButton onClick={openAddModal} label="Tambah santri ke kamar" />;
+      return { onClick: openAddModal, label: 'Tambah santri ke kamar' };
     }
     if (detailTab === 'fasilitas') {
-      return <HeaderAddButton onClick={openAddFasilitasModal} label="Tambah fasilitas" />;
+      return { onClick: openAddFasilitasModal, label: 'Tambah fasilitas' };
     }
     return null;
   }, [detailTab, isFull, kamar, openAddFasilitasModal, openAddModal]);
 
-  useScreenHeaderActions(kamarId && kamar && kamarReady ? headerAddAction : null, [
+  useScreenAddAction(kamarId && kamar && kamarReady ? headerAddAction : null, [
     kamarId,
     kamar,
     kamarReady,

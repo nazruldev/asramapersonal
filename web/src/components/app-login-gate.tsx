@@ -110,9 +110,7 @@ export function AppLoginGate({ onSuccess }: { onSuccess: () => void }) {
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-100 dark:bg-slate-950 p-4">
       <div className="w-full max-w-sm rounded-sm border border-slate-300 bg-white dark:bg-slate-900 dark:border-slate-500 shadow-lg p-5 space-y-4">
         <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-sm bg-emerald-600 text-white flex items-center justify-center">
-            <Lock className="w-5 h-5" />
-          </div>
+          <Lock className="w-6 h-6 text-emerald-600 shrink-0" />
           <div>
             <h1 className="text-base font-bold text-slate-900 dark:text-white">Pengelola Asrama</h1>
             <p className="text-[11px] text-slate-500 dark:text-slate-300">

@@ -41,9 +41,7 @@ export default function DatabasePage() {
     >
       <div className="bg-blue-50 dark:bg-blue-950/40 rounded-sm p-4 border border-blue-200 dark:border-blue-800">
         <div className="flex items-start gap-3">
-          <div className="w-8 h-8 rounded-sm bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 flex items-center justify-center flex-shrink-0">
-            <FileJson className="w-4 h-4" />
-          </div>
+          <FileJson className="w-5 h-5 text-blue-600 dark:text-blue-300 flex-shrink-0 mt-0.5" />
           <div>
             <h3 className="text-sm font-bold text-blue-900 dark:text-blue-100 mb-1">
               {isTursoConfigured() ? 'Full online Turso' : 'Satu sumber data'}

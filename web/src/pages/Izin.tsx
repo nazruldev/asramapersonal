@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { useAppStore } from '@/store/app-store';
 import { useReloadKeyReady } from '@/hooks/use-reload-key';
@@ -61,8 +61,8 @@ import {
   matchesSantriSearchAndRoomFilters,
   toggleMultiSelect,
 } from '@/lib/santri-multi-filter';
-import { useScreenHeaderActions } from '@/lib/screen-header-actions';
-import { HeaderAddButton } from '@/components/header-action-button';
+import { useScreenAddAction } from '@/lib/screen-header-actions';
+import { ScrollNavButtons } from '@/components/scroll-nav-buttons';
 import { AppModal } from '@/components/ui/app-modal';
 import { toast } from '@/lib/toast';
 
@@ -97,6 +97,7 @@ export default function Izin() {
   const navigate = useNavigate();
   const { theme } = useTheme();
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const statusScrollRef = useRef<HTMLDivElement>(null);
   const [isSantriPickerOpen, setIsSantriPickerOpen] = useState(false);
   const [selectedSantriId, setSelectedSantriId] = useState('');
   const [filterStatus, setFilterStatus] = useState<'Semua' | 'Belum' | 'Sudah'>('Semua');
@@ -318,11 +319,11 @@ export default function Izin() {
   }, [resetIzinFormDates]);
 
   const headerAddAction = useMemo(
-    () => <HeaderAddButton onClick={openAddModal} label="Buat izin" />,
+    () => ({ onClick: openAddModal, label: 'Tambah izin' }),
     [openAddModal]
   );
 
-  useScreenHeaderActions(isIzinScreen ? headerAddAction : null, [isIzinScreen, headerAddAction]);
+  useScreenAddAction(isIzinScreen ? headerAddAction : null, [isIzinScreen, headerAddAction]);
 
   return (
     <>
@@ -398,7 +399,8 @@ export default function Izin() {
         </p>
       )}
 
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar">
+      <div className="flex items-center gap-1">
+      <div ref={statusScrollRef} className="flex-1 min-w-0 flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar">
         {(['Semua', 'Belum', 'Sudah'] as const).map((st) => (
           <button
             key={st}
@@ -407,13 +409,15 @@ export default function Izin() {
             className={cn(
               'whitespace-nowrap px-3.5 py-1.5 rounded-sm text-xs font-bold transition-all shrink-0 active:scale-95',
               filterStatus === st
-                ? 'bg-slate-900 text-white shadow-xs dark:bg-slate-100 dark:text-slate-900'
+                ? 'bg-slate-900 text-white shadow-xs dark:bg-slate-700 dark:text-white'
                 : cn(appChipInactiveClass, 'text-slate-600')
             )}
           >
             {st === 'Semua' ? 'Semua Riwayat' : st === 'Belum' ? 'Sedang Izin' : 'Sudah Kembali'}
           </button>
         ))}
+      </div>
+      <ScrollNavButtons target={statusScrollRef} />
       </div>
 
       <AppModal
@@ -439,7 +443,7 @@ export default function Izin() {
                       className={cn(
                         'px-3 py-1.5 rounded-sm text-xs font-bold border transition-all',
                         active
-                          ? 'bg-slate-900 text-white border-slate-900 dark:bg-slate-100 dark:text-slate-900 dark:border-slate-100'
+                          ? 'bg-slate-900 text-white border-slate-900 dark:bg-slate-700 dark:text-white dark:border-slate-600'
                           : cn(appChipInactiveClass, 'text-slate-600')
                       )}
                     >

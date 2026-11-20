@@ -13,28 +13,28 @@ export default function Master() {
       description: 'Kelola data santri, kelas, dan kamar',
       icon: Users,
       path: '/master/santri',
-      color: 'bg-blue-500',
+      color: 'text-blue-500',
     },
     {
       title: 'Data Kamar',
       description: 'Kelola kamar, kapasitas, dan ketua kamar',
       icon: BedDouble,
       path: '/master/kamar',
-      color: 'bg-emerald-500',
+      color: 'text-emerald-500',
     },
     {
       title: 'Data Kelas',
       description: 'Kelola kelas dan tingkat',
       icon: GraduationCap,
       path: '/master/kelas',
-      color: 'bg-purple-500',
+      color: 'text-purple-500',
     },
     {
       title: 'Data Kegiatan',
       description: 'Kelola kegiatan dan jadwal',
       icon: CalendarDays,
       path: '/master/kegiatan',
-      color: 'bg-orange-500',
+      color: 'text-orange-500',
     },
   ];
 
@@ -57,9 +57,7 @@ export default function Master() {
                 'p-4 hover:border-emerald-300 dark:hover:border-emerald-700 hover:shadow-md dark:hover:shadow-none transition-all text-left active:scale-[0.98]'
               )}
             >
-              <div className={`w-10 h-10 rounded-sm ${item.color} text-white flex items-center justify-center mb-3`}>
-                <Icon className="w-5 h-5" />
-              </div>
+              <Icon className={cn('w-6 h-6 mb-3', item.color)} />
               <h3 className="text-sm font-bold text-slate-900 dark:text-slate-50 mb-1">{item.title}</h3>
               <p className="text-[11px] text-slate-500 leading-snug">{item.description}</p>
             </button>

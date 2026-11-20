@@ -68,9 +68,7 @@ export default function Peringkat() {
       className="space-y-3"
     >
       <div className={cn(appCardClass, 'p-3.5 flex gap-3 items-start')}>
-        <div className="w-10 h-10 rounded-sm bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 flex items-center justify-center shrink-0">
-          <Trophy className="w-5 h-5" />
-        </div>
+        <Trophy className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
         <div className="min-w-0">
           <p className="text-xs font-bold text-slate-900 dark:text-slate-50">Daftar Peringkat Santri</p>
           <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">

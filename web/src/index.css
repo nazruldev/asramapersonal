@@ -65,28 +65,28 @@
 
   .dark {
     color-scheme: dark;
-    /* Latar lebih gelap dari kartu supaya panel/kartu terbaca */
-    --background: 222 47% 6%;
-    --foreground: 210 40% 98%;
-    --popover: 217 33% 12%;
-    --popover-foreground: 210 40% 98%;
+    /* Hitam pekat — latar lebih gelap dari kartu supaya panel/kartu terbaca */
+    --background: 0 0% 4%;
+    --foreground: 0 0% 96%;
+    --popover: 0 0% 9%;
+    --popover-foreground: 0 0% 96%;
     /* Hijau terang di gelap — emerald gelap malah nyatu background */
     --primary: 158 70% 52%;
     --primary-foreground: 160 80% 8%;
-    --secondary: 217 28% 16%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217 28% 16%;
+    --secondary: 0 0% 13%;
+    --secondary-foreground: 0 0% 96%;
+    --muted: 0 0% 13%;
     /* muted text: cukup terang agar tidak nyatu dengan background */
-    --muted-foreground: 215 20% 78%;
-    --accent: 217 28% 18%;
-    --accent-foreground: 210 40% 98%;
+    --muted-foreground: 0 0% 82%;
+    --accent: 0 0% 16%;
+    --accent-foreground: 0 0% 96%;
     --destructive: 0 62% 55%;
     /* border ditegaskan — sebelumnya hampir sama dengan card */
-    --border: 215 18% 42%;
-    --input: 215 18% 38%;
+    --border: 0 0% 30%;
+    --input: 0 0% 25%;
     --ring: 158 55% 42%;
-    --card: 217 33% 12%;
-    --card-foreground: 210 40% 98%;
+    --card: 0 0% 9%;
+    --card-foreground: 0 0% 96%;
   }
 
   /* Smooth mobile touch scrolling */
@@ -160,32 +160,28 @@
    * Penyesuaian global di bawah .dark agar mode gelap konsisten tanpa mengubah header hijau.
    */
   .dark #root {
-    color: rgb(226 232 240);
+    color: rgb(245 245 245);
   }
 
-  .dark .text-slate-900 {
-    color: rgb(248 250 252);
-  }
+  .dark .text-slate-900,
   .dark .text-slate-800 {
-    color: rgb(241 245 249);
+    color: rgb(255 255 255);
   }
   .dark .text-slate-700 {
-    color: rgb(226 232 240);
+    color: rgb(245 245 245);
   }
-  .dark .text-slate-600 {
-    color: rgb(203 213 225);
-  }
+  .dark .text-slate-600,
   .dark .text-slate-500 {
-    color: rgb(203 213 225);
+    color: rgb(235 235 235);
   }
   .dark .text-slate-400 {
-    color: rgb(186 196 214);
+    color: rgb(220 220 220);
   }
   .dark .hover\:text-slate-900:hover {
-    color: rgb(248 250 252);
+    color: rgb(255 255 255);
   }
   .dark .hover\:text-slate-600:hover {
-    color: rgb(203 213 225);
+    color: rgb(235 235 235);
   }
 
   /* Aksen hijau: pakai mint terang di dark mode */
@@ -254,22 +250,30 @@
   }
 
   .dark .bg-white {
-    background-color: rgb(30 41 59);
+    background-color: rgb(20 20 20);
+  }
+  .dark .bg-white.text-emerald-950 {
+    background-color: rgb(6 78 59 / 0.6); /* emerald-900/60 — badge di hero */
+    color: rgb(255 255 255);
+    border-color: rgb(52 211 153 / 0.4);
+  }
+  .dark .bg-white.text-emerald-950 .bg-emerald-600 {
+    background-color: rgb(255 255 255); /* dot status jadi putih */
   }
   .dark .bg-slate-50,
   .dark .bg-slate-50\/80 {
-    background-color: rgb(51 65 85);
+    background-color: rgb(32 32 32);
   }
   .dark .bg-slate-100 {
-    background-color: rgb(51 65 85);
+    background-color: rgb(32 32 32);
   }
   .dark .bg-slate-200,
   .dark .bg-slate-200\/80 {
-    background-color: rgb(51 65 85);
+    background-color: rgb(32 32 32);
   }
   .dark .hover\:bg-slate-50:hover,
   .dark .hover\:bg-slate-100:hover {
-    background-color: rgb(71 85 105);
+    background-color: rgb(45 45 45);
   }
 
   .dark .bg-blue-50 {
@@ -326,11 +330,11 @@
   .dark .border-slate-800,
   .dark .dark\:border-slate-700,
   .dark .dark\:border-slate-800 {
-    border-color: rgb(100 116 139); /* slate-500 — lebih tegas */
+    border-color: rgb(82 82 82); /* slate-500 — lebih tegas */
   }
   .dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
   .dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
-    border-color: rgb(100 116 139);
+    border-color: rgb(82 82 82);
   }
   .dark .border-amber-200,
   .dark .border-amber-200\/60 {
@@ -349,7 +353,7 @@
   .dark .bg-amber-50.text-amber-800,
   .dark .bg-emerald-50.text-emerald-800,
   .dark .bg-blue-50.text-blue-800 {
-    color: rgb(226 232 240);
+    color: rgb(228 228 228);
   }
   .dark .hover\:bg-rose-100:hover {
     background-color: rgb(127 29 29 / 0.4);
@@ -368,7 +372,7 @@
   .dark select:focus.bg-white,
   .dark textarea:focus.bg-white,
   .dark .focus\:bg-white:focus {
-    background-color: rgb(30 41 59);
+    background-color: rgb(20 20 20);
   }
 
   .dark select,
@@ -420,35 +424,35 @@
  */
 @layer utilities {
   html.dark .bg-white\/95 {
-    background-color: rgb(15 23 42 / 0.95);
+    background-color: rgb(10 10 10 / 0.95);
   }
   html.dark .bg-white\/35,
   html.dark .bg-white\/25,
   html.dark .bg-white\/15 {
-    background-color: rgb(30 41 59 / 0.35);
+    background-color: rgb(20 20 20 / 0.35);
   }
   html.dark .hover\:bg-white\/95:hover {
-    background-color: rgb(30 41 59 / 0.95);
+    background-color: rgb(20 20 20 / 0.95);
   }
   html.dark .hover\:bg-white\/25:hover {
-    background-color: rgb(51 65 85 / 0.5);
+    background-color: rgb(32 32 32 / 0.5);
   }
 
   html.dark .bg-slate-100\/80 {
-    background-color: rgb(51 65 85 / 0.85);
+    background-color: rgb(32 32 32 / 0.85);
   }
 
   html.dark .text-slate-800 {
-    color: rgb(241 245 249);
+    color: rgb(255 255 255);
   }
   html.dark .text-slate-300 {
-    color: rgb(203 213 225);
+    color: rgb(235 235 235);
   }
   html.dark .dark\:text-slate-500 {
-    color: rgb(203 213 225);
+    color: rgb(235 235 235);
   }
   html.dark .dark\:text-slate-400 {
-    color: rgb(186 196 214);
+    color: rgb(220 220 220);
   }
 
   html.dark .border-slate-300,
@@ -459,10 +463,10 @@
   html.dark .dark\:border-slate-600,
   html.dark .dark\:border-slate-700,
   html.dark .dark\:border-slate-800 {
-    border-color: rgb(100 116 139);
+    border-color: rgb(82 82 82);
   }
   html.dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
-    border-color: rgb(100 116 139);
+    border-color: rgb(82 82 82);
   }
 
   html.dark .shadow-xs {
@@ -474,7 +478,7 @@
   html.dark .border-t.border-slate-100,
   html.dark .border-b.border-slate-100,
   html.dark .border-slate-100 {
-    border-color: rgb(100 116 139);
+    border-color: rgb(82 82 82);
   }
 
   /* Token border shadcn / appCard */
@@ -491,7 +495,7 @@ html:not(.dark) .border-slate-200\/90,
 html:not(.dark) .border-slate-200\/80,
 html:not(.dark) .border-slate-200\/70,
 html:not(.dark) .border-slate-200\/60 {
-  border-color: rgb(203 213 225); /* slate-300 */
+  border-color: rgb(208 208 208); /* slate-300 */
 }
 html:not(.dark) .border-border,
 html:not(.dark) .border-input {
@@ -499,7 +503,7 @@ html:not(.dark) .border-input {
 }
 html:not(.dark) .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
 html:not(.dark) .divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
-  border-color: rgb(203 213 225);
+  border-color: rgb(208 208 208);
 }
 
 /* Mode gelap — di luar @layer agar menang atas utility Tailwind terang */
@@ -510,21 +514,21 @@ html.dark .text-slate-900 {
   color: hsl(var(--card-foreground));
 }
 html.dark .text-slate-800 {
-  color: rgb(241 245 249);
+  color: rgb(255 255 255);
 }
 html.dark .text-slate-700 {
-  color: rgb(226 232 240);
+  color: rgb(245 245 245);
 }
 html.dark .bg-slate-50,
 html.dark .bg-slate-100,
 html.dark .bg-slate-200,
 html.dark .bg-slate-200\/80 {
-  background-color: rgb(51 65 85);
+  background-color: rgb(32 32 32);
 }
 html.dark .bg-orange-50,
 html.dark .bg-teal-50,
 html.dark .bg-violet-50 {
-  background-color: rgb(51 65 85 / 0.65);
+  background-color: rgb(32 32 32 / 0.65);
 }
 html.dark .text-rose-700,
 html.dark .text-rose-600 {
@@ -536,7 +540,7 @@ html.dark .text-orange-700 {
 html.dark .hover\:bg-white:hover,
 html.dark .hover\:bg-slate-50:hover,
 html.dark .hover\:bg-slate-100:hover {
-  background-color: rgb(71 85 105);
+  background-color: rgb(45 45 45);
 }
 html.dark .bg-card {
   background-color: hsl(var(--card));
@@ -548,15 +552,15 @@ html.dark .text-muted-foreground {
   color: hsl(var(--muted-foreground));
 }
 html.dark .text-slate-500 {
-  color: rgb(203 213 225);
+  color: rgb(235 235 235);
 }
 html.dark .text-slate-400 {
-  color: rgb(203 213 225);
+  color: rgb(220 220 220);
 }
 html.dark .placeholder\:text-muted-foreground::placeholder,
 html.dark .placeholder\:text-slate-400::placeholder,
 html.dark .placeholder\:text-slate-500::placeholder {
-  color: rgb(148 163 184);
+  color: rgb(170 170 170);
   opacity: 1;
 }
 
@@ -569,7 +573,7 @@ html.dark [class*='border'].bg-card,
 html.dark [class*='border'].bg-white,
 html.dark [class*='border'].bg-slate-800,
 html.dark [class*='border'].bg-slate-900 {
-  border-color: rgb(100 116 139);
+  border-color: rgb(82 82 82);
 }
 
 /* Hijau gelap → mint terang (override utility Tailwind) */
@@ -587,4 +591,118 @@ html.dark .bg-emerald-700 {
 html.dark .border-emerald-200,
 html.dark .border-emerald-600 {
   border-color: rgb(52 211 153) !important;
+}
+
+/* Slate gelap (bg aplikasi, header, sidebar) -> hitam netral, bukan biru */
+html.dark .bg-slate-950,
+html.dark .dark\:bg-slate-950 {
+  background-color: rgb(0 0 0);
+}
+html.dark .bg-slate-900,
+html.dark .dark\:bg-slate-900 {
+  background-color: rgb(18 18 18);
+}
+html.dark .bg-slate-900\/50,
+html.dark .dark\:bg-slate-900\/50 {
+  background-color: rgb(18 18 18 / 0.5);
+}
+html.dark .bg-slate-900\/95,
+html.dark .dark\:bg-slate-900\/95 {
+  background-color: rgb(18 18 18 / 0.95);
+}
+html.dark .bg-slate-800,
+html.dark .dark\:bg-slate-800 {
+  background-color: rgb(28 28 28);
+}
+html.dark .text-slate-50,
+html.dark .dark\:text-slate-50 {
+  color: rgb(245 245 245);
+}
+
+/* Varian slate bersisa (opacity/hover) -> netral, hilangkan tint biru */
+html.dark .bg-slate-800\/80,
+html.dark .dark\:bg-slate-800\/80 {
+  background-color: rgb(28 28 28 / 0.8);
+}
+html.dark .bg-slate-700,
+html.dark .dark\:bg-slate-700 {
+  background-color: rgb(38 38 38);
+}
+html.dark .bg-slate-700\/80,
+html.dark .dark\:bg-slate-700\/80 {
+  background-color: rgb(38 38 38 / 0.8);
+}
+html.dark .bg-slate-700\/50,
+html.dark .dark\:bg-slate-700\/50 {
+  background-color: rgb(38 38 38 / 0.5);
+}
+html.dark .bg-slate-600,
+html.dark .dark\:bg-slate-600 {
+  background-color: rgb(50 50 50);
+}
+html.dark .bg-slate-100\/80,
+html.dark .dark\:bg-slate-100\/80 {
+  background-color: rgb(32 32 32 / 0.8);
+}
+html.dark .hover\:bg-slate-700:hover,
+html.dark .dark\:hover\:bg-slate-700:hover,
+html.dark .hover\:bg-slate-700\/80:hover,
+html.dark .dark\:hover\:bg-slate-700\/80:hover {
+  background-color: rgb(48 48 48);
+}
+html.dark .hover\:bg-slate-800:hover,
+html.dark .dark\:hover\:bg-slate-800:hover {
+  background-color: rgb(38 38 38);
+}
+html.dark .border-slate-500,
+html.dark .dark\:border-slate-500,
+html.dark .border-slate-400,
+html.dark .dark\:border-slate-400,
+html.dark .hover\:border-slate-600:hover,
+html.dark .dark\:hover\:border-slate-600:hover,
+html.dark .hover\:border-slate-300:hover {
+  border-color: rgb(82 82 82);
+}
+
+/* Teks slate varian dark: tersisa -> putih/terang */
+html.dark .text-slate-100,
+html.dark .dark\:text-slate-50,
+html.dark .dark\:text-slate-100 {
+  color: rgb(255 255 255);
+}
+html.dark .text-slate-200,
+html.dark .dark\:text-slate-200,
+html.dark .text-slate-300,
+html.dark .dark\:text-slate-300 {
+  color: rgb(240 240 240);
+}
+
+/* Semua teks slate di dark -> putih penuh (permintaan: jangan abu) */
+html.dark .text-slate-50,
+html.dark .text-slate-100,
+html.dark .text-slate-200,
+html.dark .text-slate-300,
+html.dark .text-slate-400,
+html.dark .text-slate-500,
+html.dark .text-slate-600,
+html.dark .text-slate-700,
+html.dark .text-slate-800,
+html.dark .text-slate-900,
+html.dark .dark\:text-slate-50,
+html.dark .dark\:text-slate-100,
+html.dark .dark\:text-slate-200,
+html.dark .dark\:text-slate-300,
+html.dark .dark\:text-slate-400,
+html.dark .dark\:text-slate-500,
+html.dark .dark\:text-slate-600,
+html.dark .dark\:text-slate-700,
+html.dark .dark\:text-slate-800,
+html.dark .dark\:text-slate-900,
+html.dark .text-muted-foreground,
+html.dark .text-card-foreground {
+  color: rgb(255 255 255);
+}
+html.dark .dark #root,
+html.dark #root {
+  color: rgb(255 255 255);
 }

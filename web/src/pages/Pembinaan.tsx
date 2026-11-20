@@ -39,8 +39,7 @@ import {
 } from '@/lib/surface-styles';
 import { cn } from '@/lib/utils';
 import { useTheme } from '@/lib/theme';
-import { useScreenHeaderActions } from '@/lib/screen-header-actions';
-import { HeaderAddButton } from '@/components/header-action-button';
+import { useScreenAddAction } from '@/lib/screen-header-actions';
 import { AppModal } from '@/components/ui/app-modal';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/lib/toast';
@@ -274,11 +273,11 @@ export default function Pembinaan() {
   }, []);
 
   const headerAddAction = useMemo(
-    () => <HeaderAddButton onClick={openAddModal} label="Catat pelanggaran / teguran" />,
+    () => ({ onClick: openAddModal, label: 'Tambah pembinaan' }),
     [openAddModal]
   );
 
-  useScreenHeaderActions(isPembinaanScreen ? headerAddAction : null, [isPembinaanScreen, headerAddAction]);
+  useScreenAddAction(isPembinaanScreen ? headerAddAction : null, [isPembinaanScreen, headerAddAction]);
 
   return (
     <PageWithPullRefresh
@@ -379,7 +378,7 @@ export default function Pembinaan() {
                       className={cn(
                         'px-3 py-1.5 rounded-sm text-xs font-bold border transition-all',
                         active
-                          ? 'bg-slate-900 text-white border-slate-900 dark:bg-slate-100 dark:text-slate-900 dark:border-slate-100'
+                          ? 'bg-slate-900 text-white border-slate-900 dark:bg-slate-700 dark:text-white dark:border-slate-600'
                           : cn(appChipInactiveClass, 'text-slate-600')
                       )}
                     >

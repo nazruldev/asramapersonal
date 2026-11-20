@@ -114,9 +114,7 @@ export default function SantriKamarRiwayat() {
         >
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-start gap-3 min-w-0">
-              <div className="w-10 h-10 rounded-sm bg-blue-50 flex items-center justify-center shrink-0">
-                <BedDouble className="w-5 h-5 text-blue-600" />
-              </div>
+              <BedDouble className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
               <div className="min-w-0">
                 <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Kamar sekarang</p>
                 <p className="text-sm font-bold text-slate-900 truncate">{currentKamar.nama}</p>

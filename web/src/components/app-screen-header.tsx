@@ -42,7 +42,7 @@ export function AppScreenHeader({ meta, isScrolled, onBack, right }: Props) {
       </div>
 
       {right ? (
-        <div className="shrink-0 flex items-center justify-end relative z-10 touch-manipulation">{right}</div>
+        <div className="shrink-0 hidden sm:flex items-center justify-end relative z-10 touch-manipulation">{right}</div>
       ) : (
         <div className="w-2 shrink-0" aria-hidden />
       )}

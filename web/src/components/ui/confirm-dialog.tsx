@@ -41,13 +41,11 @@ export function ConfirmDialog({
       className={className}
     >
       <div className="flex flex-col items-center text-center -mt-1">
-        <div
-          className={`w-12 h-12 rounded-full flex items-center justify-center mb-3 ${
-            destructive ? 'bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400'
+        <AlertTriangle
+          className={`w-8 h-8 mb-3 ${
+            destructive ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'
           }`}
-        >
-          <AlertTriangle className="w-6 h-6" />
-        </div>
+        />
         <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed px-1">{message}</p>
       </div>
       <div className="flex gap-2 mt-5">

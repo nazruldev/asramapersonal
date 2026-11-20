@@ -87,20 +87,11 @@ export function TursoSyncPanel() {
   return (
     <div className={cn(appCardClass, 'p-4 space-y-3')}>
       <div className="flex items-start gap-3">
-        <div
-          className={cn(
-            'w-8 h-8 rounded-sm flex items-center justify-center flex-shrink-0',
-            status.configured && status.online
-              ? 'bg-emerald-100 text-emerald-700'
-              : 'bg-slate-100 text-slate-500'
-          )}
-        >
-          {status.configured && status.online ? (
-            <Cloud className="w-4 h-4" />
-          ) : (
-            <CloudOff className="w-4 h-4" />
-          )}
-        </div>
+        {status.configured && status.online ? (
+          <Cloud className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+        ) : (
+          <CloudOff className="w-5 h-5 text-slate-400 flex-shrink-0 mt-0.5" />
+        )}
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
             Turso Cloud (full online)

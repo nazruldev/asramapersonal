@@ -4,19 +4,25 @@ import { useMutation } from '@tanstack/react-query';
 import {
   AlertTriangle,
   BedDouble,
+  CalendarCheck,
   ChevronRight,
   CircleAlert,
   ClockAlert,
   Crown,
   Edit2,
+  FileDown,
+  FileText,
+  ListTodo,
   MessageCircle,
   Phone,
   Save,
+  Share2,
   ShieldAlert,
   Trash2,
   User,
+  UserRound,
 } from 'lucide-react';
-import { useAppStore } from '@/store/app-store';
+import { useAppStore, type EntityRow } from '@/store/app-store';
 import { useReloadKeyReady } from '@/hooks/use-reload-key';
 import { PageWithPullRefresh } from '@/components/page-with-pull-refresh';
 import { useAppReload } from '@/hooks/use-app-reload';
@@ -48,6 +54,25 @@ import { appCardClass, appMutedTextClass, appSectionTitleClass } from '@/lib/sur
 import { cn } from '@/lib/utils';
 import type { PembinaanRow } from '@/lib/pembinaan-group';
 import { fetchSantriById } from '@/lib/santri-api';
+import { fetchAbsensiForLaporanPeriod } from '@/lib/absensi-api';
+import { fetchIzinForLaporanPeriod, fetchPembinaanForLaporanPeriod } from '@/lib/laporan-data-api';
+import {
+  downloadLaporanPerSantri,
+  downloadSingleLaporanPdf,
+  shareLaporanPerSantri,
+  shareSingleLaporanPdf,
+} from '@/lib/laporan-print';
+import type { LaporanContext, LaporanPeriod, LaporanReportId } from '@/lib/laporan-reports';
+import type { KegiatanSchedule } from '@/lib/kegiatan-schedule';
+
+type SantriReportId = 'persantri' | Extract<LaporanReportId, 'absensi' | 'izin' | 'pembinaan'>;
+
+const SANTRI_REPORTS: { id: SantriReportId; title: string; desc: string; icon: typeof FileText; tone: string }[] = [
+  { id: 'persantri', title: 'Laporan Santri', desc: 'Laporan lengkap santri ini (absensi, izin, pembinaan).', icon: UserRound, tone: 'text-blue-600' },
+  { id: 'absensi', title: 'Rekap Absensi', desc: 'Riwayat kehadiran santri ini.', icon: CalendarCheck, tone: 'text-emerald-600' },
+  { id: 'izin', title: 'Rekap Perizinan', desc: 'Riwayat izin keluar santri ini.', icon: ClockAlert, tone: 'text-amber-600' },
+  { id: 'pembinaan', title: 'Rekap Pembinaan', desc: 'Catatan pembinaan/pelanggaran santri ini.', icon: ShieldAlert, tone: 'text-violet-600' },
+];
 
 const emptyForm = {
   nama: '',
@@ -126,6 +151,9 @@ export default function SantriDetail() {
   const kelasList = useAppStore((s) => s.kelas) as { id: string; nama: string; tingkat?: string }[];
   const izinList = useAppStore((s) => s.izin) as IzinRow[];
   const pembinaanList = useAppStore((s) => s.pembinaan) as PembinaanRow[];
+  const settings = useAppStore((s) => s.settings);
+  const dashboardStats = useAppStore((s) => s.dashboard);
+  const kegiatanMaster = useAppStore((s) => s.kegiatan) as KegiatanSchedule[];
 
   const santriFromStore = useMemo(
     () => santriList.find((s) => s.id === santriId),
@@ -145,6 +173,12 @@ export default function SantriDetail() {
       .finally(() => setDetailLoading(false));
   }, [santriId]);
 
+  const [actionSheetOpen, setActionSheetOpen] = useState(false);
+  const [reportSheetOpen, setReportSheetOpen] = useState(false);
+  const [reportPick, setReportPick] = useState<SantriReportId | null>(null);
+  const [reportCtx, setReportCtx] = useState<LaporanContext | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportBusy, setReportBusy] = useState<'unduh' | 'bagikan' | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showContactModal, setShowContactModal] = useState(false);
   const [optionPicker, setOptionPicker] = useState<'kelas' | 'kamar' | null>(null);
@@ -238,13 +272,70 @@ export default function SantriDetail() {
     setShowEditModal(true);
   }, [santri]);
 
+  const openLaporanSheet = useCallback(() => {
+    setReportSheetOpen(true);
+    if (reportCtx) return;
+    setReportLoading(true);
+    const period: LaporanPeriod = '30d';
+    Promise.all([
+      fetchAbsensiForLaporanPeriod(period),
+      fetchIzinForLaporanPeriod(period),
+      fetchPembinaanForLaporanPeriod(period),
+    ])
+      .then(([abs, iz, pb]) =>
+        setReportCtx({
+          namaAsrama: settings.namaAsrama,
+          period,
+          stats: dashboardStats,
+          santri: santriList as unknown as EntityRow[],
+          kamar: kamarList as unknown as EntityRow[],
+          absensi: abs as EntityRow[],
+          izin: iz as EntityRow[],
+          pembinaan: pb as EntityRow[],
+          kegiatan: kegiatanMaster,
+        })
+      )
+      .catch(() => toast.error('Gagal memuat data laporan'))
+      .finally(() => setReportLoading(false));
+  }, [reportCtx, settings.namaAsrama, dashboardStats, santriList, kamarList, kegiatanMaster]);
+
+  const runSantriReport = useCallback(
+    async (action: 'unduh' | 'bagikan') => {
+      if (!reportCtx || !reportPick || !santri) return;
+      const sid = String(santri.id);
+      setReportBusy(action);
+      try {
+        if (reportPick === 'persantri') {
+          await (action === 'unduh'
+            ? downloadLaporanPerSantri(reportCtx, sid)
+            : shareLaporanPerSantri(reportCtx, sid));
+        } else {
+          await (action === 'unduh'
+            ? downloadSingleLaporanPdf(reportPick, reportCtx, sid)
+            : shareSingleLaporanPdf(reportPick, reportCtx, sid));
+        }
+        setReportPick(null);
+      } catch {
+        toast.error(action === 'unduh' ? 'Gagal mengunduh laporan' : 'Gagal membagikan laporan');
+      } finally {
+        setReportBusy(null);
+      }
+    },
+    [reportCtx, reportPick, santri]
+  );
+
   const headerEditAction = useMemo(
     () => (
-      <HeaderNeutralButton onClick={openEdit} label="Ubah data santri">
-        <Edit2 className="w-5 h-5" strokeWidth={2} />
-      </HeaderNeutralButton>
+      <>
+        <HeaderNeutralButton onClick={() => setActionSheetOpen(true)} label="Aksi" withLabel>
+          <ListTodo className="w-5 h-5" strokeWidth={2} />
+        </HeaderNeutralButton>
+        <HeaderNeutralButton onClick={openLaporanSheet} label="Laporan santri" withLabel>
+          <FileText className="w-5 h-5" strokeWidth={2} />
+        </HeaderNeutralButton>
+      </>
     ),
-    [openEdit]
+    [openLaporanSheet]
   );
 
   useScreenHeaderActions(santriId && santri && santriReady && !detailLoading ? headerEditAction : null, [
@@ -255,13 +346,16 @@ export default function SantriDetail() {
     headerEditAction,
   ]);
 
-  const handleTakePhoto = async () => {
+  const handleTakePhoto = async (source: 'camera' | 'gallery') => {
     try {
-      const { Camera: CapacitorCamera, CameraResultType } = await import('@capacitor/camera');
+      const { Camera: CapacitorCamera, CameraResultType, CameraSource } = await import(
+        '@capacitor/camera'
+      );
       const photo = await CapacitorCamera.getPhoto({
         quality: 90,
         allowEditing: false,
         resultType: CameraResultType.DataUrl,
+        source: source === 'camera' ? CameraSource.Camera : CameraSource.Photos,
       });
       setFormData({ ...formData, foto: photo.dataUrl || '' });
     } catch {
@@ -534,46 +628,6 @@ export default function SantriDetail() {
             ) : null}
           </div>
 
-          <div className="space-y-2">
-            <p className={cn(appSectionTitleClass, 'px-0.5')}>Aksi</p>
-            <ActionBtn
-              icon={<ClockAlert className="w-4 h-4 text-amber-600" />}
-              label="Riwayat izin"
-              onClick={() =>
-                navigate(izinDetailPath(santri.id), withBackTo(detailBack))
-              }
-            />
-            <ActionBtn
-              icon={<ShieldAlert className="w-4 h-4 text-rose-600" />}
-              label="Riwayat pembinaan (BK)"
-              onClick={() =>
-                navigate(pembinaanDetailPath(santri.id), withBackTo(detailBack))
-              }
-            />
-            <ActionBtn
-              icon={<BedDouble className="w-4 h-4 text-blue-600" />}
-              label="Riwayat & info kamar"
-              onClick={() =>
-                navigate(santriKamarRiwayatPath(santri.id), withBackTo(detailBack))
-              }
-            />
-            <ActionBtn
-              icon={<MessageCircle className="w-4 h-4 text-emerald-600" />}
-              label="Hubungi wali"
-              onClick={handleContact}
-            />
-            <ActionBtn
-              icon={<Edit2 className="w-4 h-4 text-blue-600" />}
-              label="Ubah data santri"
-              onClick={openEdit}
-            />
-            <ActionBtn
-              icon={<Trash2 className="w-4 h-4 text-rose-600" />}
-              label="Hapus santri"
-              onClick={requestDelete}
-              danger
-            />
-          </div>
         </>
       )}
 
@@ -683,6 +737,151 @@ export default function SantriDetail() {
             </div>
           </>
         ) : null}
+      </AppModal>
+
+      {/* Sheet daftar aksi profil */}
+      <AppModal
+        open={actionSheetOpen}
+        onClose={() => setActionSheetOpen(false)}
+        title="Aksi santri"
+      >
+        {santri ? (
+          <div className="space-y-2">
+            <ActionBtn
+              icon={<ClockAlert className="w-4 h-4 text-amber-600" />}
+              label="Riwayat izin"
+              onClick={() => {
+                setActionSheetOpen(false);
+                navigate(izinDetailPath(santri.id), withBackTo(detailBack));
+              }}
+            />
+            <ActionBtn
+              icon={<ShieldAlert className="w-4 h-4 text-rose-600" />}
+              label="Riwayat pembinaan (BK)"
+              onClick={() => {
+                setActionSheetOpen(false);
+                navigate(pembinaanDetailPath(santri.id), withBackTo(detailBack));
+              }}
+            />
+            <ActionBtn
+              icon={<BedDouble className="w-4 h-4 text-blue-600" />}
+              label="Riwayat & info kamar"
+              onClick={() => {
+                setActionSheetOpen(false);
+                navigate(santriKamarRiwayatPath(santri.id), withBackTo(detailBack));
+              }}
+            />
+            <ActionBtn
+              icon={<MessageCircle className="w-4 h-4 text-emerald-600" />}
+              label="Hubungi wali"
+              onClick={() => {
+                setActionSheetOpen(false);
+                handleContact();
+              }}
+            />
+            <ActionBtn
+              icon={<Edit2 className="w-4 h-4 text-blue-600" />}
+              label="Ubah data santri"
+              onClick={() => {
+                setActionSheetOpen(false);
+                openEdit();
+              }}
+            />
+            <ActionBtn
+              icon={<Trash2 className="w-4 h-4 text-rose-600" />}
+              label="Hapus santri"
+              onClick={() => {
+                setActionSheetOpen(false);
+                requestDelete();
+              }}
+              danger
+            />
+          </div>
+        ) : null}
+      </AppModal>
+
+      {/* Sheet pilih tipe laporan santri */}
+      <AppModal
+        open={reportSheetOpen}
+        onClose={() => setReportSheetOpen(false)}
+        title={`Laporan — ${santri?.nama ?? 'Santri'}`}
+      >
+        <div className="space-y-2">
+          {SANTRI_REPORTS.map((r) => {
+            const RIcon = r.icon;
+            return (
+              <button
+                key={r.id}
+                type="button"
+                disabled={reportLoading}
+                onClick={() => {
+                  setReportSheetOpen(false);
+                  setReportPick(r.id);
+                }}
+                className={cn(
+                  appCardClass,
+                  'w-full p-3.5 text-left flex items-center gap-3 hover:border-emerald-400 dark:hover:border-emerald-600 active:scale-[0.99] transition-all disabled:opacity-60'
+                )}
+              >
+                <RIcon className={cn('w-6 h-6 shrink-0', r.tone)} />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-bold text-slate-900 dark:text-slate-50">{r.title}</p>
+                  <p className="text-[11px] text-slate-500 leading-snug">{r.desc}</p>
+                </div>
+                <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+              </button>
+            );
+          })}
+          {reportLoading && (
+            <p className="text-[11px] text-slate-500 text-center py-1">Memuat data laporan…</p>
+          )}
+        </div>
+      </AppModal>
+
+      {/* Sheet aksi: unduh atau bagikan */}
+      <AppModal
+        open={reportPick !== null}
+        onClose={() => setReportPick(null)}
+        title="Unduh atau bagikan?"
+      >
+        <div className="space-y-2">
+          <button
+            type="button"
+            disabled={reportBusy !== null || reportLoading || !reportCtx}
+            onClick={() => void runSantriReport('unduh')}
+            className={cn(
+              appCardClass,
+              'w-full p-3.5 text-left flex items-center gap-3 hover:border-emerald-400 disabled:opacity-60'
+            )}
+          >
+            <FileDown className="w-5 h-5 text-emerald-600 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-slate-900 dark:text-slate-50">Unduh PDF</p>
+              <p className="text-[11px] text-slate-500">Simpan file laporan ke perangkat.</p>
+            </div>
+            {reportBusy === 'unduh' && (
+              <span className="text-[10px] font-bold text-emerald-700 shrink-0">Menyiapkan…</span>
+            )}
+          </button>
+          <button
+            type="button"
+            disabled={reportBusy !== null || reportLoading || !reportCtx}
+            onClick={() => void runSantriReport('bagikan')}
+            className={cn(
+              appCardClass,
+              'w-full p-3.5 text-left flex items-center gap-3 hover:border-emerald-400 disabled:opacity-60'
+            )}
+          >
+            <Share2 className="w-5 h-5 text-teal-600 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-slate-900 dark:text-slate-50">Bagikan</p>
+              <p className="text-[11px] text-slate-500">Kirim file PDF lewat WhatsApp / aplikasi lain.</p>
+            </div>
+            {reportBusy === 'bagikan' && (
+              <span className="text-[10px] font-bold text-teal-700 shrink-0">Menyiapkan…</span>
+            )}
+          </button>
+        </div>
       </AppModal>
 
       <ConfirmDialog

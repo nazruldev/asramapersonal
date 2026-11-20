@@ -65,9 +65,7 @@ export default function WilayahSebaran() {
       className="space-y-3"
     >
       <div className={cn(appCardClass, 'p-3.5 flex gap-3 items-start')}>
-        <div className="w-10 h-10 rounded-sm bg-teal-50 text-teal-700 dark:bg-teal-950/40 dark:text-teal-300 flex items-center justify-center shrink-0">
-          <MapPin className="w-5 h-5" />
-        </div>
+        <MapPin className="w-5 h-5 text-teal-700 dark:text-teal-300 shrink-0 mt-0.5" />
         <div className="min-w-0">
           <p className="text-xs font-bold text-slate-900 dark:text-slate-50">Sebaran Asal Santri</p>
           <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">

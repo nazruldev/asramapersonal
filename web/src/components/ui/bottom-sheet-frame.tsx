@@ -20,7 +20,7 @@ function measureSheetHeights(): SheetMetrics {
   const vh = vv?.height ?? window.innerHeight;
   const available = Math.max(240, vh - 8);
   return {
-    half: Math.round(available * 0.52),
+    half: Math.round(available * 0.7),
     full: Math.round(available * 0.94),
   };
 }
@@ -47,13 +47,18 @@ export function BottomSheetFrame({
 }: BottomSheetFrameProps) {
   const [snap, setSnap] = useState<Snap>('half');
   const [metrics, setMetrics] = useState<SheetMetrics>(() => measureSheetHeights());
+  const [contentHeight, setContentHeight] = useState(0);
   const [dragY, setDragY] = useState(0);
   const dragging = useRef(false);
   const startY = useRef(0);
   const snapRef = useRef<Snap>('half');
+  const contentRef = useRef<HTMLDivElement>(null);
 
   const remeasure = useCallback(() => {
     setMetrics(measureSheetHeights());
+    // Tinggi konten -> snap bawah mengikuti isi (max 94%)
+    const el = contentRef.current;
+    if (el) setContentHeight(el.scrollHeight);
   }, []);
 
   useEffect(() => {
@@ -74,6 +79,18 @@ export function BottomSheetFrame({
       window.removeEventListener('resize', remeasure);
     };
   }, [open, remeasure]);
+
+  // Ukur ulang tinggi saat isi berubah (form panjang -> sheet naik otomatis)
+  useEffect(() => {
+    if (!open) return;
+    const el = contentRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => {
+      setContentHeight(el.scrollHeight);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -131,13 +148,18 @@ export function BottomSheetFrame({
 
   if (!open) return null;
 
-  const panelHeight = snap === 'full' ? metrics.full : metrics.half;
+  // Snap bawah mengikuti isi: min 52%, naik sampai max 94% kalau konten panjang
+  const autoHeight =
+    contentHeight > 0
+      ? Math.min(metrics.full, Math.max(metrics.half, contentHeight))
+      : metrics.half;
+  const panelHeight = snap === 'full' ? metrics.full : autoHeight;
   const isAnimating = !dragging.current;
 
   return (
     <div
       className={cn(
-        'fixed inset-0 flex items-end justify-center px-1.5 pt-0 pointer-events-none',
+        'fixed inset-0 flex items-end justify-center pt-0 pointer-events-none',
         'pb-[max(0.375rem,calc(var(--keyboard-inset,0px)+env(safe-area-inset-bottom)))]',
         elevated ? 'z-[110]' : 'z-[100]',
         className
@@ -154,8 +176,8 @@ export function BottomSheetFrame({
         role="dialog"
         aria-modal="true"
         className={cn(
-          'relative w-full max-w-[calc(100vw-0.75rem)] flex flex-col min-h-0 shadow-2xl pointer-events-auto',
-          'bg-card text-card-foreground border border-border rounded-t-sm',
+          'relative w-full sm:max-w-xl md:max-w-2xl lg:max-w-4xl xl:max-w-5xl flex flex-col min-h-0 shadow-2xl pointer-events-auto',
+          'bg-card text-card-foreground border-t border-border rounded-t-sm',
           'animate-in fade-in slide-in-from-bottom duration-200',
           elevated ? 'z-[111]' : 'z-[101]',
           panelClassName
@@ -178,7 +200,7 @@ export function BottomSheetFrame({
         >
           <div className="w-10 h-1 rounded-full bg-slate-200 dark:bg-slate-600 mx-auto" />
         </div>
-        <div className="flex flex-col flex-1 min-h-0 overflow-hidden">{children}</div>
+        <div ref={contentRef} className="flex flex-col flex-1 min-h-0 overflow-hidden">{children}</div>
       </div>
     </div>
   );

@@ -2,8 +2,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { useLocation } from 'react-router';
 import { Edit2, Trash2, Save, GraduationCap } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
-import { HeaderAddButton } from '@/components/header-action-button';
-import { useScreenHeaderActions } from '@/lib/screen-header-actions';
+import { useScreenAddAction } from '@/lib/screen-header-actions';
 import { useMutation } from '@tanstack/react-query';
 import { useAppStore } from '@/store/app-store';
 import { useReloadKeyReady } from '@/hooks/use-reload-key';
@@ -103,11 +102,11 @@ export default function Kelas() {
   const openAddModal = useCallback(() => setShowModal(true), []);
 
   const headerAddAction = useMemo(
-    () => <HeaderAddButton onClick={openAddModal} label="Tambah kelas" />,
+    () => ({ onClick: openAddModal, label: 'Tambah kelas' }),
     [openAddModal]
   );
 
-  useScreenHeaderActions(isKelasScreen ? headerAddAction : null, [isKelasScreen, headerAddAction]);
+  useScreenAddAction(isKelasScreen ? headerAddAction : null, [isKelasScreen, headerAddAction]);
 
   return (
     <PageWithPullRefresh keys={['kelas', 'santri']} className="space-y-3">

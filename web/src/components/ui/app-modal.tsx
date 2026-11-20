@@ -81,7 +81,7 @@ export function AppModal({
   return createPortal(
     <div
       className={cn(
-        'fixed inset-0 flex items-end sm:items-center justify-center px-1.5 pb-[max(0.375rem,var(--keyboard-inset,0px))] pt-0 sm:p-4',
+        'fixed inset-0 flex items-end sm:items-center justify-center px-0 pb-[max(0.375rem,var(--keyboard-inset,0px))] pt-0 sm:p-4',
         elevated ? 'z-[110]' : 'z-[100]'
       )}
       role="dialog"
@@ -95,9 +95,9 @@ export function AppModal({
       />
       <div
         className={cn(
-          'relative w-full max-w-[calc(100vw-0.75rem)] sm:max-w-md max-h-[min(92vh,calc(100dvh-var(--keyboard-inset,0px)-1rem))] flex flex-col shadow-2xl animate-in fade-in duration-200',
+          'relative w-full max-w-full sm:max-w-md max-h-[min(92vh,calc(100dvh-var(--keyboard-inset,0px)-1rem))] flex flex-col shadow-2xl animate-in fade-in duration-200',
           elevated ? 'z-[111]' : 'z-[101]',
-          'bg-card text-card-foreground border border-border',
+          'bg-card text-card-foreground border-t border-border sm:border',
           sheet
             ? 'rounded-sm sm:rounded-sm slide-in-from-bottom sm:zoom-in-95'
             : 'rounded-sm zoom-in-95 sm:max-w-sm',

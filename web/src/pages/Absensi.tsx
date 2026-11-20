@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useLocation } from 'react-router';
 import { useMutation } from '@tanstack/react-query';
 import { useAppStore } from '@/store/app-store';
@@ -19,6 +19,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { AppModal } from '@/components/ui/app-modal';
 import { Button } from '@/components/ui/button';
 import { useScreenHeaderActions } from '@/lib/screen-header-actions';
+import { ScrollNavButtons } from '@/components/scroll-nav-buttons';
 import { HeaderNeutralButton } from '@/components/header-action-button';
 import { toast } from '@/lib/toast';
 import {
@@ -94,6 +95,7 @@ export default function Absensi() {
   const zonaWaktu = useAppZonaWaktu();
   const reload = useAppReload();
   const [clockNow, setClockNow] = useState(() => new Date());
+  const agendaScrollRef = useRef<HTMLDivElement>(null);
   const [activeKegiatan, setActiveKegiatan] = useState('');
   const [selectedRoomFilter, setSelectedRoomFilter] = useState('Semua Kamar');
   const [selectedDateKey, setSelectedDateKey] = useState(() => toDateKey(new Date()));
@@ -481,9 +483,11 @@ export default function Absensi() {
         <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 leading-snug">
           {selectedDateLabel}
         </p>
-        <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 tabular-nums tracking-wide">
-          {liveTimeLabel} {zonaShort}
-        </p>
+        {agendaUntukTanggal.length > 0 ? (
+          <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 tabular-nums tracking-wide">
+            {liveTimeLabel} {zonaShort}
+          </p>
+        ) : null}
         {selectedRoomFilter !== 'Semua Kamar' ? (
           <p className="text-[11px] text-slate-500 truncate">{selectedRoomFilter}</p>
         ) : null}
@@ -560,8 +564,10 @@ export default function Absensi() {
             variant="inline"
           />
         ) : (
+          <div className="flex items-center gap-1">
           <div
-            className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar -mx-3 sm:-mx-4 px-3 sm:px-4 scroll-px-3 sm:scroll-px-4"
+            ref={agendaScrollRef}
+            className="flex-1 min-w-0 flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar -mx-3 sm:-mx-4 px-3 sm:px-4 scroll-px-3 sm:scroll-px-4"
           >
             {agendaSorted.map((keg) => {
               const isSelected = activeKegiatan === keg.nama;
@@ -611,6 +617,8 @@ export default function Absensi() {
               );
             })}
           </div>
+          <ScrollNavButtons target={agendaScrollRef} />
+          </div>
         )}
       </div>
 
@@ -655,7 +663,9 @@ export default function Absensi() {
         </p>
       )}
 
+      {agendaUntukTanggal.length > 0 && (
       <div className="space-y-2">
+        {activeKegiatan && (
         <div className="flex items-center gap-1 p-0.5 bg-slate-100/80 dark:bg-slate-800/80 rounded-sm border border-slate-200/60 dark:border-slate-700">
           <button
             type="button"
@@ -682,6 +692,7 @@ export default function Absensi() {
             </span>
           </button>
         </div>
+        )}
 
         {presensiTab === 'belum' && activeKegiatan && belumDiabsen.length > 0 && (
           <button
@@ -810,6 +821,7 @@ export default function Absensi() {
           </div>
         )}
       </div>
+      )}
     </PageWithPullRefresh>
   );
 }
