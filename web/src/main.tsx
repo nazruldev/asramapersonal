@@ -15,24 +15,12 @@ import { Toaster } from './components/ui/sonner';
 const queryClient = new QueryClient();
 
 async function bootstrap() {
-  const boot = (msg: string) => {
-    console.info('[boot]', msg);
-    const el = document.getElementById('root');
-    if (el && !el.childElementCount) {
-      el.innerHTML = `<p style="padding:1.5rem;font-family:sans-serif;color:#64748b">${msg}</p>`;
-    }
-  };
   // Web/Electron: localStorage. Android: Capacitor SQLite.
   // Sync penuh semua platform lewat Turso snapshot.
-  boot('1/5 setWebSqlite…');
   setWebSqliteAvailable(false);
-  boot('2/5 installNativeApiFetch…');
   installNativeApiFetch();
-  boot('3/5 initClientApiStore…');
   await initClientApiStore();
-  boot('4/5 startAutoSync…');
   startAutoSync();
-  boot('5/5 render…');
 
   createRoot(document.getElementById('root')!).render(
     <StrictMode>

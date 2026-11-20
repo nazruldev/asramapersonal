@@ -480,18 +480,22 @@ export function startAutoSync(): void {
   autoStarted = true;
   void refreshConfiguredFlag();
 
-  const maybeSync = () => {
-    if (!readTursoConfig()) return;
-    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
-    if (cloudPushPaused) return;
+  const maybeSync = async (): Promise<boolean> => {
+    if (!readTursoConfig()) return true;
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return true;
+    if (cloudPushPaused) return true;
     if (!navigator.onLine) {
       status.online = false;
       emit();
-      return;
+      return false;
     }
-    void runTursoSync().catch((err) => {
+    try {
+      await runTursoSync();
+      return true;
+    } catch (err) {
       console.warn('Auto sync skipped/failed:', err);
-    });
+      return false;
+    }
   };
 
   window.addEventListener('online', () => {
@@ -508,7 +512,7 @@ export function startAutoSync(): void {
     emit();
   });
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') maybeSync();
+    if (document.visibilityState === 'visible') void maybeSync();
   });
 
   void Network.addListener('networkStatusChange', (s) => {
@@ -523,6 +527,18 @@ export function startAutoSync(): void {
     /* web/Electron tanpa plugin */
   });
 
-  window.setInterval(maybeSync, 2 * 60 * 1000);
+  // Backoff eksponensial: 2 mnt → ganda tiap gagal → maks 30 mnt. Reset saat sukses.
+  const BASE_DELAY = 2 * 60 * 1000;
+  const MAX_DELAY = 30 * 60 * 1000;
+  let delay = BASE_DELAY;
+  const scheduleNext = () => {
+    window.setTimeout(() => {
+      void maybeSync().then((ok) => {
+        delay = ok ? BASE_DELAY : Math.min(delay * 2, MAX_DELAY);
+        scheduleNext();
+      });
+    }, delay);
+  };
+  scheduleNext();
   console.info('[sync] mode=offline-first-delta-sync');
 }

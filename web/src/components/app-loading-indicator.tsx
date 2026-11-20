@@ -1,4 +1,6 @@
 const APP_ICON_URL = `${import.meta.env.BASE_URL}apple-touch-icon.png`;
+/** typeof aman jika Vite belum inject define (server belum restart). */
+const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev';
 
 type Props = {
   message?: string;
@@ -54,7 +56,7 @@ export function AppLoadingIndicator({
             Aplikasi dibuat oleh Nasrullah
           </p>
           <p className="text-[11px] font-medium text-slate-400 dark:text-slate-500 text-center">
-            Versi {__APP_VERSION__}
+            Versi {APP_VERSION}
           </p>
         </div>
       </div>

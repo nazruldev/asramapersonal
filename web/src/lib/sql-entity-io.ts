@@ -72,6 +72,19 @@ async function sqlIdSet(table: 'santri' | 'kamar'): Promise<Set<string>> {
   return withSql((db) => sqlIdSetOnDb(db, table));
 }
 
+/** Tandai updated_by = akun yang sedang login pada baris yang baru ditulis. */
+async function stampActor(
+  db: SQLiteDBConnection,
+  table: string,
+  id: string
+): Promise<void> {
+  const actor = currentActorName();
+  if (!actor) return;
+  await db
+    .run(`UPDATE ${table} SET updated_by = ? WHERE id = ?`, [actor, id])
+    .catch(() => undefined);
+}
+
 function remoteVal(v: unknown): string | number | null {
   if (v === undefined || v === null) return null;
   if (typeof v === 'bigint') return Number(v);
@@ -96,9 +109,38 @@ async function tableColumns(
   return cols;
 }
 
+/** Catat konflik saat versi remote menimpa versi lokal yang berbeda. */
+async function ensureConflictTable(db: SQLiteDBConnection): Promise<void> {
+  await db.execute(`CREATE TABLE IF NOT EXISTS sync_conflict (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    table_name TEXT NOT NULL,
+    row_id TEXT NOT NULL,
+    local_updated_at TEXT,
+    remote_updated_at TEXT,
+    local_payload TEXT,
+    remote_payload TEXT,
+    resolution TEXT NOT NULL DEFAULT 'remote_won',
+    seen_at TEXT NOT NULL
+  )`);
+}
+
+export async function sqlListSyncConflicts(
+  limit = 50
+): Promise<Record<string, unknown>[]> {
+  return withSql(async (db) => {
+    await ensureConflictTable(db);
+    const res = await db.query(
+      `SELECT * FROM sync_conflict ORDER BY id DESC LIMIT ?`,
+      [limit]
+    );
+    return (res.values ?? []) as Record<string, unknown>[];
+  });
+}
+
 /**
  * Terapkan baris hasil delta-pull ke tabel lokal (upsert).
  * LWW: baris lokal yang lebih baru tidak ditimpa remote basi.
+ * Kalau remote menimpa versi lokal yang berbeda → dicatat di sync_conflict.
  */
 export async function sqlApplyRemoteRows(
   table: string,
@@ -106,6 +148,7 @@ export async function sqlApplyRemoteRows(
 ): Promise<number> {
   if (!rows.length) return 0;
   return withWrite(async (db) => {
+    await ensureConflictTable(db);
     const cols = await tableColumns(db, table);
     let applied = 0;
     for (const row of rows) {
@@ -115,8 +158,45 @@ export async function sqlApplyRemoteRows(
       if (!keys.includes('id') || keys.length < 2) continue;
       const nonId = keys.filter((k) => k !== 'id');
       const setClause = nonId.map((c) => `${c} = excluded.${c}`).join(', ');
-      await db
-        .run(
+      try {
+        const existing = await db.query(
+          `SELECT * FROM ${table} WHERE id = ?`,
+          [remoteVal(row.id)]
+        );
+        const local = (existing.values ?? [])[0] as
+          | Record<string, unknown>
+          | undefined;
+        const localTs = local?.updated_at ? String(local.updated_at) : null;
+        const remoteTs = row.updated_at ? String(row.updated_at) : null;
+        const differs =
+          local &&
+          nonId.some(
+            (c) =>
+              c !== 'updated_at' &&
+              String(local[c] ?? '') !== String(row[c] ?? '')
+          );
+        const remoteWins =
+          !localTs || !remoteTs || remoteTs >= localTs;
+        if (local && differs && remoteWins) {
+          await db
+            .run(
+              `INSERT INTO sync_conflict
+               (table_name, row_id, local_updated_at, remote_updated_at,
+                local_payload, remote_payload, resolution, seen_at)
+               VALUES (?, ?, ?, ?, ?, ?, 'remote_won', ?)`,
+              [
+                table,
+                String(row.id),
+                localTs,
+                remoteTs,
+                JSON.stringify(local),
+                JSON.stringify(row),
+                new Date().toISOString(),
+              ]
+            )
+            .catch(() => undefined);
+        }
+        await db.run(
           `INSERT INTO ${table} (${keys.join(', ')})
            VALUES (${keys.map(() => '?').join(', ')})
            ON CONFLICT(id) DO UPDATE SET ${setClause}
@@ -124,11 +204,11 @@ export async function sqlApplyRemoteRows(
               OR excluded.updated_at IS NULL
               OR datetime(excluded.updated_at) >= datetime(${table}.updated_at)`,
           keys.map((k) => remoteVal(row[k]))
-        )
-        .then(() => {
-          applied += 1;
-        })
-        .catch(() => undefined);
+        );
+        applied += 1;
+      } catch {
+        /* baris gagal, lanjut */
+      }
     }
     return applied;
   });
@@ -229,6 +309,7 @@ export async function sqlUpsertKamarRow(row: Record<string, unknown>): Promise<v
          asrama_id=excluded.asrama_id`,
       kamarSqlParams(row, ketuaId)
     );
+    await stampActor(db, 'kamar', String(row.id));
   });
 }
 
@@ -720,6 +801,7 @@ export async function sqlInsertIzin(row: Record<string, unknown>): Promise<void>
       optStr(row, 'created_at') ?? new Date().toISOString(),
     ]
   );
+  await stampActor(db, 'izin', String(row.id));
   });
 }
 
@@ -727,9 +809,10 @@ export async function sqlUpdateIzinRow(row: Record<string, unknown>): Promise<vo
   if (!shouldPersistToSqlite()) return;
   await withWrite(async (db) => {
     await db.run(
-      `UPDATE izin SET status_kembali=?, waktu_kembali_aktual=? WHERE id=?`,
+      `UPDATE izin SET status_kembali=?, waktu_kembali_aktual=?, updated_at=datetime('now') WHERE id=?`,
       [strField(row, 'status_kembali'), optStr(row, 'waktu_kembali_aktual'), String(row.id)]
     );
+    await stampActor(db, 'izin', String(row.id));
   });
 }
 
@@ -757,6 +840,7 @@ export async function sqlInsertPembinaan(row: Record<string, unknown>): Promise<
       optStr(row, 'created_at') ?? new Date().toISOString(),
     ]
   );
+  await stampActor(db, 'pembinaan', String(row.id));
   });
 }
 
@@ -811,6 +895,7 @@ export async function sqlUpsertAbsensiRow(
       optStr(row, 'catatan'),
     ]
   );
+  await stampActor(db, 'absensi', String(row.id));
   });
 }
 
@@ -858,6 +943,7 @@ export async function sqlUpsertPenjadwalanRow(row: Record<string, unknown>): Pro
          catatan=excluded.catatan, generated_at=excluded.generated_at, generate_batch_id=excluded.generate_batch_id`,
       penjadwalanInsertParams(entry)
     );
+    await stampActor(db, 'penjadwalan', String(row.id));
   });
 }
 
@@ -921,6 +1007,7 @@ export async function sqlInsertPenjadwalanMany(rows: Record<string, unknown>[]):
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         penjadwalanInsertParams(entry)
       );
+      await stampActor(db, 'penjadwalan', String(row.id ?? ''));
     }
   });
 }
@@ -957,6 +1044,7 @@ export async function sqlInsertRiwayatKamar(
           row.tanggal,
         ]
       );
+      await stampActor(db, 'riwayat_kamar', String(row.id));
     } else {
       await db.run(
         `INSERT INTO riwayat_kamar (id, santri_id, kamar_id, kamar_nama, tipe, tanggal, kamar_sebelumnya) VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -978,18 +1066,25 @@ export async function sqlBumpSantriPelanggaran(santriId: string, delta: number):
   if (!shouldPersistToSqlite()) return;
   await withWrite(async (db) => {
     await db.run(
-      `UPDATE santri SET jumlah_pelanggaran = COALESCE(jumlah_pelanggaran, 0) + ? WHERE id = ?`,
+      `UPDATE santri SET jumlah_pelanggaran = COALESCE(jumlah_pelanggaran, 0) + ?, updated_at = datetime('now') WHERE id = ?`,
       [delta, santriId]
     );
+    await stampActor(db, 'santri', santriId);
   });
 }
 
 export async function sqlVacateKamarResidents(kamarId: string): Promise<void> {
   if (!shouldPersistToSqlite()) return;
   await withWrite(async (db) => {
-    await db.run(`UPDATE santri SET kamar_id = NULL, masuk_kamar_sejak = NULL WHERE kamar_id = ?`, [
+    await db.run(`UPDATE santri SET kamar_id = NULL, masuk_kamar_sejak = NULL, updated_at = datetime('now') WHERE kamar_id = ?`, [
       kamarId,
     ]);
+    const actor = currentActorName();
+    if (actor) {
+      await db
+        .run(`UPDATE santri SET updated_by = ? WHERE kamar_id IS NULL AND updated_at >= datetime('now', '-5 seconds')`, [actor])
+        .catch(() => undefined);
+    }
   });
 }
 
@@ -1001,7 +1096,8 @@ export async function sqlDeletePenjadwalanByKamarId(_kamarId: string): Promise<v
 export async function sqlSetSantriPelanggaran(santriId: string, value: number): Promise<void> {
   if (!shouldPersistToSqlite()) return;
   await withWrite(async (db) => {
-    await db.run(`UPDATE santri SET jumlah_pelanggaran = ? WHERE id = ?`, [value, santriId]);
+    await db.run(`UPDATE santri SET jumlah_pelanggaran = ?, updated_at = datetime('now') WHERE id = ?`, [value, santriId]);
+    await stampActor(db, 'santri', santriId);
   });
 }
 
