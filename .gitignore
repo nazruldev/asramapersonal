@@ -10,3 +10,10 @@ web/.env.local
 data.json
 web/data.json
 *.log
+
+# Artefak sync/replika lokal & dump
+auth
+auth-wal
+backups/
+dump-turso.mjs
+tmp-*.ts

@@ -126,6 +126,36 @@ export async function writeSnapshotToTursoTables(
   const riwayat = (snapshot.riwayat_kamar ?? []) as SantriKamarRiwayatRow[];
   const now = new Date().toISOString();
 
+  if (mode === 'upsert') {
+    // Anti-resurrect: baris yang dihapus device lain (tombstone remote) tidak
+    // di-insert ulang — kecuali versi lokal memang lebih baru dari deleted_at.
+    const tomb = await readTursoTombstones(client);
+    if (tomb.size) {
+      const alive = <T extends Record<string, unknown>>(rows: T[], table: string): T[] =>
+        rows.filter((r) => {
+          const del = tomb.get(`${table}|${String((r as { id?: unknown }).id)}`);
+          if (!del) return true;
+          const upd = String(
+            (r as { updated_at?: unknown; updatedAt?: unknown }).updated_at ??
+              (r as { updatedAt?: unknown }).updatedAt ??
+              ''
+          );
+          const t = (v: string) => Date.parse(v.replace(' ', 'T') + (v.includes('Z') ? '' : 'Z')) || 0;
+          return upd ? t(upd) > t(del) : false;
+        });
+      kelas.splice(0, kelas.length, ...alive(kelas, 'kelas'));
+      kamar.splice(0, kamar.length, ...alive(kamar, 'kamar'));
+      santri.splice(0, santri.length, ...alive(santri, 'santri'));
+      kegiatan.splice(0, kegiatan.length, ...alive(kegiatan, 'kegiatan'));
+      presets.splice(0, presets.length, ...(alive(presets as unknown as Record<string, unknown>[], 'penjadwalan_preset') as unknown as typeof presets));
+      penjadwalan.splice(0, penjadwalan.length, ...alive(penjadwalan, 'penjadwalan'));
+      absensi.splice(0, absensi.length, ...alive(absensi, 'absensi'));
+      izin.splice(0, izin.length, ...alive(izin, 'izin'));
+      pembinaan.splice(0, pembinaan.length, ...alive(pembinaan, 'pembinaan'));
+      riwayat.splice(0, riwayat.length, ...alive(riwayat as unknown as Record<string, unknown>[], 'riwayat_kamar') as unknown as SantriKamarRiwayatRow[]);
+    }
+  }
+
   const clear: InStatement[] = [
     stmt(`DELETE FROM absensi`),
     stmt(`DELETE FROM izin`),
@@ -488,6 +518,27 @@ const CHILD_CLEANUP: Record<string, string[]> = {
     `DELETE FROM penjadwalan WHERE kegiatan_id = ?`,
   ],
 };
+
+/** Baca semua tombstone remote → map "table|id" → deleted_at. */
+export async function readTursoTombstones(
+  client: Client
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  try {
+    const res = await client.execute(
+      `SELECT table_name, row_id, deleted_at FROM sync_tombstone`
+    );
+    for (const r of res.rows) {
+      map.set(
+        `${String(r.table_name)}|${String(r.row_id)}`,
+        String(r.deleted_at ?? '')
+      );
+    }
+  } catch {
+    /* tabel belum ada */
+  }
+  return map;
+}
 
 export async function ensureTursoTombstoneTable(client: Client): Promise<void> {
   await client.execute(`CREATE TABLE IF NOT EXISTS sync_tombstone (
