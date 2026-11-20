@@ -10,10 +10,20 @@ import type { OfflineDbSnapshot } from '@/lib/db/snapshot-types';
 import {
   applyTombstonesToTurso,
   countTursoOperationalRows,
+  readDeltaFromTursoTables,
   readSnapshotFromTursoTables,
   writeSnapshotToTursoTables,
 } from '@/lib/sync/turso-relational';
-import { listSyncTombstones } from '@/lib/offline-db';
+import {
+  applyRemoteAppSettings,
+  getSyncMeta,
+  listSyncTombstones,
+  setSyncMeta,
+} from '@/lib/offline-db';
+import {
+  sqlApplyRemoteRows,
+  sqlDeleteRemoteTombstone,
+} from '@/lib/sql-entity-io';
 import { getSessionUser } from '@/lib/app-auth';
 
 export type SyncStatus = {
@@ -209,16 +219,76 @@ function sessionAsramaScope(): string | null {
   return null;
 }
 
-/** Pull dari tabel Turso → lokal. */
+const PULL_CURSOR_KEY = 'pull_cursor';
+const PULL_SCOPE_KEY = 'pull_scope';
+/** Urutan apply agar parent ada sebelum child (FK). */
+const DELTA_APPLY_ORDER = [
+  'kelas',
+  'kegiatan',
+  'kamar',
+  'santri',
+  'penjadwalan_preset',
+  'penjadwalan',
+  'absensi',
+  'izin',
+  'pembinaan',
+  'riwayat_kamar',
+] as const;
+
+/** Terapkan hasil delta pull ke SQLite lokal (upsert, bukan replace). */
+async function applyDeltaLocally(
+  delta: Awaited<ReturnType<typeof readDeltaFromTursoTables>>
+): Promise<number> {
+  let applied = 0;
+  for (const t of DELTA_APPLY_ORDER) {
+    const rows = delta.rows[t];
+    if (rows?.length) applied += await sqlApplyRemoteRows(t, rows);
+  }
+  for (const tb of delta.tombstones) {
+    await sqlDeleteRemoteTombstone(tb.table_name, tb.row_id, tb.deleted_at);
+  }
+  if (delta.settingsPayload) {
+    try {
+      const settings = mergeAppSettings({
+        ...(JSON.parse(delta.settingsPayload) as object),
+        setupSelesai: true,
+      });
+      await applyRemoteAppSettings(settings);
+      applied += 1;
+    } catch {
+      /* payload rusak */
+    }
+  }
+  markOnboardingComplete();
+  await reloadClientApiFromStorage();
+  return applied;
+}
+
+/** Pull dari tabel Turso → lokal (delta setelah baseline pertama). */
 export async function pullFromTurso(): Promise<string> {
   await ensureOnline();
   const client = createTursoClient();
   const counts = await countTursoOperationalRows(client);
+  const scope = sessionAsramaScope();
+  const scopeKey = scope ?? '';
+  const cursor = await getSyncMeta(PULL_CURSOR_KEY);
+  const savedScope = await getSyncMeta(PULL_SCOPE_KEY);
+  const startedAt = new Date().toISOString();
+  // Overlap 30 dtk: toleransi jam device lain yang sedikit lebih lambat.
+  const nextCursor = new Date(Date.now() - 30_000).toISOString();
 
   if (counts.santri > 0 || counts.kamar > 0 || counts.kelas > 0) {
-    const snap = await readSnapshotFromTursoTables(client, sessionAsramaScope());
-    const at = new Date().toISOString();
-    await applyTableSnapshot(snap, at);
+    // Delta pull hanya valid kalau scope sama dengan baseline terakhir.
+    if (cursor && savedScope === scopeKey) {
+      const delta = await readDeltaFromTursoTables(client, cursor, scope);
+      const applied = await applyDeltaLocally(delta);
+      await setSyncMeta(PULL_CURSOR_KEY, nextCursor);
+      return `Pull delta Turso (${applied} baris berubah)`;
+    }
+    const snap = await readSnapshotFromTursoTables(client, scope);
+    await applyTableSnapshot(snap, startedAt);
+    await setSyncMeta(PULL_CURSOR_KEY, nextCursor);
+    await setSyncMeta(PULL_SCOPE_KEY, scopeKey);
     return `Pull tabel Turso (santri=${counts.santri}, kamar=${counts.kamar})`;
   }
 
@@ -353,9 +423,13 @@ export async function runTursoSync(): Promise<SyncStatus> {
   return runWithStatus(() => syncRound());
 }
 
-/** Manual refresh dari cloud. */
+/** Manual refresh dari cloud — full pull (reset kursor delta). */
 export async function runTursoPull(): Promise<SyncStatus> {
-  return runWithStatus(() => pullFromTurso());
+  return runWithStatus(async () => {
+    await setSyncMeta(PULL_CURSOR_KEY, '');
+    await setSyncMeta(PULL_SCOPE_KEY, '');
+    return pullFromTurso();
+  });
 }
 
 /** Simpan → push segera ke Turso. */

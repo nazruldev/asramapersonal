@@ -834,3 +834,105 @@ export async function readSnapshotFromTursoTables(
     settings,
   };
 }
+
+export type TursoDelta = {
+  /** table_name → baris berubah sejak kursor (kolom mentah snake_case). */
+  rows: Record<string, Record<string, unknown>[]>;
+  tombstones: { table_name: string; row_id: string; deleted_at: string }[];
+  settingsPayload: string | null;
+};
+
+const DELTA_TABLES = [
+  'kelas',
+  'kegiatan',
+  'kamar',
+  'santri',
+  'penjadwalan_preset',
+  'penjadwalan',
+  'absensi',
+  'izin',
+  'pembinaan',
+  'riwayat_kamar',
+] as const;
+
+/**
+ * Delta pull: ambil hanya baris dengan updated_at > sinceIso.
+ * Scope asrama diterapkan sama seperti pull penuh.
+ */
+export async function readDeltaFromTursoTables(
+  client: Client,
+  sinceIso: string,
+  asramaScope: string | null
+): Promise<TursoDelta> {
+  const scoped = Boolean(asramaScope);
+  const ownScope = scoped ? `AND (asrama_id = ? OR asrama_id IS NULL)` : '';
+  const childScope = scoped
+    ? `AND santri_id IN (SELECT id FROM santri WHERE asrama_id = ? OR asrama_id IS NULL)`
+    : '';
+  const penjadwalanScope = scoped
+    ? `AND (assignee_santri_id IN (SELECT id FROM santri WHERE asrama_id = ? OR asrama_id IS NULL)
+        OR assignee_kamar_id IN (SELECT id FROM kamar WHERE asrama_id = ? OR asrama_id IS NULL))`
+    : '';
+
+  const scopeFor = (t: string): { sql: string; extraArgs: string[] } => {
+    if (!scoped) return { sql: '', extraArgs: [] };
+    if (t === 'kamar' || t === 'santri')
+      return { sql: ownScope, extraArgs: [String(asramaScope)] };
+    if (t === 'penjadwalan')
+      return {
+        sql: penjadwalanScope,
+        extraArgs: [String(asramaScope), String(asramaScope)],
+      };
+    if (t === 'kelas' || t === 'kegiatan' || t === 'penjadwalan_preset')
+      return { sql: '', extraArgs: [] };
+    return { sql: childScope, extraArgs: [String(asramaScope)] };
+  };
+
+  const rows: Record<string, Record<string, unknown>[]> = {};
+  let total = 0;
+  await Promise.all(
+    DELTA_TABLES.map(async (t) => {
+      const s = scopeFor(t);
+      const res = await client
+        .execute({
+          sql: `SELECT * FROM ${t} WHERE updated_at > ? ${s.sql}`,
+          args: [sinceIso, ...s.extraArgs],
+        })
+        .catch(() => ({ rows: [] as Record<string, unknown>[] }));
+      const list = (res.rows ?? []) as unknown as Record<string, unknown>[];
+      rows[t] = list;
+      total += list.length;
+    })
+  );
+  void total;
+
+  let tombstones: TursoDelta['tombstones'] = [];
+  try {
+    const res = await client.execute({
+      sql: `SELECT table_name, row_id, deleted_at FROM sync_tombstone WHERE deleted_at > ?`,
+      args: [sinceIso],
+    });
+    tombstones = res.rows.map((r) => ({
+      table_name: String(r.table_name),
+      row_id: String(r.row_id),
+      deleted_at: String(r.deleted_at ?? ''),
+    }));
+  } catch {
+    /* tabel belum ada */
+  }
+
+  let settingsPayload: string | null = null;
+  try {
+    const res = await client.execute({
+      sql: `SELECT payload FROM app_settings WHERE id = 'default' AND updated_at > ?`,
+      args: [sinceIso],
+    });
+    settingsPayload = res.rows[0]?.payload
+      ? String(res.rows[0].payload)
+      : null;
+  } catch {
+    /* abaikan */
+  }
+
+  return { rows, tombstones, settingsPayload };
+}

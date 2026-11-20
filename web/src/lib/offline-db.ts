@@ -989,6 +989,20 @@ export async function setSyncMeta(key: string, value: string): Promise<void> {
   });
 }
 
+/** Terapkan settings hasil pull (tanpa replace seluruh snapshot). */
+export async function applyRemoteAppSettings(settings: AppSettings): Promise<void> {
+  await runSqlExclusive(async (db) => {
+    await db.run(`INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)`, [
+      'settings',
+      JSON.stringify(settings),
+    ]);
+    await db.run(`INSERT OR REPLACE INTO sync_meta (key, value) VALUES (?, ?)`, [
+      'settings_updated_at',
+      new Date().toISOString(),
+    ]);
+  });
+}
+
 async function flushKamarTable(db: SQLiteDBConnection, kamar: Record<string, unknown>[]) {
   const snapshotIds = new Set(kamar.map((row) => String(row.id)));
   const existingRes = await db.query(`SELECT id FROM kamar`);

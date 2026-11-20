@@ -72,6 +72,85 @@ async function sqlIdSet(table: 'santri' | 'kamar'): Promise<Set<string>> {
   return withSql((db) => sqlIdSetOnDb(db, table));
 }
 
+function remoteVal(v: unknown): string | number | null {
+  if (v === undefined || v === null) return null;
+  if (typeof v === 'bigint') return Number(v);
+  if (typeof v === 'number' || typeof v === 'string') return v;
+  return String(v);
+}
+
+const tableColsCache = new Map<string, Set<string>>();
+
+async function tableColumns(
+  db: SQLiteDBConnection,
+  table: string
+): Promise<Set<string>> {
+  let cols = tableColsCache.get(table);
+  if (!cols) {
+    const res = await db.query(`PRAGMA table_info(${table})`);
+    cols = new Set(
+      (res.values ?? []).map((r) => String((r as { name: string }).name))
+    );
+    tableColsCache.set(table, cols);
+  }
+  return cols;
+}
+
+/**
+ * Terapkan baris hasil delta-pull ke tabel lokal (upsert).
+ * LWW: baris lokal yang lebih baru tidak ditimpa remote basi.
+ */
+export async function sqlApplyRemoteRows(
+  table: string,
+  rows: Record<string, unknown>[]
+): Promise<number> {
+  if (!rows.length) return 0;
+  return withWrite(async (db) => {
+    const cols = await tableColumns(db, table);
+    let applied = 0;
+    for (const row of rows) {
+      const keys = Object.keys(row).filter(
+        (k) => cols.has(k) && !(k === 'updated_at' && row[k] === undefined)
+      );
+      if (!keys.includes('id') || keys.length < 2) continue;
+      const nonId = keys.filter((k) => k !== 'id');
+      const setClause = nonId.map((c) => `${c} = excluded.${c}`).join(', ');
+      await db
+        .run(
+          `INSERT INTO ${table} (${keys.join(', ')})
+           VALUES (${keys.map(() => '?').join(', ')})
+           ON CONFLICT(id) DO UPDATE SET ${setClause}
+           WHERE ${table}.updated_at IS NULL
+              OR excluded.updated_at IS NULL
+              OR datetime(excluded.updated_at) >= datetime(${table}.updated_at)`,
+          keys.map((k) => remoteVal(row[k]))
+        )
+        .then(() => {
+          applied += 1;
+        })
+        .catch(() => undefined);
+    }
+    return applied;
+  });
+}
+
+/** Hapus baris lokal karena tombstone remote — hanya jika tidak lebih baru. */
+export async function sqlDeleteRemoteTombstone(
+  table: string,
+  rowId: string,
+  deletedAt: string
+): Promise<void> {
+  await withWrite(async (db) => {
+    await db
+      .run(
+        `DELETE FROM ${table} WHERE id = ?
+         AND (updated_at IS NULL OR datetime(updated_at) <= datetime(?))`,
+        [rowId, deletedAt]
+      )
+      .catch(() => undefined);
+  });
+}
+
 /** Pastikan santri ada di tabel induk sebelum absensi/izin/BK (hindari FOREIGN KEY gagal). */
 export async function requireSantriInDatabase(
   santriId: string,
