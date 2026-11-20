@@ -29,14 +29,16 @@ jobs:
         run: Compress-Archive -Path web\dist\* -DestinationPath dist.zip -Force
         shell: pwsh
 
-      # Upload dist.zip dulu ke release (dipakai OTA Android)
-      - name: Upload OTA asset
+      # Build installer Electron TANPA publish (upload digabung di step bawah)
+      - name: Build Electron installer
+        run: npm run build && npx electron-builder --win --publish never
+
+      # Satu step upload semua asset: dist.zip (OTA Android) + installer + latest.yml (auto-update Electron)
+      - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
-          files: dist.zip
-
-      # Build installer Electron + publish ke release yang sama (latest.yml ikut ter-upload)
-      - name: Build & publish Electron
-        run: npm run electron:release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          files: |
+            dist.zip
+            release/*.exe
+            release/*.blockmap
+            release/latest.yml
