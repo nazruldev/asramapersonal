@@ -134,20 +134,6 @@ export async function applyOtaUpdate(info: OtaUpdateInfo): Promise<void> {
   throw lastErr;
 }
 
-/**
- * Update OTA silent: download bundle di background lalu `next()` —
- * bundle baru aktif pada launch berikutnya, tanpa reload paksa.
- * User tetap bisa pakai app; cukup tutup & buka ulang untuk pindah versi.
- */
-export async function downloadOtaSilently(info: OtaUpdateInfo): Promise<void> {
-  const bundle = await CapacitorUpdater.download({
-    url: info.url,
-    version: info.version,
-    checksum: info.checksum,
-  });
-  await CapacitorUpdater.next(bundle);
-}
-
 /** Pesan error yang bisa dibaca user untuk kegagalan OTA. */
 export function otaErrorMessage(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err ?? '');

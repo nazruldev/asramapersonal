@@ -3,8 +3,7 @@
  * Throttle agar tidak spam GitHub API tiap refresh.
  */
 import { create } from 'zustand';
-import { checkOtaUpdateAvailable, downloadOtaSilently, type OtaUpdateInfo } from './app-update';
-import { toast } from './toast';
+import { checkOtaUpdateAvailable, type OtaUpdateInfo } from './app-update';
 
 const MIN_CHECK_INTERVAL_MS = 60_000;
 
@@ -31,16 +30,9 @@ export const useOtaUpdateCheck = create<OtaCheckState>((set, get) => ({
     set({ checking: true });
     try {
       const info = await checkOtaUpdateAvailable();
+      // Versi yang sama yang sudah di-dismiss jangan dimunculkan lagi sesi ini.
       if (info && info.version !== get().dismissedVersion) {
-        // Silent OTA: unduh langsung di background, aktif saat launch berikutnya.
-        // Kalau unduh gagal → jatuh ke popup konfirmasi (info di-set).
-        try {
-          await downloadOtaSilently(info);
-          set({ info: null });
-          toast.success(`Update v${info.version} terunduh — aktif saat aplikasi dibuka ulang`);
-        } catch {
-          set({ info });
-        }
+        set({ info });
       } else if (!info) {
         set({ info: null });
       }
