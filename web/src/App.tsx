@@ -421,8 +421,11 @@ function AppShell() {
               <nav
                 aria-label="Navigasi Bawah"
                 className={cn(
-                  'w-full px-2 sm:px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] flex items-center justify-around',
-                  showMobileAction ? 'max-sm:pt-1.5 pt-2' : 'pt-2'
+                  'w-full px-2 sm:px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] flex items-center justify-around',
+                  showMobileAction &&
+                    (theme === 'dark'
+                      ? 'border-t border-slate-500'
+                      : 'border-t border-slate-300 dark:border-slate-500')
                 )}
               >
                 {navTabs.map((tab) => {

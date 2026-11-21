@@ -9,7 +9,6 @@ import {
   Settings,
   HardDrive,
   ChevronRight,
-  Building2,
   LogOut,
   Camera,
   KeyRound,
@@ -17,7 +16,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { PageWithPullRefresh } from '@/components/page-with-pull-refresh';
-import { AppModal } from '@/components/ui/app-modal';
+import { AppModal, AppModalFooter } from '@/components/ui/app-modal';
 import { Button } from '@/components/ui/button';
 import {
   PIN_MAX_LENGTH,
@@ -26,7 +25,6 @@ import {
   getSessionUser,
   hasModuleAccess,
   pinLengthError,
-  setActiveAsramaId,
   subscribeSessionUser,
 } from '@/lib/app-auth';
 import {
@@ -36,15 +34,10 @@ import {
   setAvatar,
   subscribeAvatar,
 } from '@/lib/app-avatar';
-import {
-  penggunaRoleLabel,
-  type Asrama,
-  type ModulAkses,
-} from '@/lib/app-settings';
-import { appFieldClass, appLabelClass, appSelectClass } from '@/lib/form-styles';
+import { penggunaRoleLabel, type ModulAkses } from '@/lib/app-settings';
+import { appFieldClass, appLabelClass } from '@/lib/form-styles';
 import { appCardClass, appListCardButtonClass, appMutedTextClass } from '@/lib/surface-styles';
 import { toast } from '@/lib/toast';
-import { useAppStore } from '@/store/app-store';
 import { cn } from '@/lib/utils';
 
 const BUILD_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev';
@@ -68,13 +61,12 @@ const MENU_LAINNYA: MenuLink[] = [
 
 export default function Profil() {
   const navigate = useNavigate();
-  const reloadAll = useAppStore((s) => s.reloadAll);
   const [user, setUser] = useState(() => getSessionUser());
   const [avatar, setAvatarState] = useState<string | null>(() => getAvatar(getSessionUser()?.id));
   const [avatarOpen, setAvatarOpen] = useState(false);
+  const [pinOpen, setPinOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [asramaList, setAsramaList] = useState<Asrama[]>([]);
   const [pinLama, setPinLama] = useState('');
   const [pinBaru, setPinBaru] = useState('');
   const [pinUlang, setPinUlang] = useState('');
@@ -105,23 +97,18 @@ export default function Profil() {
 
   useEffect(() => subscribeAvatar(() => setAvatarState(getAvatar(getSessionUser()?.id))), []);
 
-  useEffect(() => {
-    void fetch('/api/asrama')
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data) => setAsramaList(data as Asrama[]))
-      .catch(() => setAsramaList([]));
-  }, []);
-
-  const dibatasiTugas =
-    user && user.role !== 'super_admin' && user.asramaIds.length > 0;
-  const asramaOptions = dibatasiTugas
-    ? asramaList.filter((a) => user.asramaIds.includes(a.id))
-    : asramaList;
-  const bisaPilihSemua = !user || user.role !== 'pengawas';
-  const activeAsrama =
-    user?.activeAsramaId ?? (asramaOptions.length === 1 ? (asramaOptions[0]?.id ?? null) : null);
-
   const links = MENU_LAINNYA.filter((l) => !l.modul || hasModuleAccess(user, l.modul));
+
+  const resetPinForm = () => {
+    setPinLama('');
+    setPinBaru('');
+    setPinUlang('');
+  };
+
+  const closePinSheet = () => {
+    setPinOpen(false);
+    resetPinForm();
+  };
 
   const pilihFoto = async (file: File | null) => {
     if (!file) return;
@@ -165,9 +152,7 @@ export default function Profil() {
         return;
       }
       toast.success('PIN berhasil diganti');
-      setPinLama('');
-      setPinBaru('');
-      setPinUlang('');
+      closePinSheet();
     } finally {
       setSavingPin(false);
     }
@@ -204,126 +189,57 @@ export default function Profil() {
         </div>
       </section>
 
-      {/* Asrama aktif */}
-      {asramaOptions.length > 1 || (bisaPilihSemua && asramaOptions.length >= 1) ? (
-        <section className={cn(appCardClass, 'p-4 space-y-2')}>
-          <p className="flex items-center gap-1.5 text-xs font-bold text-slate-900 dark:text-slate-50">
-            <Building2 className="w-3.5 h-3.5 text-emerald-600" />
-            Asrama aktif
-          </p>
-          <select
-            className={cn(appSelectClass, 'h-10')}
-            value={activeAsrama ?? ''}
-            onChange={(e) => {
-              const next = e.target.value || null;
-              void (async () => {
-                try {
-                  await setActiveAsramaId(next);
-                  await reloadAll();
-                } catch (err) {
-                  toast.error(
-                    err instanceof Error ? err.message : 'Gagal sync setelah ganti asrama'
-                  );
-                }
-              })();
-            }}
-          >
-            {bisaPilihSemua && <option value="">Semua asrama</option>}
-            {asramaOptions.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.nama}
-              </option>
-            ))}
-          </select>
-        </section>
-      ) : null}
-
-      {/* Ganti PIN */}
-      <section className={cn(appCardClass, 'p-4 space-y-3')}>
-        <p className="flex items-center gap-1.5 text-xs font-bold text-slate-900 dark:text-slate-50">
-          <KeyRound className="w-3.5 h-3.5 text-emerald-600" />
-          Ganti PIN
-        </p>
-        <div>
-          <label className={appLabelClass}>PIN saat ini</label>
-          <input
-            type="password"
-            inputMode="numeric"
-            maxLength={PIN_MAX_LENGTH}
-            className={appFieldClass}
-            value={pinLama}
-            onChange={(e) => setPinLama(clampPinInput(e.target.value))}
-            placeholder="PIN lama"
-          />
-        </div>
-        <div>
-          <label className={appLabelClass}>PIN baru</label>
-          <input
-            type="password"
-            inputMode="numeric"
-            maxLength={PIN_MAX_LENGTH}
-            className={appFieldClass}
-            value={pinBaru}
-            onChange={(e) => setPinBaru(clampPinInput(e.target.value))}
-            placeholder={`${PIN_MIN_LENGTH}–${PIN_MAX_LENGTH} digit`}
-          />
-        </div>
-        <div>
-          <label className={appLabelClass}>Ulangi PIN baru</label>
-          <input
-            type="password"
-            inputMode="numeric"
-            maxLength={PIN_MAX_LENGTH}
-            className={appFieldClass}
-            value={pinUlang}
-            onChange={(e) => setPinUlang(clampPinInput(e.target.value))}
-            placeholder="Ketik ulang PIN baru"
-          />
-        </div>
-        <Button
-          type="button"
-          onClick={() => void gantiPin()}
-          disabled={savingPin || !pinLama || !pinBaru}
-          className="w-full"
-        >
-          {savingPin ? 'Menyimpan…' : 'Simpan PIN Baru'}
-        </Button>
-      </section>
-
       {/* Menu lainnya */}
-      {links.length > 0 ? (
-        <section className="space-y-2">
-          <p className="px-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-            Menu lainnya
-          </p>
-          <div className="space-y-2">
-            {links.map((link) => {
-              const Icon = link.icon;
-              return (
-                <button
-                  key={link.path}
-                  type="button"
-                  onClick={() => navigate(link.path)}
-                  className={cn(appListCardButtonClass, 'flex items-center gap-3 space-y-0')}
-                >
-                  <span className="w-9 h-9 rounded-sm bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
-                    <Icon className="w-4.5 h-4.5" strokeWidth={2.25} />
+      <section className="space-y-2">
+        <p className="px-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          Menu lainnya
+        </p>
+        <div className="space-y-2">
+          <button
+            type="button"
+            onClick={() => setPinOpen(true)}
+            className={cn(appListCardButtonClass, 'flex items-center gap-3 space-y-0')}
+          >
+            <span className="w-9 h-9 rounded-sm bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+              <KeyRound className="w-4.5 h-4.5" strokeWidth={2.25} />
+            </span>
+            <span className="flex-1 min-w-0 text-left">
+              <span className="block text-xs font-bold text-slate-900 dark:text-slate-50 leading-tight">
+                Ganti PIN
+              </span>
+              <span className={cn(appMutedTextClass, 'block text-[11px] leading-snug mt-0.5')}>
+                Ubah PIN login akun ini.
+              </span>
+            </span>
+            <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+          </button>
+
+          {links.map((link) => {
+            const Icon = link.icon;
+            return (
+              <button
+                key={link.path}
+                type="button"
+                onClick={() => navigate(link.path)}
+                className={cn(appListCardButtonClass, 'flex items-center gap-3 space-y-0')}
+              >
+                <span className="w-9 h-9 rounded-sm bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                  <Icon className="w-4.5 h-4.5" strokeWidth={2.25} />
+                </span>
+                <span className="flex-1 min-w-0 text-left">
+                  <span className="block text-xs font-bold text-slate-900 dark:text-slate-50 leading-tight">
+                    {link.label}
                   </span>
-                  <span className="flex-1 min-w-0 text-left">
-                    <span className="block text-xs font-bold text-slate-900 dark:text-slate-50 leading-tight">
-                      {link.label}
-                    </span>
-                    <span className={cn(appMutedTextClass, 'block text-[11px] leading-snug mt-0.5')}>
-                      {link.desc}
-                    </span>
+                  <span className={cn(appMutedTextClass, 'block text-[11px] leading-snug mt-0.5')}>
+                    {link.desc}
                   </span>
-                  <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
-                </button>
-              );
-            })}
-          </div>
-        </section>
-      ) : null}
+                </span>
+                <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+              </button>
+            );
+          })}
+        </div>
+      </section>
 
       {/* Ganti akun */}
       <button
@@ -341,6 +257,71 @@ export default function Profil() {
       <p className="pt-2 pb-1 text-center text-[11px] text-slate-400 dark:text-slate-500">
         AsramaPersonal · Versi {appVersion}
       </p>
+
+      {/* Sheet ganti PIN */}
+      <AppModal
+        open={pinOpen}
+        onClose={closePinSheet}
+        title="Ganti PIN"
+        description="Masukkan PIN lama dan PIN baru."
+        footer={
+          <AppModalFooter>
+            <Button type="button" variant="outline" className="flex-1" onClick={closePinSheet}>
+              Batal
+            </Button>
+            <Button
+              type="button"
+              className="flex-1"
+              onClick={() => void gantiPin()}
+              disabled={savingPin || !pinLama || !pinBaru || !pinUlang}
+            >
+              {savingPin ? 'Menyimpan…' : 'Simpan'}
+            </Button>
+          </AppModalFooter>
+        }
+      >
+        <div className="p-4 space-y-3">
+          <div>
+            <label className={appLabelClass}>PIN saat ini</label>
+            <input
+              type="password"
+              inputMode="numeric"
+              maxLength={PIN_MAX_LENGTH}
+              className={appFieldClass}
+              value={pinLama}
+              onChange={(e) => setPinLama(clampPinInput(e.target.value))}
+              placeholder="PIN lama"
+              autoComplete="current-password"
+            />
+          </div>
+          <div>
+            <label className={appLabelClass}>PIN baru</label>
+            <input
+              type="password"
+              inputMode="numeric"
+              maxLength={PIN_MAX_LENGTH}
+              className={appFieldClass}
+              value={pinBaru}
+              onChange={(e) => setPinBaru(clampPinInput(e.target.value))}
+              placeholder={`${PIN_MIN_LENGTH}–${PIN_MAX_LENGTH} digit`}
+              autoComplete="new-password"
+            />
+          </div>
+          <div>
+            <label className={appLabelClass}>Ulangi PIN baru</label>
+            <input
+              type="password"
+              inputMode="numeric"
+              maxLength={PIN_MAX_LENGTH}
+              className={appFieldClass}
+              value={pinUlang}
+              onChange={(e) => setPinUlang(clampPinInput(e.target.value))}
+              placeholder="Ketik ulang PIN baru"
+              autoComplete="new-password"
+            />
+          </div>
+        </div>
+      </AppModal>
 
       {/* Modal avatar */}
       <AppModal

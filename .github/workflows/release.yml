@@ -21,9 +21,20 @@ jobs:
 
       - run: npm ci
 
-      # Build web bundle → zip → asset OTA untuk Android (Capacitor Updater)
+      # Vite membekukan VITE_* saat build — wajib diisi di GitHub Secrets,
+      # kalau kosong APK/OTA/Electron tidak bisa sambung Turso.
       - name: Build web bundle
-        run: npm run build
+        env:
+          VITE_TURSO_DATABASE_URL: ${{ secrets.VITE_TURSO_DATABASE_URL }}
+          VITE_TURSO_AUTH_TOKEN: ${{ secrets.VITE_TURSO_AUTH_TOKEN }}
+          VITE_ABLY_API_KEY: ${{ secrets.VITE_ABLY_API_KEY }}
+        run: |
+          if [ -z "$VITE_TURSO_DATABASE_URL" ] || [ -z "$VITE_TURSO_AUTH_TOKEN" ]; then
+            echo "::error::Secret VITE_TURSO_DATABASE_URL / VITE_TURSO_AUTH_TOKEN kosong. Isi di Settings → Secrets."
+            exit 1
+          fi
+          npm run build
+        shell: bash
 
       # WAJIB pakai Capgo CLI — Compress-Archive/PowerShell menghasilkan zip
       # dengan EXT descriptor yang gagal di-unzip Java/Android (Capgo known issue).
@@ -36,6 +47,10 @@ jobs:
 
       # Build installer Electron TANPA publish (upload digabung di step bawah)
       - name: Build Electron installer
+        env:
+          VITE_TURSO_DATABASE_URL: ${{ secrets.VITE_TURSO_DATABASE_URL }}
+          VITE_TURSO_AUTH_TOKEN: ${{ secrets.VITE_TURSO_AUTH_TOKEN }}
+          VITE_ABLY_API_KEY: ${{ secrets.VITE_ABLY_API_KEY }}
         run: npm run build && npx electron-builder --win --publish never
 
       # Satu step upload semua asset: dist.zip (OTA Android) + installer + latest.yml (auto-update Electron)
