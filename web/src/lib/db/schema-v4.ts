@@ -5,10 +5,10 @@ export const SCHEMA_V4_SQL = `
     id          TEXT PRIMARY KEY,
     nama        TEXT NOT NULL,
     tingkat     TEXT NOT NULL CHECK (tingkat IN ('MTS', 'ALIYAH')),
+    created_by  TEXT,
+    updated_by  TEXT,
     UNIQUE (tingkat, nama)
-  
-    created_by          TEXT,
-    updated_by          TEXT,);
+  );
 
   CREATE TABLE IF NOT EXISTS kegiatan (
     id                  TEXT PRIMARY KEY,
@@ -20,10 +20,10 @@ export const SCHEMA_V4_SQL = `
     waktu               TEXT,
     urutan              INTEGER NOT NULL DEFAULT 0,
     untuk_absensi       INTEGER NOT NULL DEFAULT 0 CHECK (untuk_absensi IN (0, 1)),
-    hari_aktif_json     TEXT
-  
+    hari_aktif_json     TEXT,
     created_by          TEXT,
-    updated_by          TEXT,);
+    updated_by          TEXT
+  );
 
   CREATE TABLE IF NOT EXISTS kamar (
     id                  TEXT PRIMARY KEY,
@@ -32,10 +32,10 @@ export const SCHEMA_V4_SQL = `
     lantai              TEXT,
     ketua_santri_id     TEXT,
     fasilitas_json      TEXT,
-    asrama_id           TEXT
-  
+    asrama_id           TEXT,
     created_by          TEXT,
-    updated_by          TEXT,);
+    updated_by          TEXT
+  );
 
   CREATE TABLE IF NOT EXISTS santri (
     id                      TEXT PRIMARY KEY,
@@ -60,8 +60,8 @@ export const SCHEMA_V4_SQL = `
     asal_desa_nama          TEXT,
     asrama_id               TEXT,
     created_at              TEXT NOT NULL DEFAULT (datetime('now')),
-    created_by          TEXT,
-    updated_by          TEXT,
+    created_by              TEXT,
+    updated_by              TEXT,
     updated_at              TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -101,15 +101,15 @@ export const SCHEMA_V4_SQL = `
     catatan             TEXT,
     generated_at        TEXT NOT NULL,
     generate_batch_id   TEXT,
+    created_by          TEXT,
+    updated_by          TEXT,
     CHECK (length(trim(assignee_nama)) > 0),
     CHECK (
       (mode = 'santri' AND assignee_santri_id IS NOT NULL AND assignee_kamar_id IS NULL)
       OR
       (mode = 'kamar' AND assignee_kamar_id IS NOT NULL AND assignee_santri_id IS NULL)
     )
-  
-    created_by          TEXT,
-    updated_by          TEXT,);
+  );
 
   CREATE UNIQUE INDEX IF NOT EXISTS uq_penjadwalan_slot
     ON penjadwalan (jenis, tanggal, mode);
@@ -134,10 +134,10 @@ export const SCHEMA_V4_SQL = `
     kegiatan_id     TEXT NOT NULL REFERENCES kegiatan(id) ON DELETE RESTRICT,
     tanggal         TEXT NOT NULL,
     status          TEXT NOT NULL CHECK (status IN ('Hadir', 'Alpa', 'Izin', 'Sakit')),
-    catatan         TEXT
-  
-    created_by          TEXT,
-    updated_by          TEXT,);
+    catatan         TEXT,
+    created_by      TEXT,
+    updated_by      TEXT
+  );
 
   CREATE UNIQUE INDEX IF NOT EXISTS uq_absensi_hari
     ON absensi (santri_id, kegiatan_id, tanggal);
@@ -152,8 +152,8 @@ export const SCHEMA_V4_SQL = `
       CHECK (status_kembali IN ('Belum', 'Sudah')),
     penjemput               TEXT,
     waktu_kembali_aktual    TEXT,
-    created_by          TEXT,
-    updated_by          TEXT,
+    created_by              TEXT,
+    updated_by              TEXT,
     created_at              TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -164,8 +164,8 @@ export const SCHEMA_V4_SQL = `
     keterangan      TEXT NOT NULL,
     tanggal         TEXT NOT NULL,
     tindak_lanjut   TEXT,
-    created_by          TEXT,
-    updated_by          TEXT,
+    created_by      TEXT,
+    updated_by      TEXT,
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -177,10 +177,10 @@ export const SCHEMA_V4_SQL = `
     kamar_sebelumnya_id     TEXT REFERENCES kamar(id) ON DELETE SET NULL,
     kamar_sebelumnya_nama   TEXT,
     tipe                    TEXT NOT NULL CHECK (tipe IN ('masuk', 'pindah', 'keluar', 'ketua')),
-    tanggal                 TEXT NOT NULL
-  
-    created_by          TEXT,
-    updated_by          TEXT,);
+    tanggal                 TEXT NOT NULL,
+    created_by              TEXT,
+    updated_by              TEXT
+  );
 
   CREATE TABLE IF NOT EXISTS tagihan_jenis (
     id                  TEXT PRIMARY KEY,

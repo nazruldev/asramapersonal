@@ -78,7 +78,7 @@ export function AppLoginGate({ onSuccess }: { onSuccess: () => void }) {
           <div>
             <h1 className="text-base font-bold text-slate-900 dark:text-white">Pengelola Asrama</h1>
             <p className="text-[11px] text-slate-500 dark:text-slate-300">
-              {mode === 'login' ? 'Pilih akun lalu masukkan PIN' : 'Lupa kata sandi'}
+              {mode === 'login' ? 'OTA v0.2.2 · Pilih akun lalu masukkan PIN' : 'Lupa kata sandi'}
             </p>
           </div>
         </div>
