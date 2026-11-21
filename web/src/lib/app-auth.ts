@@ -2,6 +2,23 @@ import type { ModulAkses, Pengguna, PenggunaRole } from './app-settings';
 
 export const DEFAULT_APP_PASSWORD = '12345';
 
+/** Panjang PIN / kata sandi akun (login & manajemen pengguna). */
+export const PIN_MIN_LENGTH = 4;
+export const PIN_MAX_LENGTH = 6;
+
+/** Null jika valid; pesan error jika terlalu pendek/panjang. */
+export function pinLengthError(pin: string): string | null {
+  const len = pin.trim().length;
+  if (len < PIN_MIN_LENGTH) return `PIN minimal ${PIN_MIN_LENGTH} digit`;
+  if (len > PIN_MAX_LENGTH) return `PIN maksimal ${PIN_MAX_LENGTH} digit`;
+  return null;
+}
+
+/** Batasi input PIN ke digit saja, max PIN_MAX_LENGTH. */
+export function clampPinInput(value: string): string {
+  return value.replace(/\D/g, '').slice(0, PIN_MAX_LENGTH);
+}
+
 /** Hash sinkron untuk penyimpanan lokal (bukan keamanan server). */
 export function hashSecretSync(value: string): string {
   const normalized = normalizeAnswer(value);
@@ -208,14 +225,15 @@ export function getSessionUser(): SessionUser | null {
   }
 }
 
-export function setActiveAsramaId(asramaId: string | null): void {
+export async function setActiveAsramaId(asramaId: string | null): Promise<void> {
   const user = getSessionUser();
   if (!user) return;
   setSessionUser({ ...user, activeAsramaId: asramaId });
-  // Scope asrama berubah → sinkronkan ulang agar data lokal ikut scope baru.
-  void import('@/lib/sync/turso-sync')
-    .then((m) => m.runTursoSync())
-    .catch(() => undefined);
+  // Scope asrama berubah → pull ulang dari Turso sesuai scope (wajib online).
+  const { runTursoSync } = await import('@/lib/sync/turso-sync');
+  await runTursoSync();
+  const { pullPembayaranFromTurso } = await import('@/lib/pembayaran-store');
+  await pullPembayaranFromTurso();
 }
 
 /** Super admin selalu punya akses penuh; pengawas dibatasi checklist modul. */

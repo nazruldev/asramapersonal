@@ -1,125 +1,168 @@
-import { useCallback, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useOtaUpdateCheck } from '@/lib/ota-update-check';
+import { getPagePullRefresh } from '@/lib/page-pull-refresh';
 
 type Props = {
-  onRefresh: () => Promise<void>;
-  children: ReactNode;
-  className?: string;
-  disabled?: boolean;
+  /** Area scroll utama (main). */
+  scrollRef: RefObject<HTMLElement | null>;
+  /** Shell yang membungkus header + main — gesture & indikator di sini. */
+  shellRef: RefObject<HTMLElement | null>;
 };
 
-const THRESHOLD_PX = 72;
-const INDICATOR_SIZE = 36;
+/** Tarik sejauh ini dulu baru PTR mengunci gesture (hindari salah picu). */
+const ACTIVATION_PX = 28;
+/** Jarak teredam (setelah damping) untuk memicu refresh. */
+const THRESHOLD_PX = 52;
+const MAX_PULL_PX = 88;
+const INDICATOR_SIZE = 32;
+/** Redam jarak jari → jarak indikator (kurang agresif). */
+const DAMPING = 0.4;
 
-/** Cek apakah area scroll (biasanya `<main>`) masih di atas — untuk PTR tanpa nested scroll. */
-function scrollParentOffsetTop(el: HTMLElement): number {
-  let node: HTMLElement | null = el;
-  while (node) {
-    const { overflowY } = getComputedStyle(node);
-    const canScroll =
-      (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay') &&
-      node.scrollHeight > node.clientHeight + 1;
-    if (canScroll) return node.scrollTop;
-    node = node.parentElement;
-  }
-  return 0;
+function scrollTopOf(el: HTMLElement | null): number {
+  return el?.scrollTop ?? 0;
 }
 
-export function PullToRefresh({ onRefresh, children, className, disabled }: Props) {
+/**
+ * Pull-to-refresh level shell: indikator di status bar/header,
+ * tidak menggeser konten halaman, gesture lebih redam.
+ */
+export function ShellPullToRefresh({ scrollRef, shellRef }: Props) {
   const [pull, setPull] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const startY = useRef(0);
-  const pulling = useRef(false);
+  const armed = useRef(false);
+  const engaged = useRef(false);
   const pullRef = useRef(0);
   const refreshingRef = useRef(false);
 
   const runRefresh = useCallback(async () => {
-    if (refreshingRef.current || disabled) return;
+    if (refreshingRef.current) return;
+    const { handler, disabled } = getPagePullRefresh();
+    if (disabled || !handler) return;
+
     refreshingRef.current = true;
     setRefreshing(true);
     try {
-      await onRefresh();
-      // Sekalian cek update OTA (di-non-native otomatis no-op).
+      await handler();
       void useOtaUpdateCheck.getState().check();
     } finally {
       refreshingRef.current = false;
       setRefreshing(false);
       setPull(0);
       pullRef.current = 0;
+      engaged.current = false;
     }
-  }, [disabled, onRefresh]);
+  }, []);
 
-  const onTouchStart = (e: React.TouchEvent) => {
-    if (disabled || refreshingRef.current) return;
-    const el = e.currentTarget as HTMLElement;
-    if (scrollParentOffsetTop(el) > 0) return;
-    startY.current = e.touches[0]?.clientY ?? 0;
-    pulling.current = true;
-  };
+  useEffect(() => {
+    const shell = shellRef.current;
+    if (!shell) return;
 
-  const onTouchMove = (e: React.TouchEvent) => {
-    if (!pulling.current || disabled || refreshingRef.current) return;
-    const y = e.touches[0]?.clientY ?? 0;
-    const delta = Math.max(0, y - startY.current);
-    const next = Math.min(delta, THRESHOLD_PX * 1.4);
-    pullRef.current = next;
-    setPull(next);
-  };
-
-  const onTouchEnd = () => {
-    if (!pulling.current) return;
-    pulling.current = false;
-    const released = pullRef.current;
-    if (released >= THRESHOLD_PX) {
-      void runRefresh();
-    } else {
+    const reset = () => {
+      armed.current = false;
+      engaged.current = false;
       pullRef.current = 0;
       setPull(0);
-    }
-  };
+    };
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (refreshingRef.current) return;
+      const { disabled, handler } = getPagePullRefresh();
+      if (disabled || !handler) return;
+
+      if (scrollTopOf(scrollRef.current) > 0) return;
+
+      startY.current = e.touches[0]?.clientY ?? 0;
+      armed.current = true;
+      engaged.current = false;
+      pullRef.current = 0;
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (!armed.current || refreshingRef.current) return;
+      if (scrollTopOf(scrollRef.current) > 0) {
+        reset();
+        return;
+      }
+
+      const y = e.touches[0]?.clientY ?? 0;
+      const raw = Math.max(0, y - startY.current);
+      if (raw <= 0) {
+        if (engaged.current) {
+          pullRef.current = 0;
+          setPull(0);
+          engaged.current = false;
+        }
+        return;
+      }
+
+      if (!engaged.current) {
+        if (raw < ACTIVATION_PX) return;
+        engaged.current = true;
+      }
+
+      if (e.cancelable) e.preventDefault();
+      // Rubber-band: jari jauh, indikator bergerak pelan.
+      const damped = Math.min(MAX_PULL_PX, (raw - ACTIVATION_PX) * DAMPING);
+      pullRef.current = damped;
+      setPull(damped);
+    };
+
+    const onTouchEnd = () => {
+      if (!armed.current) return;
+      const released = pullRef.current;
+      const wasEngaged = engaged.current;
+      armed.current = false;
+      engaged.current = false;
+
+      if (wasEngaged && released >= THRESHOLD_PX) {
+        void runRefresh();
+      } else {
+        pullRef.current = 0;
+        setPull(0);
+      }
+    };
+
+    shell.addEventListener('touchstart', onTouchStart, { passive: true, capture: true });
+    shell.addEventListener('touchmove', onTouchMove, { passive: false, capture: true });
+    shell.addEventListener('touchend', onTouchEnd, { capture: true });
+    shell.addEventListener('touchcancel', onTouchEnd, { capture: true });
+    return () => {
+      shell.removeEventListener('touchstart', onTouchStart, true);
+      shell.removeEventListener('touchmove', onTouchMove, true);
+      shell.removeEventListener('touchend', onTouchEnd, true);
+      shell.removeEventListener('touchcancel', onTouchEnd, true);
+    };
+  }, [runRefresh, scrollRef, shellRef]);
 
   const progress = Math.min(1, pull / THRESHOLD_PX);
-  const visible = pull > 4 || refreshing;
-  // Posisi indikator: muncul dari atas mengikuti tarikan, menetap saat refresh.
-  const indicatorY = refreshing ? 12 : -INDICATOR_SIZE + Math.min(pull, THRESHOLD_PX) * 0.7;
-  const contentShift = refreshing ? INDICATOR_SIZE + 20 : pull * 0.5;
+  const visible = pull > 6 || refreshing;
+  const indicatorY = refreshing
+    ? 10
+    : -INDICATOR_SIZE + 8 + Math.min(pull, THRESHOLD_PX) * 0.55;
 
   return (
     <div
-      className="relative w-full min-h-0 overflow-hidden"
-      onTouchStart={onTouchStart}
-      onTouchMove={onTouchMove}
-      onTouchEnd={onTouchEnd}
-      onTouchCancel={onTouchEnd}
+      className={cn(
+        'pointer-events-none absolute left-1/2 z-[60] flex items-center justify-center rounded-full border border-slate-200 bg-white shadow-md dark:border-slate-700 dark:bg-slate-800',
+        visible ? 'opacity-100' : 'opacity-0',
+        refreshing ? 'transition-all duration-200' : 'transition-[opacity,transform] duration-150'
+      )}
+      style={{
+        width: INDICATOR_SIZE,
+        height: INDICATOR_SIZE,
+        top: 'max(0.35rem, env(safe-area-inset-top))',
+        transform: `translate(-50%, ${indicatorY}px) scale(${refreshing ? 1 : 0.55 + progress * 0.45})`,
+      }}
+      aria-live="polite"
+      aria-hidden={!visible}
     >
-      {/* Indikator spinner melayang di atas konten (pola umum PTR). */}
-      <div
-        className={cn(
-          'pointer-events-none absolute left-1/2 top-0 z-20 flex items-center justify-center rounded-full border border-slate-200 bg-white shadow-md dark:border-slate-700 dark:bg-slate-800',
-          visible ? 'opacity-100' : 'opacity-0',
-          pulling.current ? 'transition-none' : 'transition-all duration-200',
-        )}
-        style={{
-          width: INDICATOR_SIZE,
-          height: INDICATOR_SIZE,
-          transform: `translate(-50%, ${indicatorY}px) scale(${refreshing ? 1 : 0.5 + progress * 0.5})`,
-        }}
-        aria-live="polite"
-        aria-hidden={!visible}
-      >
-        <RefreshCw
-          className={cn('size-4 text-slate-600 dark:text-slate-300', refreshing && 'animate-spin')}
-          style={refreshing ? undefined : { transform: `rotate(${progress * 360}deg)` }}
-        />
-      </div>
-      <div
-        className={cn('w-full', pulling.current ? 'transition-none' : 'transition-transform duration-200', className)}
-        style={{ transform: `translateY(${contentShift}px)` }}
-      >
-        {children}
-      </div>
+      <RefreshCw
+        className={cn('size-3.5 text-slate-600 dark:text-slate-300', refreshing && 'animate-spin')}
+        style={refreshing ? undefined : { transform: `rotate(${progress * 280}deg)` }}
+      />
     </div>
   );
 }

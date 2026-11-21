@@ -118,7 +118,7 @@ export default function PembinaanDetail() {
   const nomorWali = santri?.nomor_wali?.trim() || '';
 
   const ketuaKamar = useMemo(() => {
-    if (!displayKamar || displayKamar === '-') return 'Belum ada kamar';
+    if (!displayKamar || displayKamar === '-') return 'Tanpa kamar';
     const kamar = (kamarList as { nama?: string; ketua?: string }[]).find(
       (k) => k.nama === displayKamar
     );

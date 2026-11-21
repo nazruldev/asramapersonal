@@ -11,6 +11,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { BottomPicker } from '@/components/ui/bottom-picker';
+import {
+  PIN_MAX_LENGTH,
+  PIN_MIN_LENGTH,
+  clampPinInput,
+  pinLengthError,
+} from '@/lib/app-auth';
 import { DEFAULT_APP_SETTINGS } from '@/lib/app-settings';
 import { DEFAULT_KELAS_SEED } from '@/lib/kelas-defaults';
 import {
@@ -84,8 +90,9 @@ export function AppSetupWizard({ onComplete }: Props) {
       return;
     }
     if (step === 2) {
-      if (newPassword.length < 4) {
-        toast.error('Kata sandi minimal 4 karakter');
+      const pwdErr = pinLengthError(newPassword);
+      if (pwdErr) {
+        toast.error(pwdErr.replace(/^PIN/, 'Kata sandi'));
         return;
       }
       if (newPassword !== confirmPassword) {
@@ -187,13 +194,17 @@ export function AppSetupWizard({ onComplete }: Props) {
               Buat kata sandi untuk membuka aplikasi. Simpan dengan aman — Anda bisa mengubahnya lagi di Pengaturan.
             </p>
             <div className="space-y-1.5">
-              <Label htmlFor="setup-pass" className="text-xs">Kata sandi baru</Label>
+              <Label htmlFor="setup-pass" className="text-xs">
+                Kata sandi baru ({PIN_MIN_LENGTH}–{PIN_MAX_LENGTH} digit)
+              </Label>
               <Input
                 id="setup-pass"
                 type="password"
+                inputMode="numeric"
+                maxLength={PIN_MAX_LENGTH}
                 autoComplete="new-password"
                 value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
+                onChange={(e) => setNewPassword(clampPinInput(e.target.value))}
               />
             </div>
             <div className="space-y-1.5">
@@ -201,9 +212,11 @@ export function AppSetupWizard({ onComplete }: Props) {
               <Input
                 id="setup-pass2"
                 type="password"
+                inputMode="numeric"
+                maxLength={PIN_MAX_LENGTH}
                 autoComplete="new-password"
                 value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
+                onChange={(e) => setConfirmPassword(clampPinInput(e.target.value))}
                 onKeyDown={(e) => e.key === 'Enter' && goNext()}
               />
             </div>

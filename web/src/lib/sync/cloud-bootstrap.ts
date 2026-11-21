@@ -12,10 +12,21 @@ export function isTursoConfigured(): boolean {
   return Boolean(url && token);
 }
 
+/** Mode full-online: Turso adalah satu-satunya sumber kebenaran. */
+export function isTursoCloudAuthority(): boolean {
+  return isTursoConfigured();
+}
+
 function tursoClient() {
   const url = (import.meta.env.VITE_TURSO_DATABASE_URL as string).trim();
   const authToken = (import.meta.env.VITE_TURSO_AUTH_TOKEN as string).trim();
   return createClient({ url, authToken });
+}
+
+function assertOnline(): void {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    throw new Error('Internet wajib. Aplikasi hanya berjalan online ke Turso.');
+  }
 }
 
 async function pullRemoteSettings(): Promise<AppSettings | null> {
@@ -37,6 +48,7 @@ async function pullRemoteSettings(): Promise<AppSettings | null> {
 /** Push settings ke Turso (cepat, tanpa full snapshot). */
 export async function pushSettingsToTurso(settings: AppSettings): Promise<void> {
   if (!isTursoConfigured()) return;
+  assertOnline();
   const client = tursoClient();
   const payload = JSON.stringify(mergeAppSettings({ ...settings, setupSelesai: true }));
   const updatedAt = new Date().toISOString();
@@ -56,28 +68,20 @@ export type CloudBootstrapResult = {
 };
 
 /**
- * Offline-first boot: sync Turso best-effort.
- * Gagal/offline → lanjut data lokal; auto-sync mengejar saat online.
+ * Full-online boot: wajib Turso + internet.
+ * Pull cloud dulu (seed lokal hanya jika tabel cloud kosong).
+ * Gagal → throw (UI cloudBlocked).
  */
 export async function bootstrapFromCloud(): Promise<CloudBootstrapResult> {
   if (!isTursoConfigured()) {
-    return { cloudMode: false, appliedRemote: false };
+    throw new Error('Turso wajib. Isi VITE_TURSO_DATABASE_URL dan VITE_TURSO_AUTH_TOKEN.');
   }
 
+  assertOnline();
   markOnboardingComplete();
 
-  let syncOk = true;
-  if (typeof navigator !== 'undefined' && !navigator.onLine) {
-    syncOk = false;
-  } else {
-    const { runTursoSync } = await import('@/lib/sync/turso-sync');
-    try {
-      await runTursoSync();
-    } catch (err) {
-      console.warn('[boot] sync cloud gagal, lanjut offline lokal:', err);
-      syncOk = false;
-    }
-  }
+  const { runCloudBootstrap } = await import('@/lib/sync/turso-sync');
+  await runCloudBootstrap();
 
   const remote = await pullRemoteSettings();
   if (remote) {
@@ -86,5 +90,5 @@ export async function bootstrapFromCloud(): Promise<CloudBootstrapResult> {
   }
 
   await applySettingsFromCloud(mergeAppSettings({ setupSelesai: true }));
-  return { cloudMode: true, appliedRemote: false, error: syncOk ? undefined : 'offline' };
+  return { cloudMode: true, appliedRemote: false };
 }

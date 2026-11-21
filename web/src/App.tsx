@@ -64,9 +64,11 @@ import {
 import { HeaderAddButton } from './components/header-action-button';
 import { Plus } from 'lucide-react';
 import { AppBootLoading } from './components/app-boot-loading';
+import { AppOnlineGate } from './components/app-online-gate';
 import { toast } from './lib/toast';
 import { useAndroidBackButton } from './hooks/use-android-back-button';
 import { subscribeSyncStatus } from './lib/sync/turso-sync';
+import { ShellPullToRefresh } from './components/pull-to-refresh';
 
 function AppShell() {
   useKeyboardInset();
@@ -77,11 +79,15 @@ function AppShell() {
   const { theme, toggleTheme } = useTheme();
   const [isScrolled, setIsScrolled] = useState(false);
   const [unlocked, setUnlocked] = useState(() => isAuthenticatedSession());
+  const shellRef = useRef<HTMLDivElement>(null);
   const mainContentRef = useRef<HTMLDivElement>(null);
   const hydrate = useAppStore((s) => s.hydrate);
+  const retryCloudHydrate = useAppStore((s) => s.retryCloudHydrate);
   const reload = useAppStore((s) => s.reload);
   const reloadAll = useAppStore((s) => s.reloadAll);
   const hydrated = useAppStore((s) => s.hydrated);
+  const hydrating = useAppStore((s) => s.hydrating);
+  const cloudBlocked = useAppStore((s) => s.cloudBlocked);
   const settings = useAppStore((s) => s.settings);
   const initialLoading = useInitialAppLoading();
   const hydrateError = useAppStore((s) => s.hydrateError);
@@ -92,35 +98,36 @@ function AppShell() {
     void hydrate();
   }, [hydrate]);
 
+  // Setelah hydrate sukses: pull ulang (entity + pembayaran) lalu refresh store.
   useEffect(() => {
-    if (hydrateError) {
-      toast.error(hydrateError);
-    }
-  }, [hydrateError]);
-
-  // Setelah hydrate: sync Turso lalu refresh store (Electron punya localStorage sendiri).
-  useEffect(() => {
-    if (!hydrated || !isTursoConfigured()) return;
+    if (!hydrated || cloudBlocked || !isTursoConfigured()) return;
     let cancelled = false;
-    void import('@/lib/sync/turso-sync')
-      .then((m) => m.runTursoSync())
-      .then(async () => {
+    void (async () => {
+      try {
+        const { runTursoSync } = await import('@/lib/sync/turso-sync');
+        await runTursoSync();
+        const { pullPembayaranFromTurso } = await import('@/lib/pembayaran-store');
+        await pullPembayaranFromTurso();
         if (!cancelled) await reloadAll();
-      })
-      .catch(() => undefined);
+      } catch (err) {
+        if (!cancelled) {
+          toast.error(err instanceof Error ? err.message : 'Gagal sync ulang setelah boot');
+        }
+      }
+    })();
     return () => {
       cancelled = true;
     };
-  }, [hydrated, reloadAll]);
+  }, [hydrated, cloudBlocked, reloadAll]);
 
-  // Offline-first: jangan blokir UI — cukup toast sekali + badge di header.
+  // Full-online: offline = error, bukan lanjut lokal.
   useEffect(() => {
     if (!isTursoConfigured()) return;
     return subscribeSyncStatus((s) => {
       if (s.configured && !s.online) {
         if (!offlineToastShown.current) {
           offlineToastShown.current = true;
-          toast.message('Mode offline — data lokal dipakai, sync saat online.');
+          toast.error('Offline — aplikasi memerlukan koneksi ke Turso.');
         }
       } else if (s.online) {
         offlineToastShown.current = false;
@@ -199,13 +206,29 @@ function AppShell() {
 
   const screenHeader = getScreenHeader(location.pathname);
   const showBottomNav = showBottomNavigation(location.pathname);
+  const showMobileAction = Boolean(
+    (addAction || headerRight) && !isHome && screenHeader
+  );
+  const showAppFooter = showBottomNav || showMobileAction;
 
   useAndroidBackButton(navigate, location);
   // Mode cloud (Turso): langsung login — wizard hanya jika tanpa cloud & lokal belum setup
   const setupDone = isTursoConfigured() || isSetupSelesai(settings);
 
   if (!hydrated || initialLoading) {
-    return <AppBootLoading message="Memuat aplikasi…" />;
+    return <AppBootLoading message="Memuat dari Turso…" />;
+  }
+
+  if (cloudBlocked) {
+    return (
+      <AppOnlineGate
+        message={hydrateError}
+        retrying={hydrating}
+        onRetry={() => {
+          void retryCloudHydrate();
+        }}
+      />
+    );
   }
 
   if (!setupDone) {
@@ -236,8 +259,12 @@ function AppShell() {
   return (
     <div className={`h-[100dvh] max-h-[100dvh] overflow-hidden selection:bg-emerald-500 selection:text-white font-sans antialiased ${theme === 'dark' ? 'bg-slate-950' : 'bg-slate-100'}`}>
       {/* Responsive shell: phone → tablet → desktop */}
-      <div className={`w-full h-full max-h-[100dvh] flex flex-col relative mx-auto overflow-hidden ${theme === 'dark' ? 'bg-slate-900' : 'bg-slate-50'} ${/Electron/.test(navigator.userAgent) ? 'max-w-none' : 'max-w-full sm:max-w-xl md:max-w-2xl lg:max-w-4xl xl:max-w-5xl'}`}>
-        
+      <div
+        ref={shellRef}
+        className={`w-full h-full max-h-[100dvh] flex flex-col relative mx-auto overflow-hidden ${theme === 'dark' ? 'bg-slate-900' : 'bg-slate-50'} ${/Electron/.test(navigator.userAgent) ? 'max-w-none' : 'max-w-full sm:max-w-xl md:max-w-2xl lg:max-w-4xl xl:max-w-5xl'}`}
+      >
+        <ShellPullToRefresh shellRef={shellRef} scrollRef={mainContentRef} />
+
         {isHome ? (
           <AppHomeHeader
             namaAsrama={settings.namaAsrama}
@@ -274,16 +301,12 @@ function AppShell() {
         {/* Scrollable Main Content */}
         <main
           ref={mainContentRef}
-          className={`flex-1 min-h-0 overflow-y-auto overscroll-y-contain px-3 sm:px-4 py-4 scroll-smooth ${
-            showBottomNav
-              ? 'pb-[calc(5.5rem+env(safe-area-inset-bottom))]'
-              : 'pb-[calc(1rem+env(safe-area-inset-bottom))]'
+          className={`flex-1 min-h-0 overflow-y-auto overscroll-y-contain scroll-smooth ${
+            isHome ? 'px-0 pt-0' : 'px-3 sm:px-4 py-4'
           } ${
-            addAction || headerRight
-              ? showBottomNav
-                ? 'max-sm:pb-[calc(10.5rem+env(safe-area-inset-bottom))]'
-                : 'max-sm:pb-[calc(5.5rem+env(safe-area-inset-bottom))]'
-              : ''
+            showBottomNav
+              ? 'pb-4'
+              : 'pb-[calc(1rem+env(safe-area-inset-bottom))]'
           }`}
         >
           <RequireAkses>
@@ -358,96 +381,100 @@ function AppShell() {
           </RequireAkses>
         </main>
 
-        {/* Aksi kanan header (tambah/filter/dll) -> bar sticky bawah, khusus mobile */}
-        {(addAction || headerRight) && !isHome && screenHeader ? (
+        {/* Footer bawah: aksi mobile + tab menu satu parent (tanpa gap) */}
+        {showAppFooter ? (
           <div
             className={cn(
-              'sm:hidden absolute inset-x-0 z-50 px-3 py-2.5 border-t border-slate-300 dark:border-slate-500 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl flex items-center gap-2',
-              showBottomNav
-                ? 'bottom-[calc(4rem+env(safe-area-inset-bottom))]'
-                : 'bottom-0 pb-[max(0.75rem,env(safe-area-inset-bottom))]'
+              'shrink-0 z-50 border-t',
+              theme === 'dark'
+                ? 'bg-slate-900 border-slate-500'
+                : 'bg-white border-slate-300 dark:bg-slate-900 dark:border-slate-500',
+              !showBottomNav && 'pb-[max(0.5rem,env(safe-area-inset-bottom))]'
             )}
           >
-            {addAction ? (
-              <button
-                type="button"
-                onClick={addAction.onClick}
-                className="flex-1 min-w-0 flex items-center justify-center gap-2 rounded-sm bg-emerald-600 hover:bg-emerald-700 text-white py-3 px-3 text-xs font-bold shadow-lg active:scale-[0.98] transition-all"
-              >
-                <Plus className="w-4 h-4 shrink-0" strokeWidth={2.5} />
-                <span className="truncate">{addAction.label}</span>
-              </button>
-            ) : null}
-            {headerRight ? (
-              <div
-                className={cn(
-                  'flex items-center gap-0.5 [&_button]:text-slate-700 dark:[&_button]:text-slate-200 [&_button]:justify-center',
-                  addAction ? 'shrink-0' : 'flex-1 justify-center'
-                )}
-              >
-                {headerRight}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-
-        {showBottomNav ? (
-          <nav
-            aria-label="Navigasi Bawah"
-            className={`shrink-0 z-50 w-full py-2 px-2 sm:px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] flex items-center justify-around shadow-[0_-6px_25px_rgba(0,0,0,0.08)] transition-colors ${
-              theme === 'dark'
-                ? 'bg-slate-900/95 backdrop-blur-xl border-t border-slate-500'
-                : 'bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-t border-slate-300 dark:border-slate-500'
-            }`}
-          >
-            {navTabs.map((tab) => {
-              const Icon = tab.icon;
-              const active = tab.isActive;
-
-              return (
-                <div key={tab.name} className="relative flex-1">
+            {showMobileAction ? (
+              <div className="sm:hidden px-3 pt-2 pb-0 flex items-center gap-2">
+                {addAction ? (
                   <button
                     type="button"
-                    onClick={() => {
-                      if (tab.path === '/laporan/izin' && isIzinBkSubRoute(location.pathname)) {
-                        navigate(izinBkTabRoot(location.pathname));
-                        return;
-                      }
-                      if (tab.path === '/master' && isMasterSubRoute(location.pathname)) {
-                        navigate('/master');
-                        return;
-                      }
-                      navigate(tab.path);
-                    }}
-                    className={`w-full flex flex-col items-center justify-center py-1 rounded-sm transition-all relative active:scale-90 ${
-                      active
-                        ? theme === 'dark'
-                          ? 'text-emerald-400 font-bold'
-                          : 'text-emerald-700 font-bold'
-                        : `${theme === 'dark' ? 'text-slate-400 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600'} font-medium`
-                    }`}
+                    onClick={addAction.onClick}
+                    className="flex-1 min-w-0 flex items-center justify-center gap-2 rounded-sm bg-emerald-600 hover:bg-emerald-700 text-white py-3 px-3 text-xs font-bold shadow-lg active:scale-[0.98] transition-all"
                   >
-                    <div className="flex items-center justify-center py-0.5">
-                      <Icon
-                        className={`transition-all duration-200 ease-out ${
-                          active ? 'w-[22px] h-[22px]' : 'w-[18px] h-[18px] opacity-80'
-                        }`}
-                        strokeWidth={active ? 2.25 : 2}
-                      />
-                    </div>
-
-                    <span className="text-[10px] tracking-tight mt-1 leading-none">{tab.name}</span>
-
-                    {tab.badge ? (
-                      <span className="absolute top-0.5 right-2 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white font-bold text-[9px] flex items-center justify-center ring-2 ring-white dark:ring-slate-900">
-                        {tab.badge}
-                      </span>
-                    ) : null}
+                    <Plus className="w-4 h-4 shrink-0" strokeWidth={2.5} />
+                    <span className="truncate">{addAction.label}</span>
                   </button>
-                </div>
-              );
-            })}
-          </nav>
+                ) : null}
+                {headerRight ? (
+                  <div
+                    className={cn(
+                      'flex items-center gap-0.5 [&_button]:text-slate-700 dark:[&_button]:text-slate-200 [&_button]:justify-center',
+                      addAction ? 'shrink-0' : 'flex-1 justify-center'
+                    )}
+                  >
+                    {headerRight}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {showBottomNav ? (
+              <nav
+                aria-label="Navigasi Bawah"
+                className={cn(
+                  'w-full px-2 sm:px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] flex items-center justify-around',
+                  showMobileAction ? 'max-sm:pt-1.5 pt-2' : 'pt-2'
+                )}
+              >
+                {navTabs.map((tab) => {
+                  const Icon = tab.icon;
+                  const active = tab.isActive;
+
+                  return (
+                    <div key={tab.name} className="relative flex-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (tab.path === '/laporan/izin' && isIzinBkSubRoute(location.pathname)) {
+                            navigate(izinBkTabRoot(location.pathname));
+                            return;
+                          }
+                          if (tab.path === '/master' && isMasterSubRoute(location.pathname)) {
+                            navigate('/master');
+                            return;
+                          }
+                          navigate(tab.path);
+                        }}
+                        className={`w-full flex flex-col items-center justify-center py-1 rounded-sm transition-all relative active:scale-90 ${
+                          active
+                            ? theme === 'dark'
+                              ? 'text-emerald-400 font-bold'
+                              : 'text-emerald-700 font-bold'
+                            : `${theme === 'dark' ? 'text-slate-400 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600'} font-medium`
+                        }`}
+                      >
+                        <div className="flex items-center justify-center py-0.5">
+                          <Icon
+                            className={`transition-all duration-200 ease-out ${
+                              active ? 'w-[22px] h-[22px]' : 'w-[18px] h-[18px] opacity-80'
+                            }`}
+                            strokeWidth={active ? 2.25 : 2}
+                          />
+                        </div>
+
+                        <span className="text-[10px] tracking-tight mt-1 leading-none">{tab.name}</span>
+
+                        {tab.badge ? (
+                          <span className="absolute top-0.5 right-2 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white font-bold text-[9px] flex items-center justify-center ring-2 ring-white dark:ring-slate-900">
+                            {tab.badge}
+                          </span>
+                        ) : null}
+                      </button>
+                    </div>
+                  );
+                })}
+              </nav>
+            ) : null}
+          </div>
         ) : null}
 
       </div>

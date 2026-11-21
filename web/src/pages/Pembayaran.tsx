@@ -141,6 +141,7 @@ export default function Pembayaran() {
 
   const [tab, setTab] = useState<'tagihan' | 'tunggakan' | 'jenis'>('tagihan');
   const [loading, setLoading] = useState(true);
+  const [cloudReady, setCloudReady] = useState(false);
   const [jenis, setJenis] = useState<TagihanJenis[]>([]);
   const [tagihan, setTagihan] = useState<TagihanView[]>([]);
   const [tunggakan, setTunggakan] = useState<TunggakanRow[]>([]);
@@ -190,14 +191,28 @@ export default function Pembayaran() {
   }, [fPeriode, fJenis, fStatus]);
 
   useEffect(() => {
-    // Pull sekali dari Turso (best-effort), lalu muat data.
-    void fetch('/api/pembayaran/sync', { method: 'POST' }).catch(() => undefined);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch('/api/pembayaran/sync', { method: 'POST' });
+        if (!res.ok) throw new Error('Gagal sync pembayaran dari Turso');
+      } catch (e) {
+        if (!cancelled) {
+          toast.error(e instanceof Error ? e.message : 'Gagal sync pembayaran dari Turso');
+        }
+      } finally {
+        if (!cancelled) setCloudReady(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
+    if (!cloudReady) return;
     void load();
-  }, [load]);
+  }, [cloudReady, load]);
 
   const isPembayaranScreen = location.pathname === '/master/pembayaran';
   const headerAddAction = useMemo(() => {

@@ -9,6 +9,7 @@ import {
   setActiveAsramaId,
   subscribeSessionUser,
 } from '@/lib/app-auth';
+import { toast } from '@/lib/toast';
 
 type AsramaSwitcherProps = {
   className?: string;
@@ -64,9 +65,15 @@ export function AsramaSwitcher({
     : 'Semua asrama';
 
   const pilih = (id: string | null) => {
-    setActiveAsramaId(id);
     setOpen(false);
-    void reloadAll();
+    void (async () => {
+      try {
+        await setActiveAsramaId(id);
+        await reloadAll();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Gagal sync setelah ganti asrama');
+      }
+    })();
   };
 
   const trigger =

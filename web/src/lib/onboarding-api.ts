@@ -1,4 +1,4 @@
-import { hashSecretSync } from '@/lib/app-auth';
+import { hashSecretSync, pinLengthError } from '@/lib/app-auth';
 import {
   isSetupSelesai,
   markOnboardingComplete,
@@ -34,8 +34,12 @@ export function handleOnboardingComplete(
   }
 
   const newPassword = String(payload.newPassword ?? '');
-  if (newPassword.length < 4) {
-    return { status: 400, body: { ok: false, error: 'Kata sandi baru minimal 4 karakter' } };
+  const pwdErr = pinLengthError(newPassword);
+  if (pwdErr) {
+    return {
+      status: 400,
+      body: { ok: false, error: pwdErr.replace(/^PIN/, 'Kata sandi') },
+    };
   }
 
   const nextSettings = mergeAppSettings({

@@ -10,22 +10,17 @@ import type { OfflineDbSnapshot } from '@/lib/db/snapshot-types';
 import {
   applyTombstonesToTurso,
   countTursoOperationalRows,
-  readDeltaFromTursoTables,
   readSnapshotFromTursoTables,
+  upsertKamarRowsToTurso,
   writeSnapshotToTursoTables,
 } from '@/lib/sync/turso-relational';
 import {
-  applyRemoteAppSettings,
-  getSyncMeta,
+  clearAppliedTombstones,
   listSyncTombstones,
   setSyncMeta,
-  shouldPersistToSqlite,
 } from '@/lib/offline-db';
-import {
-  sqlApplyRemoteRows,
-  sqlDeleteRemoteTombstone,
-} from '@/lib/sql-entity-io';
 import { getSessionUser } from '@/lib/app-auth';
+import { publishSyncSignal, startAblyRealtime } from '@/lib/sync/ably-realtime';
 
 export type SyncStatus = {
   running: boolean;
@@ -53,11 +48,28 @@ let status: SyncStatus = {
 let autoStarted = false;
 let syncChain: Promise<void> = Promise.resolve();
 let soonTimer: ReturnType<typeof setTimeout> | null = null;
-/** Pause push selama boot/hydrate agar seed lokal kosong tidak menimpa cloud. */
-let cloudPushPaused = false;
+/** Gate: jangan push sebelum hydrate/bootstrap cloud selesai. */
+let cloudWritesEnabled = false;
 
+/** Aktifkan push setelah boot Turso sukses. */
+export function setCloudWritesEnabled(enabled: boolean): void {
+  cloudWritesEnabled = enabled;
+}
+
+/** @deprecated Alias gate boot — setCloudWritesEnabled(!paused). */
 export function pauseCloudPush(paused: boolean): void {
-  cloudPushPaused = paused;
+  cloudWritesEnabled = !paused;
+}
+
+/** Tunggu gate boot selesai agar CRUD tidak tersimpan lokal-only tanpa Turso/Ably. */
+async function waitCloudWritesEnabled(timeoutMs = 20_000): Promise<boolean> {
+  if (cloudWritesEnabled) return true;
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    await new Promise((r) => setTimeout(r, 150));
+    if (cloudWritesEnabled) return true;
+  }
+  return cloudWritesEnabled;
 }
 
 type SnapshotShape = {
@@ -137,7 +149,7 @@ async function ensureOnline(): Promise<void> {
   status.online = online;
   emit();
   if (!online) {
-    throw new Error('Tidak ada koneksi internet. Perubahan tetap di lokal; sync saat online.');
+    throw new Error('Tidak ada koneksi internet. Aplikasi hanya berjalan online ke Turso.');
   }
 }
 
@@ -181,23 +193,38 @@ async function writeLocalToTursoTables(
   await writeSnapshotToTursoTables(client, snap, 'upsert');
   // Propagasi penghapusan lokal: hapus baris remote + catat tombstone.
   const tombstones = await listSyncTombstones();
-  await applyTombstonesToTurso(client, tombstones);
+  if (tombstones.length) {
+    await applyTombstonesToTurso(client, tombstones);
+    await clearAppliedTombstones(tombstones);
+  }
 
-  // Cadangan JSON (kompatibilitas lama) — tetap diisi agar tidak kosong di dashboard lama
+  // Cadangan JSON (kompatibilitas lama) — foto besar di-strip agar payload tidak meledak.
+  const snapForLegacy = { ...local.snapshot } as SnapshotShape;
+  if (Array.isArray(snapForLegacy.santri)) {
+    snapForLegacy.santri = (snapForLegacy.santri as Record<string, unknown>[]).map((s) => {
+      const foto = s.foto != null ? String(s.foto) : '';
+      if (foto.length > 500) return { ...s, foto: '' };
+      return s;
+    });
+  }
   const payload = JSON.stringify({
-    ...local.snapshot,
+    ...snapForLegacy,
     settings: mergeAppSettings({
-      ...(local.snapshot.settings as object | undefined),
+      ...(snapForLegacy.settings as object | undefined),
       setupSelesai: true,
     }),
   });
-  await client.execute({
-    sql: `INSERT INTO app_data_snapshot (id, payload, updated_at) VALUES ('default', ?, ?)
-          ON CONFLICT(id) DO UPDATE SET
-            payload = excluded.payload,
-            updated_at = excluded.updated_at`,
-    args: [payload, at],
-  });
+  try {
+    await client.execute({
+      sql: `INSERT INTO app_data_snapshot (id, payload, updated_at) VALUES ('default', ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              payload = excluded.payload,
+              updated_at = excluded.updated_at`,
+      args: [payload, at],
+    });
+  } catch (err) {
+    console.warn('[turso] legacy snapshot JSON skip (payload besar?):', err);
+  }
 
   return at;
 }
@@ -222,70 +249,19 @@ function sessionAsramaScope(): string | null {
 
 const PULL_CURSOR_KEY = 'pull_cursor';
 const PULL_SCOPE_KEY = 'pull_scope';
-/** Urutan apply agar parent ada sebelum child (FK). */
-const DELTA_APPLY_ORDER = [
-  'kelas',
-  'kegiatan',
-  'kamar',
-  'santri',
-  'penjadwalan_preset',
-  'penjadwalan',
-  'absensi',
-  'izin',
-  'pembinaan',
-  'riwayat_kamar',
-] as const;
 
-/** Terapkan hasil delta pull ke SQLite lokal (upsert, bukan replace). */
-async function applyDeltaLocally(
-  delta: Awaited<ReturnType<typeof readDeltaFromTursoTables>>
-): Promise<number> {
-  let applied = 0;
-  for (const t of DELTA_APPLY_ORDER) {
-    const rows = delta.rows[t];
-    if (rows?.length) applied += await sqlApplyRemoteRows(t, rows);
-  }
-  for (const tb of delta.tombstones) {
-    await sqlDeleteRemoteTombstone(tb.table_name, tb.row_id, tb.deleted_at);
-  }
-  if (delta.settingsPayload) {
-    try {
-      const settings = mergeAppSettings({
-        ...(JSON.parse(delta.settingsPayload) as object),
-        setupSelesai: true,
-      });
-      await applyRemoteAppSettings(settings);
-      applied += 1;
-    } catch {
-      /* payload rusak */
-    }
-  }
-  markOnboardingComplete();
-  await reloadClientApiFromStorage();
-  return applied;
-}
-
-/** Pull dari tabel Turso → lokal (delta setelah baseline pertama). */
+/** Pull dari tabel Turso → RAM (full-online). */
 export async function pullFromTurso(): Promise<string> {
   await ensureOnline();
   const client = createTursoClient();
   const counts = await countTursoOperationalRows(client);
   const scope = sessionAsramaScope();
   const scopeKey = scope ?? '';
-  const cursor = await getSyncMeta(PULL_CURSOR_KEY);
-  const savedScope = await getSyncMeta(PULL_SCOPE_KEY);
   const startedAt = new Date().toISOString();
-  // Overlap 30 dtk: toleransi jam device lain yang sedikit lebih lambat.
   const nextCursor = new Date(Date.now() - 30_000).toISOString();
 
   if (counts.santri > 0 || counts.kamar > 0 || counts.kelas > 0) {
-    // Delta SQLite hanya untuk Android/iOS. Web/Electron = localStorage → full snapshot.
-    if (shouldPersistToSqlite() && cursor && savedScope === scopeKey) {
-      const delta = await readDeltaFromTursoTables(client, cursor, scope);
-      const applied = await applyDeltaLocally(delta);
-      await setSyncMeta(PULL_CURSOR_KEY, nextCursor);
-      return `Pull delta Turso (${applied} baris berubah)`;
-    }
+    // Full-online: selalu full snapshot ke RAM (bukan delta offline SQLite).
     const snap = await readSnapshotFromTursoTables(client, scope);
     await applyTableSnapshot(snap, startedAt);
     await setSyncMeta(PULL_CURSOR_KEY, nextCursor);
@@ -319,6 +295,7 @@ export async function pushToTurso(): Promise<string> {
   const client = createTursoClient();
   const local = await exportSyncSnapshot();
   const at = await writeLocalToTursoTables(client, local, new Date().toISOString());
+  void publishSyncSignal('push');
   return `Push ke tabel Turso (${at})`;
 }
 
@@ -338,6 +315,7 @@ export async function bootstrapOnlineSnapshot(): Promise<string> {
 
   if (tablesEmpty && !localEmpty) {
     const at = await writeLocalToTursoTables(client, local, new Date().toISOString());
+    void publishSyncSignal('seed');
     return `Seed tabel Turso dari lokal (${at})`;
   }
 
@@ -365,6 +343,7 @@ export async function bootstrapOnlineSnapshot(): Promise<string> {
   }
 
   const at = await writeLocalToTursoTables(client, local, new Date().toISOString());
+  void publishSyncSignal('seed');
   return `Seed tabel Turso kosong (${at})`;
 }
 
@@ -409,19 +388,23 @@ async function runWithStatus(fn: () => Promise<string>): Promise<SyncStatus> {
 }
 
 /**
- * Sync penuh satu putaran: push (upsert + tombstone) lalu pull.
- * Push dulu agar data offline lokal ikut terkirim sebelum lokal diganti remote.
- * Kalau push gagal → pull tidak jalan → perubahan lokal yang belum terkirim aman.
+ * Full-online: refresh dari cloud (pull).
+ * Mutasi sudah await push ke Turso; sync berkala cukup pull.
  */
 async function syncRound(): Promise<string> {
-  const pushMsg = await pushToTurso();
-  const pullMsg = await pullFromTurso();
-  return `${pushMsg} • ${pullMsg}`;
+  return pullFromTurso();
 }
 
-/** Boot / reconnect / berkala: push lalu pull. */
+/** Boot / reconnect / berkala: pull dari Turso. */
 export async function runTursoSync(): Promise<SyncStatus> {
   return runWithStatus(() => syncRound());
+}
+
+/**
+ * Boot wajib: pull cloud; seed dari RAM hanya jika tabel Turso kosong.
+ */
+export async function runCloudBootstrap(): Promise<SyncStatus> {
+  return runWithStatus(() => bootstrapOnlineSnapshot());
 }
 
 /** Manual refresh dari cloud — full pull (reset kursor delta). */
@@ -439,31 +422,128 @@ export async function pushToTursoNow(): Promise<SyncStatus> {
 }
 
 /**
- * Setelah CRUD: antre push singkat (debounce agar batch tulis berdekatan).
- * Offline-first: kalau offline, biarkan lokal; push saat online lagi.
+ * Setelah CRUD: antre pull singkat (bukan full push).
+ * Mutasi sudah menulis baris ke Turso; ini hanya menyegarkan dari cloud.
  */
 export function scheduleSyncSoon(delayMs = 400): void {
   if (!readTursoConfig()) return;
-  if (cloudPushPaused) return;
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
     status.online = false;
-    status.lastError = 'Offline — tersimpan lokal, belum sync ke Turso';
+    status.lastError = 'Offline — tidak bisa menyimpan ke Turso';
     emit();
     return;
   }
   if (soonTimer) clearTimeout(soonTimer);
   soonTimer = setTimeout(() => {
     soonTimer = null;
-    void pushToTursoNow().catch((err) => {
-      console.warn('pushToTursoNow failed:', err);
+    void (async () => {
+      if (!(await waitCloudWritesEnabled(8_000))) {
+        console.warn('scheduleSyncSoon skipped — cloud writes belum siap');
+        return;
+      }
+      await runTursoSync();
+    })().catch((err) => {
+      console.warn('scheduleSyncSoon pull failed:', err);
     });
   }, delayMs);
 }
 
-/** Await push setelah save (prefer ini dari client-api). */
+async function assertCloudWritable(offlineMsg: string): Promise<Client> {
+  if (!readTursoConfig()) {
+    throw new Error('Turso belum dikonfigurasi');
+  }
+  if (!(await waitCloudWritesEnabled())) {
+    throw new Error('Sync cloud belum siap. Tunggu sebentar lalu coba lagi.');
+  }
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    status.online = false;
+    status.lastError = offlineMsg;
+    emit();
+    throw new Error(offlineMsg);
+  }
+  await ensureOnline();
+  return createTursoClient();
+}
+
+function markScopedPushOk(result: string): void {
+  const now = new Date().toISOString();
+  writeLastSyncAt(now);
+  status.lastSyncAt = now;
+  status.lastResult = result;
+  status.lastError = null;
+  status.online = true;
+  emit();
+}
+
+/**
+ * Remote DB: upsert hanya entity yang ada di partial (field undefined = skip).
+ * Tidak mengirim snapshot penuh / foto santri yang tidak relevan.
+ */
+export async function pushScopedToTurso(
+  partial: Partial<OfflineDbSnapshot>,
+  reason = 'scoped'
+): Promise<void> {
+  if (!readTursoConfig()) return;
+  try {
+    const client = await assertCloudWritable('Offline — tidak bisa menyimpan ke Turso');
+    await writeSnapshotToTursoTables(client, partial, 'upsert');
+    markScopedPushOk(`Push scoped (${reason})`);
+    void publishSyncSignal(reason);
+  } catch (err) {
+    status.lastError = err instanceof Error ? err.message : String(err);
+    emit();
+    console.warn('pushScopedToTurso failed:', err);
+    throw err instanceof Error ? err : new Error(String(err));
+  }
+}
+
+/** Hapus baris remote dari tombstone lokal (tanpa full snapshot). */
+export async function flushTombstonesToTurso(reason = 'delete'): Promise<void> {
+  if (!readTursoConfig()) return;
+  try {
+    const client = await assertCloudWritable('Offline — tidak bisa menghapus di Turso');
+    const tombstones = await listSyncTombstones();
+    if (!tombstones.length) return;
+    await applyTombstonesToTurso(client, tombstones);
+    await clearAppliedTombstones(tombstones);
+    markScopedPushOk(`Tombstone ${tombstones.length} baris`);
+    void publishSyncSignal(reason);
+  } catch (err) {
+    status.lastError = err instanceof Error ? err.message : String(err);
+    emit();
+    console.warn('flushTombstonesToTurso failed:', err);
+    throw err instanceof Error ? err : new Error(String(err));
+  }
+}
+
+/**
+ * Push 1+ baris kamar langsung ke Turso (cepat).
+ * Dipakai setelah tambah/edit kamar — tanpa full snapshot (foto santri besar).
+ */
+export async function pushKamarRowsNow(rows: Record<string, unknown>[]): Promise<void> {
+  if (!rows.length || !readTursoConfig()) return;
+  try {
+    const client = await assertCloudWritable('Offline — tidak bisa menyimpan kamar ke Turso');
+    await upsertKamarRowsToTurso(client, rows);
+    markScopedPushOk(`Push ${rows.length} kamar ke Turso`);
+    void publishSyncSignal('kamar');
+  } catch (err) {
+    status.lastError = err instanceof Error ? err.message : String(err);
+    emit();
+    console.warn('pushKamarRowsNow failed:', err);
+    throw err instanceof Error ? err : new Error(String(err));
+  }
+}
+
+/**
+ * Setelah save: full push HANYA untuk impor/bootstrap (tanpa scope).
+ * CRUD harian harus pakai pushScopedToTurso / pushKamarRowsNow.
+ */
 export async function awaitCloudPushAfterSave(): Promise<void> {
   if (!readTursoConfig()) return;
-  if (cloudPushPaused) return;
+  if (!(await waitCloudWritesEnabled())) {
+    throw new Error('Sync cloud belum siap. Tunggu sebentar lalu coba lagi.');
+  }
   if (soonTimer) {
     clearTimeout(soonTimer);
     soonTimer = null;
@@ -471,7 +551,7 @@ export async function awaitCloudPushAfterSave(): Promise<void> {
   await pushToTursoNow();
 }
 
-/** Auto sync berkala + online/offline listeners (offline-first). */
+/** Auto pull berkala + online/offline listeners (full-online Turso). */
 export function startAutoSync(): void {
   if (autoStarted || typeof window === 'undefined') return;
   if (!readTursoConfig()) {
@@ -481,12 +561,52 @@ export function startAutoSync(): void {
   autoStarted = true;
   void refreshConfiguredFlag();
 
+  // Ably: device lain push → pull + refresh UI store (supaya list kamar/santri ikut berubah).
+  let uiReloadTimer: ReturnType<typeof setTimeout> | null = null;
+  const refreshUiAfterRemotePull = () => {
+    if (uiReloadTimer) clearTimeout(uiReloadTimer);
+    uiReloadTimer = setTimeout(() => {
+      uiReloadTimer = null;
+      void import('@/store/app-store')
+        .then(({ useAppStore }) => useAppStore.getState().reloadAll())
+        .catch((err) => console.warn('[ably] UI reload failed:', err));
+    }, 150);
+  };
+
+  startAblyRealtime((signal) => {
+    console.info('[ably] remote change from', signal.deviceId, signal.reason ?? '');
+    void runWithStatus(() => pullFromTurso())
+      .then(() => {
+        refreshUiAfterRemotePull();
+        // Electron/web: toast OS jika jendela di belakang.
+        if (
+          typeof document !== 'undefined' &&
+          document.visibilityState === 'hidden' &&
+          typeof Notification !== 'undefined' &&
+          Notification.permission === 'granted'
+        ) {
+          try {
+            new Notification('Asrama Manager', {
+              body: 'Data asrama diperbarui — disinkronkan otomatis',
+              silent: false,
+            });
+          } catch {
+            /* ignore */
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn('[ably] remote pull failed:', err);
+      });
+  });
+
   const maybeSync = async (): Promise<boolean> => {
     if (!readTursoConfig()) return true;
+    if (!cloudWritesEnabled) return true;
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return true;
-    if (cloudPushPaused) return true;
     if (!navigator.onLine) {
       status.online = false;
+      status.lastError = 'Offline — koneksi Turso terputus';
       emit();
       return false;
     }
@@ -528,9 +648,9 @@ export function startAutoSync(): void {
     /* web/Electron tanpa plugin */
   });
 
-  // Backoff eksponensial: 2 mnt → ganda tiap gagal → maks 30 mnt. Reset saat sukses.
-  const BASE_DELAY = 2 * 60 * 1000;
-  const MAX_DELAY = 30 * 60 * 1000;
+  // Cadangan bila Ably putus. Ably handle sync realtime antar device.
+  const BASE_DELAY = 3 * 60 * 1000;
+  const MAX_DELAY = 10 * 60 * 1000;
   let delay = BASE_DELAY;
   const scheduleNext = () => {
     window.setTimeout(() => {
@@ -545,5 +665,5 @@ export function startAutoSync(): void {
     delay = ok ? BASE_DELAY : Math.min(delay * 2, MAX_DELAY);
     scheduleNext();
   });
-  console.info('[sync] mode=offline-first-delta-sync');
+  console.info('[sync] mode=full-online-turso + ably-realtime');
 }

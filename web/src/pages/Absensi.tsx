@@ -105,6 +105,7 @@ export default function Absensi() {
   const [selectedDateKey, setSelectedDateKey] = useState(() => toDateKey(new Date()));
   const [presensiTab, setPresensiTab] = useState<'belum' | 'sudah'>('belum');
   const [filterOpen, setFilterOpen] = useState(false);
+  const [filterScopeTab, setFilterScopeTab] = useState<'kelas' | 'kamar'>('kelas');
   const [dayAbsensi, setDayAbsensi] = useState<AbsensiApiRow[]>([]);
   const [dayAbsensiLoading, setDayAbsensiLoading] = useState(false);
 
@@ -423,7 +424,10 @@ export default function Absensi() {
     selectedRoomFilter !== 'Semua Kamar' ||
     selectedKelasFilter !== 'Semua Kelas';
 
-  const openFilter = useCallback(() => setFilterOpen(true), []);
+  const openFilter = useCallback(() => {
+    setFilterScopeTab('kelas');
+    setFilterOpen(true);
+  }, []);
 
   const headerFilterAction = useMemo(
     () => (
@@ -561,43 +565,68 @@ export default function Absensi() {
             </div>
           </div>
           <div className="space-y-2 -mx-4 sm:-mx-5">
-            <p className="text-xs font-semibold text-slate-700 px-4 sm:px-5">Kelas</p>
-            {kelasNames.length <= 1 ? (
-              <EmptyState icon={GraduationCap} title="Belum ada data kelas" variant="minimal" />
-            ) : (
-              <ul className="divide-y divide-slate-200 dark:divide-slate-700 border-y border-slate-200 dark:border-slate-700 max-h-[min(28vh,14rem)] overflow-y-auto overscroll-contain">
-                {kelasNames.map((name) => {
-                  const isSelected = selectedKelasFilter === name;
-                  return (
-                    <li key={name}>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedKelasFilter(name)}
-                        className={cn(
-                          'w-full text-left px-4 sm:px-5 py-3 text-xs transition-colors flex items-center justify-between gap-2',
-                          isSelected
-                            ? 'bg-emerald-50 text-emerald-900 font-semibold dark:bg-emerald-950/40 dark:text-emerald-200'
-                            : 'text-slate-800 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-700/80'
-                        )}
-                      >
-                        <span className="truncate">{name}</span>
-                        {isSelected && (
-                          <Check className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-                        )}
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
+            <div className="px-4 sm:px-5">
+              <div className="flex gap-1 p-1 rounded-sm bg-slate-200/60 dark:bg-slate-900/80">
+                {(
+                  [
+                    ['kelas', 'Kelas', GraduationCap, selectedKelasFilter !== 'Semua Kelas'],
+                    ['kamar', 'Kamar', BedDouble, selectedRoomFilter !== 'Semua Kamar'],
+                  ] as const
+                ).map(([key, label, Icon, active]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setFilterScopeTab(key)}
+                    className={cn(
+                      'flex-1 flex items-center justify-center gap-1.5 py-2 rounded-sm text-xs font-semibold transition-all',
+                      filterScopeTab === key
+                        ? 'bg-white dark:bg-slate-800 text-emerald-700 dark:text-emerald-400 shadow-sm'
+                        : 'text-slate-500 dark:text-slate-400'
+                    )}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                    {label}
+                    {active ? (
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 shrink-0" />
+                    ) : null}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-          <div className="space-y-2 -mx-4 sm:-mx-5">
-            <p className="text-xs font-semibold text-slate-700 px-4 sm:px-5">Kamar</p>
-            {roomNames.length <= 1 ? (
+            {filterScopeTab === 'kelas' ? (
+              kelasNames.length <= 1 ? (
+                <EmptyState icon={GraduationCap} title="Belum ada data kelas" variant="minimal" />
+              ) : (
+                <ul className="divide-y divide-slate-200 dark:divide-slate-700 border-y border-slate-200 dark:border-slate-700 max-h-[min(40vh,18rem)] overflow-y-auto overscroll-contain">
+                  {kelasNames.map((name) => {
+                    const isSelected = selectedKelasFilter === name;
+                    return (
+                      <li key={name}>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedKelasFilter(name)}
+                          className={cn(
+                            'w-full text-left px-4 sm:px-5 py-3 text-xs transition-colors flex items-center justify-between gap-2',
+                            isSelected
+                              ? 'bg-emerald-50 text-emerald-900 font-semibold dark:bg-emerald-950/40 dark:text-emerald-200'
+                              : 'text-slate-800 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-700/80'
+                          )}
+                        >
+                          <span className="truncate">{name}</span>
+                          {isSelected && (
+                            <Check className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                          )}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )
+            ) : roomNames.length <= 1 ? (
               <EmptyState icon={BedDouble} title="Belum ada data kamar" variant="minimal" />
             ) : (
-              <ul className="divide-y divide-slate-200 dark:divide-slate-700 border-y border-slate-200 dark:border-slate-700 max-h-[min(28vh,14rem)] overflow-y-auto overscroll-contain">
+              <ul className="divide-y divide-slate-200 dark:divide-slate-700 border-y border-slate-200 dark:border-slate-700 max-h-[min(40vh,18rem)] overflow-y-auto overscroll-contain">
                 {roomNames.map((name) => {
                   const isSelected = selectedRoomFilter === name;
                   return (

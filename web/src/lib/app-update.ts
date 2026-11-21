@@ -45,7 +45,44 @@ async function fetchLatestRelease(): Promise<GithubRelease | null> {
 }
 
 function normalizeVersion(tag: string): string {
-  return tag.replace(/^v/i, '');
+  return tag.replace(/^v/i, '').trim();
+}
+
+/** Parse "1.2.3" / "1.2.3-beta" → [major, minor, patch] (pre-release diabaikan untuk banding). */
+function parseSemverParts(version: string): [number, number, number] | null {
+  const m = /^(\d+)\.(\d+)\.(\d+)/.exec(normalizeVersion(version));
+  if (!m) return null;
+  return [Number(m[1]), Number(m[2]), Number(m[3])];
+}
+
+/**
+ * true hanya jika remote lebih baru dari current (semver).
+ * Hindari downgrade / tawaran ulang ke versi yang sama atau lebih lama.
+ */
+export function isRemoteNewer(remote: string, current: string): boolean {
+  const a = parseSemverParts(remote);
+  const b = parseSemverParts(current);
+  if (!a || !b) return normalizeVersion(remote) !== normalizeVersion(current);
+  for (let i = 0; i < 3; i += 1) {
+    if (a[i] > b[i]) return true;
+    if (a[i] < b[i]) return false;
+  }
+  return false;
+}
+
+/** Versi bundle aktif: Capgo OTA, atau __APP_VERSION__ bila masih builtin APK. */
+export async function getActiveBundleVersion(): Promise<string> {
+  const buildVersion =
+    typeof __APP_VERSION__ !== 'undefined' ? normalizeVersion(__APP_VERSION__) : '';
+  if (!Capacitor.isNativePlatform()) return buildVersion || '0.0.0';
+  try {
+    const current = await CapacitorUpdater.current();
+    const raw = current?.bundle?.version?.trim() ?? '';
+    if (raw && raw.toLowerCase() !== 'builtin') return normalizeVersion(raw);
+  } catch {
+    /* fallback ke versi build di bawah */
+  }
+  return buildVersion || '0.0.0';
 }
 
 /** Ambil hex SHA256 dari field digest GitHub (`sha256:abc...` → `abc...`). */
@@ -56,9 +93,8 @@ function sha256FromDigest(digest: string | null | undefined): string | null {
 }
 
 /**
- * Wajib dipanggil sekali saat app selesai render pertama.
- * Memberi tahu Capgo bahwa bundle aktif berjalan baik; kalau tidak dipanggil,
- * bundle baru otomatis di-rollback ke versi sebelumnya.
+ * Wajib dipanggil sedini mungkin saat start (sebelum init berat).
+ * Kalau terlambat / tidak dipanggil, Capgo rollback bundle OTA ke versi lama.
  */
 export async function notifyAppReady(): Promise<void> {
   if (!Capacitor.isNativePlatform()) return;
@@ -101,12 +137,10 @@ export async function checkOtaUpdateAvailable(): Promise<OtaUpdateInfo | null> {
     return null;
   }
 
-  try {
-    const current = await CapacitorUpdater.current();
-    if (current?.bundle?.version === version) return null;
-  } catch {
-    // Tetap tawarkan update kalau gagal baca versi aktif.
-  }
+  // Banding semver (bukan === saja). Bundle Capgo "builtin" pakai __APP_VERSION__
+  // dari APK — tanpa ini sheet selalu muncul & bisa "update" ke versi lebih lama.
+  const active = await getActiveBundleVersion();
+  if (!isRemoteNewer(version, active)) return null;
 
   // Jangan resolve ke URL signed (release-assets.githubusercontent.com):
   // token-nya kedaluwarsa ~1 jam — user yang klik "Perbarui" belakangan gagal unduh.

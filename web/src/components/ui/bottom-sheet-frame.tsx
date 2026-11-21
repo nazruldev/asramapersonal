@@ -92,7 +92,8 @@ export function BottomSheetFrame({
       className={cn(
         'fixed inset-0 flex items-end justify-center pt-0 pointer-events-none',
         'pb-[max(0.375rem,calc(var(--keyboard-inset,0px)+env(safe-area-inset-bottom)))]',
-        elevated ? 'z-[110]' : 'z-[100]',
+        // elevated di atas login/setup gate (z-[200]) agar picker akun bisa diklik
+        elevated ? 'z-[250]' : 'z-[100]',
         className
       )}
       role="presentation"
@@ -110,7 +111,7 @@ export function BottomSheetFrame({
           'relative w-full sm:max-w-xl md:max-w-2xl lg:max-w-4xl xl:max-w-5xl flex flex-col min-h-0 shadow-2xl pointer-events-auto',
           'bg-card text-card-foreground border-t border-border rounded-t-sm',
           'animate-in fade-in slide-in-from-bottom duration-200',
-          elevated ? 'z-[111]' : 'z-[101]',
+          elevated ? 'z-[251]' : 'z-[101]',
           panelClassName
         )}
         style={{

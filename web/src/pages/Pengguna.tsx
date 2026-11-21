@@ -34,6 +34,12 @@ import { cn } from '@/lib/utils';
 import { useConfirmDialog } from '@/lib/use-confirm-dialog';
 import { toast } from '@/lib/toast';
 import {
+  PIN_MAX_LENGTH,
+  PIN_MIN_LENGTH,
+  clampPinInput,
+  pinLengthError,
+} from '@/lib/app-auth';
+import {
   MODUL_AKSES_OPTIONS,
   PENGGUNA_ROLE_OPTIONS,
   penggunaRoleLabel,
@@ -155,9 +161,18 @@ export default function PenggunaPage() {
       toast.error('Nama pengguna wajib diisi');
       return;
     }
-    if (!editing && form.pin.trim().length < 4) {
-      toast.error('PIN minimal 4 karakter');
-      return;
+    if (!editing) {
+      const pinErr = pinLengthError(form.pin);
+      if (pinErr) {
+        toast.error(pinErr);
+        return;
+      }
+    } else if (form.pin.trim()) {
+      const pinErr = pinLengthError(form.pin);
+      if (pinErr) {
+        toast.error(pinErr);
+        return;
+      }
     }
     if (form.role === 'pengawas' && form.asramaIds.length !== 1) {
       toast.error('Pengawas wajib ditugaskan ke tepat 1 asrama');
@@ -194,10 +209,14 @@ export default function PenggunaPage() {
   };
 
   const requestResetPin = (item: PenggunaPublic) => {
-    const pin = window.prompt(`PIN baru untuk ${item.nama} (min. 4 karakter):`, '');
+    const pin = window.prompt(
+      `PIN baru untuk ${item.nama} (${PIN_MIN_LENGTH}–${PIN_MAX_LENGTH} digit):`,
+      ''
+    );
     if (pin === null) return;
-    if (pin.trim().length < 4) {
-      toast.error('PIN minimal 4 karakter');
+    const pinErr = pinLengthError(pin);
+    if (pinErr) {
+      toast.error(pinErr);
       return;
     }
     void (async () => {
@@ -440,14 +459,17 @@ export default function PenggunaPage() {
           </div>
           <div className="space-y-1">
             <label className={appLabelClass}>
-              {editing ? 'PIN baru (kosongkan jika tidak diganti)' : 'PIN (min. 4 karakter)'}
+              {editing
+                ? 'PIN baru (kosongkan jika tidak diganti)'
+                : `PIN (${PIN_MIN_LENGTH}–${PIN_MAX_LENGTH} digit)`}
             </label>
             <input
               className={appFieldClass}
               type="password"
               inputMode="numeric"
+              maxLength={PIN_MAX_LENGTH}
               value={form.pin}
-              onChange={(e) => setForm((f) => ({ ...f, pin: e.target.value }))}
+              onChange={(e) => setForm((f) => ({ ...f, pin: clampPinInput(e.target.value) }))}
               placeholder="PIN unik — tidak boleh sama dengan akun lain"
             />
           </div>

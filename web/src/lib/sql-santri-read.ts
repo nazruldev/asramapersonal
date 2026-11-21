@@ -91,7 +91,7 @@ export async function sqlQuerySantriPage(opts: {
     const total = Number((countRes.values?.[0] as { c?: number })?.c ?? 0);
 
     const rowsRes = await db.query(
-      `SELECT s.*, k.nama AS kamar_nama_join, kl.nama AS kelas_nama_join ${SANTRI_FROM} ${clause} ORDER BY s.nama COLLATE NOCASE LIMIT ? OFFSET ?`,
+      `SELECT s.*, k.nama AS kamar_nama_join, kl.nama AS kelas_nama_join ${SANTRI_FROM} ${clause} ORDER BY datetime(COALESCE(s.updated_at, s.created_at)) DESC, s.nama COLLATE NOCASE LIMIT ? OFFSET ?`,
       [...params, limit, offset]
     );
     const items = (rowsRes.values ?? []).map((row) =>
@@ -120,13 +120,13 @@ export async function sqlListSantriSummary(
   return runSqlExclusive(async (db) => {
     const res = await db.query(
       `SELECT s.id, s.nama, kl.nama AS kelas, k.nama AS kamar,
-      s.nomor_wali, s.jenis_kelamin, s.include_wa, s.created_at,
+      s.nomor_wali, s.jenis_kelamin, s.include_wa, s.created_at, s.updated_at,
       s.asal_provinsi_code, s.asal_provinsi_nama, s.asal_kota_code, s.asal_kota_nama,
       s.asal_kecamatan_code, s.asal_kecamatan_nama, s.asal_desa_code, s.asal_desa_nama,
       s.jumlah_pelanggaran, s.masuk_kamar_sejak, s.asrama_id
      ${SANTRI_FROM}
      ${asramaIds?.length ? `WHERE s.asrama_id IN (${asramaIds.map(() => '?').join(',')})` : ''}
-     ORDER BY s.nama COLLATE NOCASE`,
+     ORDER BY datetime(COALESCE(s.updated_at, s.created_at)) DESC, s.nama COLLATE NOCASE`,
       asramaIds?.length ? [...asramaIds] : []
     );
     return (res.values ?? []).map((row) => {
@@ -140,6 +140,7 @@ export async function sqlListSantriSummary(
         jenis_kelamin: r.jenis_kelamin ?? '',
         include_wa: r.include_wa === 0 ? false : true,
         created_at: r.created_at ?? undefined,
+        updated_at: r.updated_at ?? undefined,
         asal_provinsi_code: r.asal_provinsi_code,
         asal_provinsi_nama: r.asal_provinsi_nama,
         asal_kota_code: r.asal_kota_code,

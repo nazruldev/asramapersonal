@@ -34,7 +34,8 @@ export const SCHEMA_V4_SQL = `
     fasilitas_json      TEXT,
     asrama_id           TEXT,
     created_by          TEXT,
-    updated_by          TEXT
+    updated_by          TEXT,
+    updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
   CREATE TABLE IF NOT EXISTS santri (

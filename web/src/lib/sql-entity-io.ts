@@ -282,7 +282,8 @@ export async function resolveKetuaSantriIdForKamarRow(
 
 function kamarSqlParams(
   row: Record<string, unknown>,
-  ketuaId: string | null
+  ketuaId: string | null,
+  updatedAt: string
 ): (string | number | null)[] {
   return [
     String(row.id),
@@ -292,24 +293,32 @@ function kamarSqlParams(
     ketuaId,
     JSON.stringify(row.fasilitas ?? []),
     optStr(row, 'asrama_id'),
+    updatedAt,
   ];
 }
 
 /** Satu baris kamar — tanpa BEGIN TRANSACTION / flush penuh (stabil di Android). */
 export async function sqlUpsertKamarRow(row: Record<string, unknown>): Promise<void> {
   if (!shouldPersistToSqlite()) return;
+  const updatedAt =
+    optStr(row, 'updated_at') ||
+    optStr(row, 'updatedAt') ||
+    new Date().toISOString();
+  row.updated_at = updatedAt;
   await withWrite(async (db) => {
     const ketuaId = await resolveKetuaSantriIdForKamarRow(db, row);
     await db.run(
-      `INSERT INTO kamar (id, nama, kapasitas, lantai, ketua_santri_id, fasilitas_json, asrama_id) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO kamar (id, nama, kapasitas, lantai, ketua_santri_id, fasilitas_json, asrama_id, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          nama=excluded.nama,
          kapasitas=excluded.kapasitas,
          lantai=excluded.lantai,
          ketua_santri_id=excluded.ketua_santri_id,
          fasilitas_json=excluded.fasilitas_json,
-         asrama_id=excluded.asrama_id`,
-      kamarSqlParams(row, ketuaId)
+         asrama_id=excluded.asrama_id,
+         updated_at=excluded.updated_at`,
+      kamarSqlParams(row, ketuaId, updatedAt)
     );
     await stampActor(db, 'kamar', String(row.id));
   });
@@ -595,6 +604,7 @@ function mapKamarRowFromSql(r: Record<string, unknown>): Record<string, unknown>
     ketua_santri_id: r.ketua_santri_id ?? undefined,
     fasilitas,
     asrama_id: r.asrama_id ?? undefined,
+    updated_at: r.updated_at ?? undefined,
   };
 }
 
@@ -606,7 +616,7 @@ export async function sqlListKamarWithPenghuni(): Promise<Record<string, unknown
       `SELECT k.*, s.nama AS ketua_nama
        FROM kamar k
        LEFT JOIN santri s ON s.id = k.ketua_santri_id
-       ORDER BY k.nama COLLATE NOCASE`
+       ORDER BY datetime(k.updated_at) DESC, k.nama COLLATE NOCASE`
     );
     const kamarRows = (kamarRes.values ?? []).map((row) =>
       mapKamarRowFromSql(row as Record<string, unknown>)

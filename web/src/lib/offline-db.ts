@@ -225,6 +225,11 @@ export function setWebSqliteAvailable(_ok: boolean): void {
 }
 
 export function shouldPersistToSqlite(): boolean {
+  // Full-online Turso: sumber kebenaran cloud + RAM; jangan pakai SQLite entity store.
+  const url = (import.meta.env.VITE_TURSO_DATABASE_URL as string | undefined)?.trim();
+  const token = (import.meta.env.VITE_TURSO_AUTH_TOKEN as string | undefined)?.trim();
+  if (url && token) return false;
+
   const platform = Capacitor.getPlatform();
   return platform === 'android' || platform === 'ios' || Capacitor.isNativePlatform();
 }
@@ -611,6 +616,10 @@ async function loadV4Snapshot(includeHeavy = true): Promise<OfflineDbSnapshot | 
       ketua_santri_id: r.ketua_santri_id ?? undefined,
       fasilitas,
       asrama_id: r.asrama_id ?? undefined,
+      // Wajib ikut ekspor — tanpa ini push/delta sync kamar antar device putus.
+      updated_at: r.updated_at ?? undefined,
+      created_by: r.created_by ?? undefined,
+      updated_by: r.updated_by ?? undefined,
     };
   });
 
@@ -914,9 +923,47 @@ async function ensureSchemaPatches(): Promise<void> {
   await purgeOrphanSantriChildRows(db);
 }
 
+const WEB_TOMBSTONE_KEY = 'asrama_sync_tombstones';
+
+type WebTombstone = { table_name: string; row_id: string; deleted_at: string };
+
+function readWebTombstones(): WebTombstone[] {
+  if (typeof localStorage === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(WEB_TOMBSTONE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? (parsed as WebTombstone[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeWebTombstones(rows: WebTombstone[]): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(WEB_TOMBSTONE_KEY, JSON.stringify(rows));
+  } catch {
+    /* ignore quota */
+  }
+}
+
+function upsertWebTombstone(tableName: string, rowId: string): void {
+  const deletedAt = new Date().toISOString();
+  const rows = readWebTombstones().filter(
+    (r) => !(r.table_name === tableName && r.row_id === rowId)
+  );
+  rows.push({ table_name: tableName, row_id: rowId, deleted_at: deletedAt });
+  writeWebTombstones(rows);
+}
+
 export async function recordSyncTombstone(tableName: string, rowId: string): Promise<void> {
   if (!tableName || !rowId) return;
-  if (!shouldPersistToSqlite()) return;
+  // Full-online Turso / web: simpan tombstone di localStorage agar push bisa hapus baris cloud.
+  if (!shouldPersistToSqlite()) {
+    upsertWebTombstone(tableName, rowId);
+    return;
+  }
   await initOfflineSqlite();
   await runSqlExclusive(async (db) => {
     await db.run(
@@ -932,7 +979,13 @@ export async function recordSyncTombstones(
   rowIds: string[]
 ): Promise<void> {
   if (!rowIds.length) return;
-  if (!shouldPersistToSqlite()) return;
+  if (!shouldPersistToSqlite()) {
+    for (const rowId of rowIds) {
+      if (!rowId) continue;
+      upsertWebTombstone(tableName, rowId);
+    }
+    return;
+  }
   await initOfflineSqlite();
   await runSqlExclusive(async (db) => {
     for (const rowId of rowIds) {
@@ -949,7 +1002,13 @@ export async function recordSyncTombstones(
 export async function listSyncTombstones(): Promise<
   { table_name: string; row_id: string; deleted_at: string }[]
 > {
-  if (!shouldPersistToSqlite()) return [];
+  if (!shouldPersistToSqlite()) {
+    return readWebTombstones().map((r) => ({
+      table_name: String(r.table_name),
+      row_id: String(r.row_id),
+      deleted_at: String(r.deleted_at),
+    }));
+  }
   await initOfflineSqlite();
   return runSqlExclusive(async (db) => {
     const result = await db.query(
@@ -963,6 +1022,29 @@ export async function listSyncTombstones(): Promise<
         deleted_at: String(row.deleted_at),
       };
     });
+  });
+}
+
+/** Hapus tombstone lokal setelah berhasil diterapkan ke Turso. */
+export async function clearAppliedTombstones(
+  tombstones: { table_name: string; row_id: string }[]
+): Promise<void> {
+  if (!tombstones.length) return;
+  if (!shouldPersistToSqlite()) {
+    const drop = new Set(tombstones.map((t) => `${t.table_name}|${t.row_id}`));
+    writeWebTombstones(
+      readWebTombstones().filter((r) => !drop.has(`${r.table_name}|${r.row_id}`))
+    );
+    return;
+  }
+  await initOfflineSqlite();
+  await runSqlExclusive(async (db) => {
+    for (const t of tombstones) {
+      await db.run(`DELETE FROM sync_tombstone WHERE table_name = ? AND row_id = ?`, [
+        t.table_name,
+        t.row_id,
+      ]);
+    }
   });
 }
 

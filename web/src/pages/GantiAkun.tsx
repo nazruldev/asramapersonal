@@ -1,13 +1,19 @@
 import { useEffect, useState } from 'react';
-import { LogOut, Plus, ShieldCheck, Users } from 'lucide-react';
+import { Eye, LogOut, Plus, ShieldCheck, UserCircle2, Users } from 'lucide-react';
 import { PageWithPullRefresh } from '@/components/page-with-pull-refresh';
 import { Button } from '@/components/ui/button';
 import { clearAuthenticated, getSessionUser } from '@/lib/app-auth';
 import { avatarInitials, getAvatar, subscribeAvatar } from '@/lib/app-avatar';
 import { listLoginAccounts, type AccountOption } from '@/lib/app-login';
-import { penggunaRoleLabel } from '@/lib/app-settings';
+import { penggunaRoleLabel, type PenggunaRole } from '@/lib/app-settings';
 import { appCardClass, appListCardButtonClass, appMutedTextClass } from '@/lib/surface-styles';
 import { cn } from '@/lib/utils';
+
+function RoleIcon({ role }: { role: PenggunaRole }) {
+  if (role === 'super_admin') return <ShieldCheck className="w-3 h-3" />;
+  if (role === 'pengawas') return <Eye className="w-3 h-3 text-sky-600" />;
+  return <UserCircle2 className="w-3 h-3" />;
+}
 
 function AccountAvatar({ id, nama }: { id: string; nama: string }) {
   const [avatar, setAvatarState] = useState<string | null>(() => getAvatar(id));
@@ -78,7 +84,7 @@ export default function GantiAkun() {
                       'flex items-center gap-1 text-[11px] leading-snug mt-0.5'
                     )}
                   >
-                    {a.role === 'super_admin' ? <ShieldCheck className="w-3 h-3" /> : null}
+                    <RoleIcon role={a.role} />
                     {penggunaRoleLabel(a.role)}
                   </span>
                 </span>

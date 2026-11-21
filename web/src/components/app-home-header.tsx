@@ -2,6 +2,7 @@ import { Moon, Sun } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { AppLogo } from '@/components/app-logo';
 import { AsramaSwitcher } from '@/components/asrama-switcher';
+import { HeaderRefreshButton } from '@/components/header-refresh-button';
 
 type Props = {
   namaAsrama: string;
@@ -57,6 +58,7 @@ export function AppHomeHeader({
         )}
       >
         <AsramaSwitcher variant="icon" theme={theme} />
+        <HeaderRefreshButton theme={theme} bindShortcut className={iconBtnClass} />
         <button
           type="button"
           onClick={onToggleTheme}

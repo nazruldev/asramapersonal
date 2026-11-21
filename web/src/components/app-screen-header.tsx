@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { ScreenHeaderMeta } from '@/lib/screen-header';
+import { HeaderRefreshButton } from '@/components/header-refresh-button';
 
 type Props = {
   meta: ScreenHeaderMeta;
@@ -41,11 +42,10 @@ export function AppScreenHeader({ meta, isScrolled, onBack, right }: Props) {
         <h1 className="text-lg font-semibold leading-tight truncate tracking-tight">{meta.title}</h1>
       </div>
 
-      {right ? (
-        <div className="shrink-0 hidden sm:flex items-center justify-end relative z-10 touch-manipulation">{right}</div>
-      ) : (
-        <div className="w-2 shrink-0" aria-hidden />
-      )}
+      <div className="shrink-0 flex items-center justify-end gap-0.5 relative z-10 touch-manipulation pr-1">
+        <HeaderRefreshButton bindShortcut />
+        {right ? <div className="hidden sm:flex items-center">{right}</div> : null}
+      </div>
     </header>
   );
 }

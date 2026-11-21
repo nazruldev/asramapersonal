@@ -1,5 +1,5 @@
 import type { PagedResponse } from './api-pagination';
-import { DEFAULT_LIST_PAGE_SIZE, paginateInMemory } from './api-pagination';
+import { DEFAULT_LIST_PAGE_SIZE, paginateInMemory, sortByUpdatedDesc } from './api-pagination';
 
 export type SantriListRow = Record<string, unknown> & { id: string };
 
@@ -19,7 +19,7 @@ export async function fetchSantriPage(params: {
   const data = (await res.json()) as PagedResponse<SantriListRow> | SantriListRow[];
   if (Array.isArray(data)) {
     return paginateInMemory(
-      data,
+      sortByUpdatedDesc(data),
       params.page,
       params.limit ?? DEFAULT_LIST_PAGE_SIZE
     );

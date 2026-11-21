@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
+import { Capacitor } from '@capacitor/core';
 import {
   Trophy,
   MapPin,
@@ -19,8 +20,12 @@ import { PageWithPullRefresh } from '@/components/page-with-pull-refresh';
 import { AppModal } from '@/components/ui/app-modal';
 import { Button } from '@/components/ui/button';
 import {
+  PIN_MAX_LENGTH,
+  PIN_MIN_LENGTH,
+  clampPinInput,
   getSessionUser,
   hasModuleAccess,
+  pinLengthError,
   setActiveAsramaId,
   subscribeSessionUser,
 } from '@/lib/app-auth';
@@ -41,6 +46,8 @@ import { appCardClass, appListCardButtonClass, appMutedTextClass } from '@/lib/s
 import { toast } from '@/lib/toast';
 import { useAppStore } from '@/store/app-store';
 import { cn } from '@/lib/utils';
+
+const BUILD_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev';
 
 type MenuLink = {
   label: string;
@@ -72,6 +79,19 @@ export default function Profil() {
   const [pinBaru, setPinBaru] = useState('');
   const [pinUlang, setPinUlang] = useState('');
   const [savingPin, setSavingPin] = useState(false);
+  const [appVersion, setAppVersion] = useState(BUILD_VERSION);
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    void import('@/lib/app-update')
+      .then((m) => m.getActiveBundleVersion())
+      .then((v) => {
+        if (v) setAppVersion(v);
+      })
+      .catch(() => {
+        /* biarkan versi build */
+      });
+  }, []);
 
   useEffect(
     () =>
@@ -116,8 +136,9 @@ export default function Profil() {
   };
 
   const gantiPin = async () => {
-    if (pinBaru.trim().length < 4) {
-      toast.error('PIN baru minimal 4 karakter');
+    const pinErr = pinLengthError(pinBaru);
+    if (pinErr) {
+      toast.error(pinErr);
       return;
     }
     if (pinBaru !== pinUlang) {
@@ -194,8 +215,17 @@ export default function Profil() {
             className={cn(appSelectClass, 'h-10')}
             value={activeAsrama ?? ''}
             onChange={(e) => {
-              setActiveAsramaId(e.target.value || null);
-              void reloadAll();
+              const next = e.target.value || null;
+              void (async () => {
+                try {
+                  await setActiveAsramaId(next);
+                  await reloadAll();
+                } catch (err) {
+                  toast.error(
+                    err instanceof Error ? err.message : 'Gagal sync setelah ganti asrama'
+                  );
+                }
+              })();
             }}
           >
             {bisaPilihSemua && <option value="">Semua asrama</option>}
@@ -219,9 +249,10 @@ export default function Profil() {
           <input
             type="password"
             inputMode="numeric"
+            maxLength={PIN_MAX_LENGTH}
             className={appFieldClass}
             value={pinLama}
-            onChange={(e) => setPinLama(e.target.value)}
+            onChange={(e) => setPinLama(clampPinInput(e.target.value))}
             placeholder="PIN lama"
           />
         </div>
@@ -230,10 +261,11 @@ export default function Profil() {
           <input
             type="password"
             inputMode="numeric"
+            maxLength={PIN_MAX_LENGTH}
             className={appFieldClass}
             value={pinBaru}
-            onChange={(e) => setPinBaru(e.target.value)}
-            placeholder="Minimal 4 karakter"
+            onChange={(e) => setPinBaru(clampPinInput(e.target.value))}
+            placeholder={`${PIN_MIN_LENGTH}–${PIN_MAX_LENGTH} digit`}
           />
         </div>
         <div>
@@ -241,9 +273,10 @@ export default function Profil() {
           <input
             type="password"
             inputMode="numeric"
+            maxLength={PIN_MAX_LENGTH}
             className={appFieldClass}
             value={pinUlang}
-            onChange={(e) => setPinUlang(e.target.value)}
+            onChange={(e) => setPinUlang(clampPinInput(e.target.value))}
             placeholder="Ketik ulang PIN baru"
           />
         </div>
@@ -304,6 +337,10 @@ export default function Profil() {
         <LogOut className="w-4 h-4" />
         Ganti Akun / Keluar
       </button>
+
+      <p className="pt-2 pb-1 text-center text-[11px] text-slate-400 dark:text-slate-500">
+        AsramaPersonal · Versi {appVersion}
+      </p>
 
       {/* Modal avatar */}
       <AppModal

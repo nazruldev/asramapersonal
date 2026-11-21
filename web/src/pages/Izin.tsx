@@ -106,7 +106,7 @@ export default function Izin() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const statusScrollRef = useRef<HTMLDivElement>(null);
   const [isSantriPickerOpen, setIsSantriPickerOpen] = useState(false);
-  const [selectedSantriId, setSelectedSantriId] = useState('');
+  const [selectedSantriIds, setSelectedSantriIds] = useState<string[]>([]);
   const [filterStatus, setFilterStatus] = useState<'Semua' | 'Belum' | 'Sudah'>('Semua');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterOpen, setFilterOpen] = useState(false);
@@ -114,7 +114,9 @@ export default function Izin() {
   const [selectedKamar, setSelectedKamar] = useState<string[]>([]);
   const [alasanJenis, setAlasanJenis] = useState<string>(DEFAULT_IZIN_ALASAN);
   const [alasanLainnya, setAlasanLainnya] = useState('');
+  const [penjemput, setPenjemput] = useState('Mandiri');
   const [tanggalKeluar, setTanggalKeluar] = useState(defaultKeluarLocal);
+  const isIzinKeluarSaja = alasanJenis === 'Izin keluar saja';
   const [durasiPreset, setDurasiPreset] = useState<IzinDurasiPreset>('belum_pasti');
   const [batasKembaliLocal, setBatasKembaliLocal] = useState(() =>
     batasKembaliLocalFromKeluar(defaultKeluarLocal(), '1hari')
@@ -145,24 +147,33 @@ export default function Izin() {
   }, [reload]);
 
   const addIzinMutation = useMutation({
-    mutationFn: async (payload: any) => {
-      const res = await fetch('/api/izin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error((data as { error?: string }).error || 'Gagal menyimpan izin');
-      return data;
+    mutationFn: async (payload: { santri_ids: string[] } & Record<string, unknown>) => {
+      const { santri_ids, ...rest } = payload;
+      let last: unknown = null;
+      for (const santriId of santri_ids) {
+        const res = await fetch('/api/izin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...rest, santri_id: santriId }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error((data as { error?: string }).error || 'Gagal menyimpan izin');
+        last = data;
+      }
+      return last;
     },
-    onSuccess: () => {
-      toast.success('Data izin berhasil disimpan');
+    onSuccess: (_data, payload) => {
+      const total = payload.santri_ids.length;
+      toast.success(
+        total > 1 ? `Izin tersimpan untuk ${total} santri` : 'Data izin berhasil disimpan'
+      );
       void reload(['izin', 'dashboard']);
       setIsAddModalOpen(false);
       setIsSantriPickerOpen(false);
-      setSelectedSantriId('');
+      setSelectedSantriIds([]);
       setAlasanJenis(DEFAULT_IZIN_ALASAN);
       setAlasanLainnya('');
+      setPenjemput('Mandiri');
       resetIzinFormDates();
     },
     onError: (err) =>
@@ -186,16 +197,25 @@ export default function Izin() {
     [santriList, santriSedangIzinIds]
   );
 
-  const selectedSantri = (santriList as { id: string; nama: string; kamar?: string }[]).find(
-    (s) => s.id === selectedSantriId
-  );
+  const selectedSantriLabel = useMemo(() => {
+    if (!selectedSantriIds.length) return '';
+    const names = (santriList as { id: string; nama: string; kamar?: string }[])
+      .filter((s) => selectedSantriIds.includes(s.id))
+      .map((s) => s.nama);
+    return names.join(', ');
+  }, [selectedSantriIds, santriList]);
+
+  const toggleSantriSelection = useCallback((id: string) => {
+    if (!id) return;
+    setSelectedSantriIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  }, []);
 
   useEffect(() => {
     if (!isAddModalOpen) return;
-    if (selectedSantriId && !santriSedangIzinIds.has(selectedSantriId)) return;
-    const first = santriPickerOptions[0];
-    setSelectedSantriId(first?.value ?? '');
-  }, [isAddModalOpen, santriPickerOptions, selectedSantriId, santriSedangIzinIds]);
+    setSelectedSantriIds((prev) => prev.filter((id) => !santriSedangIzinIds.has(id)));
+  }, [isAddModalOpen, santriSedangIzinIds]);
 
   useEffect(() => {
     if (durasiPreset === 'custom' || durasiPreset === 'belum_pasti') return;
@@ -204,12 +224,12 @@ export default function Izin() {
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!selectedSantriId) {
+    if (!selectedSantriIds.length) {
       toast.error('Pilih santri terlebih dahulu');
       return;
     }
-    if (santriSedangIzinIds.has(selectedSantriId)) {
-      toast.error('Santri masih sedang izin. Tandai sudah kembali dulu.');
+    if (selectedSantriIds.some((id) => santriSedangIzinIds.has(id))) {
+      toast.error('Ada santri yang masih sedang izin. Tandai sudah kembali dulu.');
       return;
     }
     let alasan: string;
@@ -223,7 +243,6 @@ export default function Izin() {
     } else {
       alasan = alasanJenis;
     }
-    const formData = new FormData(e.currentTarget);
     const batas_kembali =
       durasiPreset === 'belum_pasti'
         ? IZIN_BATAS_BELUM_PASTI
@@ -237,11 +256,11 @@ export default function Izin() {
       return;
     }
     addIzinMutation.mutate({
-      santri_id: selectedSantriId,
+      santri_ids: selectedSantriIds,
       alasan,
       tanggal_keluar: datetimeLocalToIso(tanggalKeluar),
       batas_kembali,
-      penjemput: formData.get('penjemput') || 'Orang Tua',
+      penjemput: isIzinKeluarSaja ? 'Mandiri' : penjemput || 'Orang Tua',
     });
   };
 
@@ -297,6 +316,10 @@ export default function Izin() {
   ).length;
 
   const openAddModal = useCallback(() => {
+    setSelectedSantriIds([]);
+    setAlasanJenis(DEFAULT_IZIN_ALASAN);
+    setAlasanLainnya('');
+    setPenjemput('Mandiri');
     resetIzinFormDates(DEFAULT_IZIN_ALASAN);
     setIsAddModalOpen(true);
   }, [resetIzinFormDates]);
@@ -304,9 +327,10 @@ export default function Izin() {
   const closeAddModal = useCallback(() => {
     setIsAddModalOpen(false);
     setIsSantriPickerOpen(false);
-    setSelectedSantriId('');
+    setSelectedSantriIds([]);
     setAlasanJenis(DEFAULT_IZIN_ALASAN);
     setAlasanLainnya('');
+    setPenjemput('Mandiri');
     resetIzinFormDates(DEFAULT_IZIN_ALASAN);
   }, [resetIzinFormDates]);
 
@@ -534,12 +558,16 @@ export default function Izin() {
               form="izin-add-form"
               disabled={
                 addIzinMutation.isPending ||
-                !selectedSantriId ||
+                !selectedSantriIds.length ||
                 santriPickerOptions.length === 0
               }
               className="w-full py-3 bg-emerald-700 hover:bg-emerald-800 text-white rounded-sm font-bold text-xs shadow-md shadow-emerald-700/20 active:scale-[0.98] transition-all disabled:opacity-50"
             >
-              {addIzinMutation.isPending ? 'Menyimpan...' : 'Simpan Surat Izin'}
+              {addIzinMutation.isPending
+                ? 'Menyimpan...'
+                : selectedSantriIds.length > 1
+                  ? `Simpan Surat Izin (${selectedSantriIds.length} santri)`
+                  : 'Simpan Surat Izin'}
             </button>
           </AppModalFooter>
         }
@@ -559,17 +587,18 @@ export default function Izin() {
                   disabled={santriPickerOptions.length === 0}
                   className={`${appPickerBtnClass} disabled:opacity-50`}
                 >
-                  <span className={`truncate text-left ${selectedSantri ? '' : 'text-slate-400'}`}>
-                    {selectedSantri
-                      ? `${selectedSantri.nama}${selectedSantri.kamar ? ` (${selectedSantri.kamar})` : ''}`
-                      : santriPickerOptions.length === 0
+                  <span
+                    className={`truncate text-left ${selectedSantriLabel ? '' : 'text-slate-400'}`}
+                  >
+                    {selectedSantriLabel ||
+                      (santriPickerOptions.length === 0
                         ? 'Tidak ada santri tersedia'
-                        : 'Pilih santri...'}
+                        : 'Pilih santri... (bisa lebih dari satu)')}
                   </span>
                   <ChevronDown className="w-4 h-4 shrink-0 opacity-60" />
                 </button>
                 <p className="text-[10px] text-slate-400">
-                  Santri yang masih sedang izin tidak bisa dipilih sampai ditandai sudah kembali.
+                  Bisa pilih banyak santri sekaligus. Yang masih sedang izin tidak bisa dipilih.
                 </p>
               </div>
 
@@ -580,13 +609,14 @@ export default function Izin() {
                   onChange={(e) => {
                     const v = e.target.value;
                     setAlasanJenis(v);
-                    if (v === 'Sakit / Berobat') {
-                      setDurasiPreset('belum_pasti');
-                    } else if (v === 'Izin keluar saja') {
+                    if (v === 'Izin keluar saja') {
+                      setPenjemput('Mandiri');
                       setDurasiPreset('1jam');
                       setBatasKembaliLocal(
                         batasKembaliLocalFromKeluar(tanggalKeluar, '1jam')
                       );
+                    } else if (v === 'Sakit / Berobat') {
+                      setDurasiPreset('belum_pasti');
                     } else if (durasiPreset === 'belum_pasti' || durasiPreset === '1jam') {
                       setDurasiPreset('1hari');
                       setBatasKembaliLocal(
@@ -619,13 +649,24 @@ export default function Izin() {
 
               <div className={appFormStack}>
                 <label className={appLabelClass}>Penjemput / Pendamping</label>
-                <select name="penjemput" defaultValue="Orang Tua" className={appSelectClass}>
+                <select
+                  name="penjemput"
+                  value={isIzinKeluarSaja ? 'Mandiri' : penjemput}
+                  onChange={(e) => setPenjemput(e.target.value)}
+                  disabled={isIzinKeluarSaja}
+                  className={cn(appSelectClass, isIzinKeluarSaja && 'opacity-60 cursor-not-allowed')}
+                >
                   <option value="Orang Tua">Orang Tua</option>
                   <option value="Saudara">Saudara</option>
                   <option value="Teman">Teman</option>
                   <option value="Kerabat">Kerabat</option>
                   <option value="Mandiri">Mandiri</option>
                 </select>
+                {isIzinKeluarSaja ? (
+                  <p className="text-[10px] text-slate-400">
+                    Izin keluar saja otomatis mandiri (tanpa penjemput).
+                  </p>
+                ) : null}
               </div>
 
               <div className={appFormStack}>
@@ -703,11 +744,13 @@ export default function Izin() {
         open={isSantriPickerOpen}
         onClose={() => setIsSantriPickerOpen(false)}
         title="Pilih Santri"
-        description="Cari nama, kelas, atau kamar"
+        description="Bisa pilih lebih dari satu — ketuk nama untuk menandai"
         searchPlaceholder="Cari santri..."
         options={santriPickerOptions}
-        value={selectedSantriId}
-        onSelect={setSelectedSantriId}
+        value=""
+        multi
+        values={selectedSantriIds}
+        onSelect={toggleSantriSelection}
       />
 
     </>

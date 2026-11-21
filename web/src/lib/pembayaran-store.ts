@@ -1,11 +1,8 @@
 /**
  * Store pembayaran santri (tagihan dinamis + cicilan).
  *
- * Terpisah dari snapshot entity utama agar database live tidak terganggu:
- * - SQLite lokal (native): tabel baru via CREATE TABLE IF NOT EXISTS (lihat schema-v4).
- * - Web/Electron: localStorage JSON terpisah (asrama_pembayaran_db).
- * - Turso: push/pull incremental ke tabel pembayaran sendiri (tidak ikut
- *   wipe-and-rewrite snapshot entity di turso-relational).
+ * Full-online Turso: cloud = sumber kebenaran.
+ * localStorage/SQLite hanya cache kerja di RAM path; setiap mutasi await push ke Turso.
  */
 import { createClient, type Client, type InStatement } from '@libsql/client/web';
 import {
@@ -230,7 +227,7 @@ export async function upsertTagihanJenis(
     for (const t of st.tagihan) if (t.jenis_id === row.id) t.nama_jenis = row.nama;
     lsWrite(st);
   }
-  schedulePush();
+  await flushPembayaranToTurso();
   return row;
 }
 
@@ -246,7 +243,7 @@ export async function deleteTagihanJenis(id: string): Promise<void> {
     for (const t of st.tagihan) if (t.jenis_id === id) t.jenis_id = null;
     lsWrite(st);
   }
-  schedulePush();
+  await flushPembayaranToTurso();
 }
 
 // ——— CRUD: tagihan ———
@@ -363,7 +360,7 @@ export async function generateTagihan(
         if ((r.changes?.changes ?? 0) > 0) created += 1;
         else skipped += 1;
       }
-      schedulePush();
+      await flushPembayaranToTurso();
       return { created, skipped };
     });
   }
@@ -383,7 +380,7 @@ export async function generateTagihan(
     created += 1;
   }
   lsWrite(st);
-  schedulePush();
+  await flushPembayaranToTurso();
   return { created, skipped };
 }
 
@@ -416,7 +413,7 @@ export async function updateTagihan(
          WHERE id = ?`,
         [next.nominal, next.jatuh_tempo ?? null, next.catatan ?? null, next.status, next.updated_at, id]
       );
-      schedulePush();
+      await flushPembayaranToTurso();
       return next;
     });
   }
@@ -427,7 +424,7 @@ export async function updateTagihan(
   st.tagihan[idx] = apply(st.tagihan[idx]);
   const next = st.tagihan[idx];
   lsWrite(st);
-  schedulePush();
+  await flushPembayaranToTurso();
   return next;
 }
 
@@ -444,7 +441,7 @@ export async function deleteTagihan(id: string): Promise<void> {
     st.pembayaran = st.pembayaran.filter((p) => p.tagihan_id !== id);
     lsWrite(st);
   }
-  schedulePush();
+  await flushPembayaranToTurso();
 }
 
 // ——— Transaksi / cicilan ———
@@ -517,7 +514,7 @@ export async function addTransaksi(
     });
     if (!ok) return null;
     await recountTagihanTerbayar(tagihanId);
-    schedulePush();
+    await flushPembayaranToTurso();
     return row;
   }
 
@@ -532,7 +529,7 @@ export async function addTransaksi(
   tagihan.status = statusOf(tagihan.nominal, tagihan.terbayar);
   tagihan.updated_at = nowIso();
   lsWrite(st);
-  schedulePush();
+  await flushPembayaranToTurso();
   return row;
 }
 
@@ -563,7 +560,7 @@ export async function deleteTransaksi(id: string): Promise<void> {
     }
     lsWrite(st);
   }
-  schedulePush();
+  await flushPembayaranToTurso();
 }
 
 /** Rekap tunggakan per santri (opsional per periode). */
@@ -606,7 +603,7 @@ export async function purgePembayaranForSantri(santriId: string): Promise<void> 
     const ids = new Set(st.tagihan.map((t) => t.id));
     st.pembayaran = st.pembayaran.filter((p) => ids.has(p.tagihan_id));
     lsWrite(st);
-    schedulePush();
+    await flushPembayaranToTurso();
   }
 }
 
@@ -622,7 +619,7 @@ export async function clearAllPembayaran(): Promise<void> {
   } else {
     lsWrite({ tagihan_jenis: [], tagihan: [], pembayaran: [] });
   }
-  schedulePush();
+  await flushPembayaranToTurso();
 }
 
 // ——— Turso sync (incremental, tabel terpisah) ———
@@ -819,30 +816,34 @@ export async function pullPembayaranFromTurso(): Promise<boolean> {
   return true;
 }
 
-let pushTimer: ReturnType<typeof setTimeout> | null = null;
 let pulled = false;
 
-/** Debounce push — dipanggil setelah setiap mutasi lokal. */
-function schedulePush(): void {
-  if (!isPembayaranSyncConfigured()) return;
-  if (pushTimer) clearTimeout(pushTimer);
-  pushTimer = setTimeout(() => {
-    pushTimer = null;
-    void pushPembayaranToTurso().catch((err) =>
-      console.warn('Push pembayaran ke Turso gagal:', err)
-    );
-  }, 600);
+/** Full-online: await push ke Turso setelah mutasi. */
+async function flushPembayaranToTurso(): Promise<void> {
+  if (!isPembayaranSyncConfigured()) {
+    throw new Error('Turso wajib untuk menyimpan pembayaran');
+  }
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    throw new Error('Offline — tidak bisa menyimpan pembayaran ke Turso');
+  }
+  await pushPembayaranToTurso();
 }
 
 /** Pull sekali per sesi (dipanggil saat halaman pembayaran dibuka). */
 export async function syncPembayaranOnce(): Promise<void> {
-  if (pulled || !isPembayaranSyncConfigured()) return;
+  if (pulled) return;
+  if (!isPembayaranSyncConfigured()) {
+    throw new Error('Turso wajib untuk pembayaran');
+  }
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    throw new Error('Offline — tidak bisa memuat pembayaran dari Turso');
+  }
   pulled = true;
   try {
     await pullPembayaranFromTurso();
   } catch (err) {
     pulled = false;
-    console.warn('Pull pembayaran dari Turso gagal:', err);
+    throw err;
   }
 }
 

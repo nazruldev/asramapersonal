@@ -1,5 +1,4 @@
 import { FileJson } from 'lucide-react';
-import { Capacitor } from '@capacitor/core';
 import { BackupRestorePanel } from '@/components/backup-restore-panel';
 import { TursoSyncPanel } from '@/components/turso-sync-panel';
 import { PageWithPullRefresh } from '@/components/page-with-pull-refresh';
@@ -7,29 +6,24 @@ import { shouldPersistToSqlite } from '@/lib/offline-db';
 import { isTursoConfigured } from '@/lib/sync/cloud-bootstrap';
 
 function nativeStorageNote(): string {
-  const platform = Capacitor.getPlatform();
   const tursoOn = isTursoConfigured();
 
   if (tursoOn) {
-    const local =
-      shouldPersistToSqlite() || platform === 'android'
-        ? 'Tulis dulu ke SQLite lokal; sync ke Turso saat online.'
-        : 'Tulis dulu ke penyimpanan browser; sync ke Turso saat online.';
     return (
-      `Mode offline-first + Turso. ${local} ` +
-      'Web, PC, dan Android memakai database Turso yang sama.'
+      'Mode full-online Turso. Semua baca/tulis ke cloud. ' +
+      'Internet wajib. Web, PC, dan Android memakai database Turso yang sama.'
     );
   }
 
   if (shouldPersistToSqlite()) {
     return (
       'Database SQLite lokal (Turso belum dikonfigurasi). ' +
-      'Ekspor cadangan .sql ke folder Unduhan.'
+      'Isi VITE_TURSO_* di web/.env — aplikasi memerlukan Turso.'
     );
   }
 
   return (
-    'Mode lokal browser (localStorage). Isi VITE_TURSO_* di web/.env untuk sync cloud.'
+    'Turso belum dikonfigurasi. Isi VITE_TURSO_DATABASE_URL dan VITE_TURSO_AUTH_TOKEN di web/.env.'
   );
 }
 
@@ -44,7 +38,7 @@ export default function DatabasePage() {
           <FileJson className="w-5 h-5 text-blue-600 dark:text-blue-300 flex-shrink-0 mt-0.5" />
           <div>
             <h3 className="text-sm font-bold text-blue-900 dark:text-blue-100 mb-1">
-              {isTursoConfigured() ? 'Offline-first + Turso' : 'Satu sumber data'}
+              {isTursoConfigured() ? 'Full-online Turso' : 'Turso wajib'}
             </h3>
             <p className="text-[11px] text-blue-700 dark:text-blue-200 leading-relaxed">
               {nativeStorageNote()}

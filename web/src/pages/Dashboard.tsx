@@ -231,7 +231,7 @@ export default function Dashboard() {
     >
       {/* Hero Welcome Card — full-bleed menempel tepi atas & samping */}
       <div
-        className="relative overflow-hidden p-5 -mx-3 sm:-mx-4 -mt-4 shadow-lg border-b border-emerald-500/40 dark:border-emerald-500/25"
+        className="relative overflow-hidden p-5 shadow-lg border-b border-emerald-500/40 dark:border-emerald-500/25"
       >
         <div className="absolute inset-0 bg-emerald-700 dark:bg-gradient-to-br dark:from-slate-950 dark:via-emerald-950 dark:to-teal-950" aria-hidden />
         <svg
@@ -298,47 +298,45 @@ export default function Dashboard() {
             {santriTanpaKamar > 0 ? (
               <div className="rounded-sm px-3 py-1.5 bg-amber-500/30 border border-amber-200/40 backdrop-blur-sm flex items-center gap-2">
                 <span className="font-black text-sm tabular-nums text-white">{santriTanpaKamar}</span>
-                <span className="text-[11px] font-semibold text-amber-50">Belum ada kamar</span>
+                <span className="text-[11px] font-semibold text-amber-50">Tanpa kamar</span>
               </div>
             ) : null}
           </div>
         </div>
       </div>
 
-      {/* Menu Cepat — full-bleed rapat jumbotron; padding luar kiri/kanan/atas dihilangkan */}
-      <div className="-mx-3 sm:-mx-4 -mt-4">
-        <div className="grid grid-cols-4 gap-2 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 pt-3 pb-3">
-          {quickActions.map((action) => {
-            const Icon = action.icon;
-            return (
-              <button
-                key={action.path}
-                type="button"
-                onClick={() => navigate(action.path)}
-                className="flex flex-col items-center gap-1.5 py-2 active:scale-95 transition-all"
-              >
-                <span className={cn('w-11 h-11 rounded-xl flex items-center justify-center', action.tile)}>
-                  <Icon className={cn('w-5 h-5', action.tone)} />
-                </span>
-                <span className="text-[10px] font-semibold text-slate-700 dark:text-slate-200 leading-tight text-center">
-                  {action.label}
-                </span>
-              </button>
-            );
-          })}
-          <button
-            type="button"
-            onClick={() => setShowAllMenu(true)}
-            className="flex flex-col items-center gap-1.5 py-2 active:scale-95 transition-all"
-          >
-            <span className="w-11 h-11 rounded-xl flex items-center justify-center bg-slate-200 dark:bg-slate-700">
-              <LayoutGrid className="w-5 h-5 text-slate-600 dark:text-slate-200" />
-            </span>
-            <span className="text-[10px] font-semibold text-slate-700 dark:text-slate-200 leading-tight text-center">
-              Lainnya
-            </span>
-          </button>
-        </div>
+      {/* Menu Cepat — full-bleed rapat jumbotron; tanpa padding kiri/kanan */}
+      <div className="-mt-4 grid grid-cols-4 gap-2 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 pt-3 pb-3">
+        {quickActions.map((action) => {
+          const Icon = action.icon;
+          return (
+            <button
+              key={action.path}
+              type="button"
+              onClick={() => navigate(action.path)}
+              className="flex flex-col items-center gap-1.5 py-2 active:scale-95 transition-all"
+            >
+              <span className={cn('w-11 h-11 rounded-xl flex items-center justify-center', action.tile)}>
+                <Icon className={cn('w-5 h-5', action.tone)} />
+              </span>
+              <span className="text-[10px] font-semibold text-slate-700 dark:text-slate-200 leading-tight text-center">
+                {action.label}
+              </span>
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          onClick={() => setShowAllMenu(true)}
+          className="flex flex-col items-center gap-1.5 py-2 active:scale-95 transition-all"
+        >
+          <span className="w-11 h-11 rounded-xl flex items-center justify-center bg-slate-200 dark:bg-slate-700">
+            <LayoutGrid className="w-5 h-5 text-slate-600 dark:text-slate-200" />
+          </span>
+          <span className="text-[10px] font-semibold text-slate-700 dark:text-slate-200 leading-tight text-center">
+            Lainnya
+          </span>
+        </button>
       </div>
 
       {/* Semua menu, dikelompokkan per kategori */}
@@ -382,6 +380,8 @@ export default function Dashboard() {
         </div>
       </AppModal>
 
+      {/* Konten di bawah full-bleed: pakai padding horizontal halaman */}
+      <div className="space-y-4 px-3 sm:px-4">
       {/* Status ringkas */}
       <div className="grid grid-cols-2 gap-3">
         {/* Total Santri */}
@@ -402,7 +402,7 @@ export default function Dashboard() {
             </div>
             <p className="text-[10px] text-slate-400 mt-0.5 truncate">
               {santriTanpaKamar > 0
-                ? `${santriTanpaKamar} belum punya kamar`
+                ? `${santriTanpaKamar} tanpa kamar`
                 : slotTotals.kapasitas > 0
                   ? `${slotTotals.terisi}/${slotTotals.kapasitas} slot terisi`
                   : 'Kelola di Data Kamar'}
@@ -756,6 +756,7 @@ export default function Dashboard() {
           </div>
       </div>
       )}
+      </div>
 
     </PageWithPullRefresh>
   );

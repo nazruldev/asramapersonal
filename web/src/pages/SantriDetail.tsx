@@ -540,7 +540,7 @@ export default function SantriDetail() {
                 </div>
                 <p className={cn('text-xs mt-0.5', appMutedTextClass)}>
                   Kelas {santri.kelas || '—'}
-                  {santri.kamar ? ` · ${santri.kamar}` : ' · Belum punya kamar'}
+                  {santri.kamar ? ` · ${santri.kamar}` : ' · Tanpa kamar'}
                 </p>
                 <div className="flex flex-wrap gap-1.5 mt-2">
                   {activeIzin ? (

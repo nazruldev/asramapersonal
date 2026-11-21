@@ -2,6 +2,7 @@ import {
   DEFAULT_PASSWORD_HASH,
   hashSecretSync,
   isSecurityQuestionsComplete,
+  pinLengthError,
   verifySecret,
   verifySecurityAnswers,
   type SecurityQuestionId,
@@ -177,7 +178,8 @@ export function handlePenggunaCreate(
   const nama = String(body.nama ?? '').trim();
   const pin = String(body.pin ?? '').trim();
   if (!nama) return { status: 400, body: { error: 'Nama pengguna wajib diisi' } };
-  if (pin.length < 4) return { status: 400, body: { error: 'PIN minimal 4 karakter' } };
+  const createPinErr = pinLengthError(pin);
+  if (createPinErr) return { status: 400, body: { error: createPinErr } };
   const role = normalizeRole(body.role);
   const asramaIds = normalizeAsramaIds(settings, body.asramaIds);
   if (role === 'pengawas' && asramaIds.length !== 1) {
@@ -227,7 +229,8 @@ export function handlePenggunaUpdate(
   if (body.aktif !== undefined) item.aktif = body.aktif !== false;
   if (body.pin !== undefined && String(body.pin).trim()) {
     const pin = String(body.pin).trim();
-    if (pin.length < 4) return { status: 400, body: { error: 'PIN minimal 4 karakter' } };
+    const updatePinErr = pinLengthError(pin);
+    if (updatePinErr) return { status: 400, body: { error: updatePinErr } };
     const pinHash = hashSecretSync(pin);
     if (pinTaken(settings, pinHash, id)) {
       return { status: 400, body: { error: 'PIN sudah dipakai akun lain. Gunakan PIN berbeda.' } };
@@ -261,7 +264,8 @@ export function handlePenggunaResetPin(
   const item = settings.pengguna.find((p) => p.id === id);
   if (!item) return { status: 404, body: { error: 'Pengguna tidak ditemukan' } };
   const pin = newPin.trim();
-  if (pin.length < 4) return { status: 400, body: { error: 'PIN minimal 4 karakter' } };
+  const resetPinErr = pinLengthError(pin);
+  if (resetPinErr) return { status: 400, body: { error: resetPinErr } };
   const pinHash = hashSecretSync(pin);
   if (pinTaken(settings, pinHash, id)) {
     return { status: 400, body: { error: 'PIN sudah dipakai akun lain. Gunakan PIN berbeda.' } };
@@ -284,7 +288,8 @@ export function handlePenggunaChangePin(
     return { status: 401, body: { ok: false, error: 'PIN saat ini salah' } };
   }
   const pin = newPin.trim();
-  if (pin.length < 4) return { status: 400, body: { ok: false, error: 'PIN minimal 4 karakter' } };
+  const changePinErr = pinLengthError(pin);
+  if (changePinErr) return { status: 400, body: { ok: false, error: changePinErr } };
   const pinHash = hashSecretSync(pin);
   if (pinTaken(settings, pinHash, id)) {
     return { status: 400, body: { ok: false, error: 'PIN sudah dipakai akun lain' } };
@@ -308,8 +313,12 @@ export function handleAuthChangePassword(
   if (!verifySecret(currentPassword, settings.passwordHash)) {
     return { status: 401, body: { ok: false, error: 'Kata sandi saat ini salah' } };
   }
-  if (!newPassword || newPassword.length < 4) {
-    return { status: 400, body: { ok: false, error: 'Kata sandi baru minimal 4 karakter' } };
+  const pwdErr = pinLengthError(newPassword || '');
+  if (pwdErr) {
+    return {
+      status: 400,
+      body: { ok: false, error: pwdErr.replace(/^PIN/, 'Kata sandi') },
+    };
   }
   const newHash = hashSecretSync(newPassword);
   settings.passwordHash = newHash;

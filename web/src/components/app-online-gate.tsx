@@ -8,10 +8,7 @@ type Props = {
   retrying?: boolean;
 };
 
-/**
- * Dipakai hanya untuk kasus ekstrem (mis. lokal rusak + cloud wajib).
- * Alur normal offline-first tidak memblokir UI — lihat SyncStatusBadge.
- */
+/** Full-online: blokir UI jika Turso / internet tidak tersedia. */
 export function AppOnlineGate({
   message,
   onRetry,
@@ -26,10 +23,10 @@ export function AppOnlineGate({
         <CloudOff className="mx-auto w-8 h-8 text-amber-600 dark:text-amber-400" />
         <div className="space-y-2">
           <h1 className="text-lg font-bold text-slate-900 dark:text-slate-100">
-            Tidak bisa menyambung cloud
+            Tidak bisa menyambung Turso
           </h1>
           <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-            Coba sambungkan internet untuk sync. Data yang sudah ada di perangkat tetap aman.
+            Aplikasi hanya berjalan online. Sambungkan internet lalu coba lagi.
           </p>
           {message ? (
             <p className="text-[11px] text-rose-600 dark:text-rose-400 break-words">{message}</p>

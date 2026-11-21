@@ -69,9 +69,10 @@ import {
   commitSqlTables,
   SQL_ENTITIES_ALL,
   sqlDeleteSantriCascade,
+  recordSyncTombstone,
   type SqlEntity,
 } from './offline-db';
-import { paginateInMemory, parsePageParams } from './api-pagination';
+import { paginateInMemory, parsePageParams, sortByUpdatedDesc } from './api-pagination';
 import { mapSqliteErrorToUserMessage, SqlForeignKeyError } from './sqlite-fk';
 import {
   sqlCountPenghuniKamar,
@@ -269,7 +270,9 @@ const applyRelationalSnapshot = (snapshot: ReturnType<typeof normalizeDb>) => {
 };
 
 const afterDbHydrated = () => {
-  if (ensureAccountsSeeded(db.settings, newId)) {
+  // Full-online: jangan seed/push sebelum bootstrap Turso (hindari polusi cloud).
+  const cloudMode = isTursoAuthority();
+  if (ensureAccountsSeeded(db.settings, newId) && !cloudMode) {
     void saveDb(SQL_SCOPE.settings);
   }
   assignDefaultAsramaToRows();
@@ -278,10 +281,10 @@ const afterDbHydrated = () => {
   }
   const presetCountBefore = db.penjadwalanPreset.length;
   reconcilePenjadwalanPresets();
-  if (db.penjadwalanPreset.length !== presetCountBefore) {
+  if (db.penjadwalanPreset.length !== presetCountBefore && !cloudMode) {
     void saveDb();
   }
-  seedDefaultsIfEmpty();
+  if (!cloudMode) seedDefaultsIfEmpty();
 };
 
 const snapshotFromMemory = (): Parameters<typeof saveOfflineDbSnapshot>[0] => ({
@@ -298,8 +301,22 @@ const snapshotFromMemory = (): Parameters<typeof saveOfflineDbSnapshot>[0] => ({
   settings: db.settings,
 });
 
+function isTursoAuthority(): boolean {
+  const url = (import.meta.env.VITE_TURSO_DATABASE_URL as string | undefined)?.trim();
+  const token = (import.meta.env.VITE_TURSO_AUTH_TOKEN as string | undefined)?.trim();
+  return Boolean(url && token);
+}
+
 const loadDbAsync = async () => {
   try {
+    // Full-online Turso: jangan muat localStorage/SQLite sebagai sumber kebenaran.
+    // Boot pull mengisi RAM dari cloud.
+    if (isTursoAuthority()) {
+      db = normalizeDb(getInitialDbSnapshot());
+      afterDbHydrated();
+      return;
+    }
+
     if (shouldPersistToSqlite()) {
       await initOfflineSqlite();
       // MVP: full snapshot — core-only + saveDb bisa menimpa absensi/izin di SQLite
@@ -444,11 +461,13 @@ export function ensureClientApiDbLoaded(): Promise<void> {
 }
 
 /** Terapkan settings dari Turso Cloud ke RAM + persist lokal. */
+/** Terapkan settings dari cloud ke RAM saja (tanpa push ulang ke Turso). */
 export async function applySettingsFromCloud(settings: AppSettings): Promise<void> {
   await ensureClientApiDbLoaded();
   db.settings = mergeAppSettings({ ...settings, setupSelesai: true });
   markOnboardingComplete();
-  await saveDb(SQL_SCOPE.settings);
+  // Full-online: jangan saveDb di sini — bootstrap baru saja pull; hindari double-push.
+  bumpDataUpdatedAt();
 }
 
 /** Snapshot penuh untuk sync lintas platform (Electron / Web / Android). */
@@ -468,14 +487,17 @@ export async function exportSyncSnapshot(): Promise<{
   return { snapshot: snapshotFromMemory(), updatedAt: getDataUpdatedAt() };
 }
 
-/** Terapkan snapshot cloud ke lokal (replace). */
+/** Terapkan snapshot cloud ke RAM (replace). Full-online: tidak tulis localStorage/SQLite. */
 export async function importSyncSnapshot(
   snapshot: Record<string, unknown>,
   remoteUpdatedAt: string
 ): Promise<void> {
   await ensureClientApiDbLoaded();
   const normalized = normalizeDb(snapshot);
-  if (shouldPersistToSqlite()) {
+  if (isTursoAuthority()) {
+    db = normalized;
+    afterDbHydrated();
+  } else if (shouldPersistToSqlite()) {
     await replaceOfflineDbSnapshot(normalized);
     applyRelationalSnapshot(normalized);
   } else {
@@ -491,8 +513,12 @@ export async function importSyncSnapshot(
   markOnboardingComplete();
 }
 
-/** Muat ulang RAM dari SQLite / localStorage setelah impor/sync (FULL — jangan core-only). */
+/** Muat ulang RAM setelah impor/sync. Full-online: data sudah di RAM. */
 export async function reloadClientApiFromStorage(): Promise<void> {
+  if (isTursoAuthority()) {
+    afterDbHydrated();
+    return;
+  }
   await flushClientApiPersist();
   if (shouldPersistToSqlite()) {
     await initOfflineSqlite();
@@ -548,6 +574,8 @@ type PersistOpts = { fullHeavyFlush?: boolean };
 
 const persistDbAsync = async (tables?: SqlEntity[], opts?: PersistOpts) => {
   bumpDataUpdatedAt();
+  // Full-online Turso: jangan tulis localStorage/SQLite sebagai sumber kebenaran.
+  if (isTursoAuthority()) return;
   if (shouldPersistToSqlite()) {
     await initOfflineSqlite();
     await commitSqlTables(snapshotFromMemory(), tables ?? SQL_ENTITIES_ALL, opts);
@@ -556,24 +584,127 @@ const persistDbAsync = async (tables?: SqlEntity[], opts?: PersistOpts) => {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
 };
 
-/** Antre push Turso tanpa memblokir respons API (hindari loading lama di form). */
-function queueTursoPush(): void {
-  const url = (import.meta.env.VITE_TURSO_DATABASE_URL as string | undefined)?.trim();
-  const token = (import.meta.env.VITE_TURSO_AUTH_TOKEN as string | undefined)?.trim();
-  if (!url || !token) return;
-  void import('@/lib/sync/turso-sync')
-    .then(({ scheduleSyncSoon }) => scheduleSyncSoon(350))
-    .catch(() => undefined);
+/** Push baris kamar segera ke Turso (tanpa full snapshot). */
+async function pushKamarTursoNow(row: Record<string, unknown>): Promise<void> {
+  if (!isTursoAuthority()) return;
+  const { pushKamarRowsNow } = await import('@/lib/sync/turso-sync');
+  await pushKamarRowsNow([row]);
+}
+
+/** Partial snapshot dari RAM hanya untuk entity di `tables`. */
+function buildPartialFromTables(tables: SqlEntity[]): Partial<ReturnType<typeof snapshotFromMemory>> {
+  const full = snapshotFromMemory();
+  const set = new Set(tables);
+  const partial: Partial<ReturnType<typeof snapshotFromMemory>> = {};
+  if (set.has('santri')) partial.santri = full.santri;
+  if (set.has('kamar')) partial.kamar = full.kamar;
+  if (set.has('kelas')) partial.kelas = full.kelas;
+  if (set.has('kegiatan')) partial.kegiatan = full.kegiatan;
+  if (set.has('penjadwalan')) partial.penjadwalan = full.penjadwalan;
+  if (set.has('penjadwalanPreset')) partial.penjadwalanPreset = full.penjadwalanPreset;
+  if (set.has('absensi')) partial.absensi = full.absensi;
+  if (set.has('izin')) partial.izin = full.izin;
+  if (set.has('pembinaan')) partial.pembinaan = full.pembinaan;
+  if (set.has('riwayat_kamar')) partial.riwayat_kamar = full.riwayat_kamar;
+  if (set.has('settings')) partial.settings = full.settings;
+  return partial;
+}
+
+function isFullEntityFlush(tables?: SqlEntity[]): boolean {
+  if (!tables || tables.length === 0) return true;
+  return SQL_ENTITIES_ALL.every((e) => tables.includes(e));
+}
+
+/** Remote: upsert hanya baris/entity di partial. */
+async function pushScopedTursoNow(
+  partial: Partial<ReturnType<typeof snapshotFromMemory>>,
+  reason: string
+): Promise<void> {
+  if (!isTursoAuthority()) return;
+  const { pushScopedToTurso } = await import('@/lib/sync/turso-sync');
+  await pushScopedToTurso(partial, reason);
+}
+
+/** Remote: terapkan tombstone lokal ke Turso (hapus baris). */
+async function flushTombstonesTursoNow(reason: string): Promise<void> {
+  if (!isTursoAuthority()) return;
+  const { flushTombstonesToTurso } = await import('@/lib/sync/turso-sync');
+  await flushTombstonesToTurso(reason);
+}
+
+/** Lengkapi FK id agar partial upsert santri tidak ter-skip. */
+function santriRowForTurso(row: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...row };
+  if (!next.kelas_id && next.kelas) {
+    const hit = db.kelas.find((k) => String(k.nama) === String(next.kelas));
+    if (hit) next.kelas_id = hit.id;
+  }
+  if (!next.kamar_id && next.kamar) {
+    const hit = db.kamar.find((k) => String(k.nama) === String(next.kamar));
+    if (hit) next.kamar_id = hit.id;
+  }
+  return next;
+}
+
+/** Remote: push baris santri (+ riwayat baru) tanpa full tabel. */
+async function pushSantriRowsTursoNow(
+  rows: Record<string, unknown>[],
+  riwayatSince?: number
+): Promise<void> {
+  if (!isTursoAuthority() || !rows.length) return;
+  const riwayat =
+    riwayatSince != null ? db.riwayat_kamar.slice(riwayatSince) : undefined;
+  await pushScopedTursoNow(
+    {
+      kelas: db.kelas,
+      kamar: db.kamar,
+      santri: rows.map(santriRowForTurso),
+      ...(riwayat && riwayat.length ? { riwayat_kamar: riwayat } : {}),
+    },
+    'santri'
+  );
+}
+
+async function pushAbsensiRowsTursoNow(rows: Record<string, unknown>[]): Promise<void> {
+  if (!isTursoAuthority() || !rows.length) return;
+  await pushScopedTursoNow({ kegiatan: db.kegiatan, absensi: rows }, 'absensi');
+}
+
+async function pushIzinRowsTursoNow(rows: Record<string, unknown>[]): Promise<void> {
+  if (!isTursoAuthority() || !rows.length) return;
+  await pushScopedTursoNow({ izin: rows }, 'izin');
+}
+
+async function pushPembinaanRowsTursoNow(
+  rows: Record<string, unknown>[],
+  santriRows?: Record<string, unknown>[]
+): Promise<void> {
+  if (!isTursoAuthority()) return;
+  await pushScopedTursoNow(
+    {
+      pembinaan: rows,
+      ...(santriRows?.length
+        ? { kelas: db.kelas, kamar: db.kamar, santri: santriRows.map(santriRowForTurso) }
+        : {}),
+    },
+    'pembinaan'
+  );
 }
 
 const saveDb = (tables?: SqlEntity[], opts?: PersistOpts): Promise<void> => {
   const task = persistChain.then(async () => {
     await persistDbAsync(tables, opts);
-    // Full online: lokal dulu (UI cepat), lalu push cloud di background.
-    queueTursoPush();
+    if (!isTursoAuthority()) return;
+    // Impor / wipe / seed: full push. CRUD harian: scoped entity saja.
+    if (isFullEntityFlush(tables)) {
+      const { awaitCloudPushAfterSave } = await import('@/lib/sync/turso-sync');
+      await awaitCloudPushAfterSave();
+      return;
+    }
+    await pushScopedTursoNow(buildPartialFromTables(tables!), tables!.join('+'));
   });
   persistChain = task.catch((err) => {
-    console.error('Failed to save offline DB:', err);
+    console.error('Failed to save to Turso / DB:', err);
   });
   return task;
 };
@@ -1081,26 +1212,30 @@ async function dispatchApiCore(
         }
         return {
           status: 200,
-          body: santriInScope().map((s) => ({
-            id: s.id,
-            nama: s.nama,
-            kelas: s.kelas,
-            kamar: s.kamar,
-            nomor_wali: s.nomor_wali ?? '',
-            jenis_kelamin: s.jenis_kelamin ?? '',
-            include_wa: s.include_wa === false || s.include_wa === 0 ? false : true,
-            asal_provinsi_code: s.asal_provinsi_code,
-            asal_provinsi_nama: s.asal_provinsi_nama,
-            asal_kota_code: s.asal_kota_code,
-            asal_kota_nama: s.asal_kota_nama,
-            asal_kecamatan_code: s.asal_kecamatan_code,
-            asal_kecamatan_nama: s.asal_kecamatan_nama,
-            asal_desa_code: s.asal_desa_code,
-            asal_desa_nama: s.asal_desa_nama,
-            jumlah_pelanggaran: s.jumlah_pelanggaran,
-            masuk_kamar_sejak: s.masuk_kamar_sejak,
-            asrama_id: s.asrama_id ?? undefined,
-          })),
+          body: sortByUpdatedDesc(
+            santriInScope().map((s) => ({
+              id: s.id,
+              nama: s.nama,
+              kelas: s.kelas,
+              kamar: s.kamar,
+              nomor_wali: s.nomor_wali ?? '',
+              jenis_kelamin: s.jenis_kelamin ?? '',
+              include_wa: s.include_wa === false || s.include_wa === 0 ? false : true,
+              created_at: s.created_at,
+              updated_at: s.updated_at,
+              asal_provinsi_code: s.asal_provinsi_code,
+              asal_provinsi_nama: s.asal_provinsi_nama,
+              asal_kota_code: s.asal_kota_code,
+              asal_kota_nama: s.asal_kota_nama,
+              asal_kecamatan_code: s.asal_kecamatan_code,
+              asal_kecamatan_nama: s.asal_kecamatan_nama,
+              asal_desa_code: s.asal_desa_code,
+              asal_desa_nama: s.asal_desa_nama,
+              jumlah_pelanggaran: s.jumlah_pelanggaran,
+              masuk_kamar_sejak: s.masuk_kamar_sejak,
+              asrama_id: s.asrama_id ?? undefined,
+            }))
+          ),
         };
       }
       const wantsPage =
@@ -1129,9 +1264,9 @@ async function dispatchApiCore(
           const matchKamar = !kamar || kamar === 'Semua' || s.kamar === kamar;
           return matchQ && matchKamar;
         });
-        return { status: 200, body: paginateInMemory(filtered, page, limit) };
+        return { status: 200, body: paginateInMemory(sortByUpdatedDesc(filtered), page, limit) };
       }
-      return { status: 200, body: santriInScope() };
+      return { status: 200, body: sortByUpdatedDesc(santriInScope()) };
     }
     if (m === 'POST' && body) {
       const raw = omitPoin(body);
@@ -1151,13 +1286,13 @@ async function dispatchApiCore(
         return { status: kamarResult.status, body: { error: kamarResult.error } };
       }
       const riBefore = db.riwayat_kamar.length;
-      db.santri.push(newSantri);
+      db.santri.unshift(newSantri);
       if (shouldPersistToSqlite()) {
         await saveDb(['kamar']);
         await persistSantriRow(newSantri);
         await persistRiwayatAppended(riBefore);
       } else {
-        await saveDb(SQL_SCOPE.santri);
+        await pushSantriRowsTursoNow([newSantri as Record<string, unknown>], riBefore);
       }
       return { status: 200, body: newSantri };
     }
@@ -1223,7 +1358,10 @@ async function dispatchApiCore(
       await saveDb(['kamar']);
       await persistRiwayatAppended(riBefore);
     } else {
-      await saveDb(SQL_SCOPE.santri);
+      const touched = ids
+        .map((id) => db.santri.find((s) => String(s.id) === id))
+        .filter(Boolean) as Record<string, unknown>[];
+      await pushSantriRowsTursoNow(touched, riBefore);
     }
     return { status: 200, body: { updated, skipped } };
   }
@@ -1266,7 +1404,7 @@ async function dispatchApiCore(
     if (shouldPersistToSqlite()) {
       await sqlSetSantriPelanggaran(santriResetMatch[1], 0);
     } else {
-      await saveDb(SQL_SCOPE.santri);
+      await pushSantriRowsTursoNow([santri as Record<string, unknown>]);
     }
     return { status: 200, body: santri };
   }
@@ -1307,7 +1445,11 @@ async function dispatchApiCore(
           auto_promote_ketua_kamar_lama: _ap,
           ...rest
         } = payload as Record<string, unknown>;
-        db.santri[index] = { ...santri, ...rest };
+        db.santri[index] = {
+          ...santri,
+          ...rest,
+          updated_at: new Date().toISOString(),
+        };
       } else {
         const {
           from_kamar_page: _fk,
@@ -1315,14 +1457,38 @@ async function dispatchApiCore(
           auto_promote_ketua_kamar_lama: _ap,
           ...rest
         } = payload as Record<string, unknown>;
-        db.santri[index] = { ...santri, ...rest };
+        db.santri[index] = {
+          ...santri,
+          ...rest,
+          updated_at: new Date().toISOString(),
+        };
+      }
+      // Pindah ke depan daftar (terbaru di atas).
+      if (index > 0) {
+        const [updatedRow] = db.santri.splice(index, 1);
+        db.santri.unshift(updatedRow);
+        index = 0;
       }
       if (shouldPersistToSqlite()) {
         await persistSantriRow(db.santri[index]);
         await saveDb(['kamar']);
         await persistRiwayatAppended(riBefore);
       } else {
-        await saveDb(SQL_SCOPE.santri);
+        const related: Record<string, unknown>[] = [db.santri[index] as Record<string, unknown>];
+        if (promotedKetua) {
+          const pk = db.santri.find((s) => String(s.nama) === promotedKetua!.nama);
+          if (pk) related.push(pk as Record<string, unknown>);
+        }
+        await pushSantriRowsTursoNow(related, riBefore);
+        // Ketua kamar berubah → sync baris kamar terkait.
+        const kamarTouched = db.kamar.filter(
+          (k) =>
+            related.some((s) => String(s.kamar ?? '') === String(k.nama)) ||
+            (promotedKetua && String(k.nama) === promotedKetua.kamarNama)
+        );
+        for (const k of kamarTouched) {
+          await pushKamarTursoNow(k as Record<string, unknown>);
+        }
       }
       const responseBody = { ...db.santri[index] } as Record<string, unknown>;
       if (promotedKetua) {
@@ -1352,7 +1518,8 @@ async function dispatchApiCore(
         db.penjadwalan = (await sqlListPenjadwalanRaw()) as Record<string, unknown>[];
         await saveDb(['kamar']);
       } else {
-        await saveDb();
+        await recordSyncTombstone('santri', normalizedId);
+        await flushTombstonesTursoNow('santri');
       }
       return { status: 200, body: { success: true } };
     }
@@ -1361,8 +1528,10 @@ async function dispatchApiCore(
   if (pathname === '/api/kamar' && m === 'GET') {
     const aid = activeAsramaId();
     if (shouldPersistToSqlite()) {
-      const result = (await sqlListKamarWithPenghuni()).filter(
-        (k) => !aid || !k.asrama_id || k.asrama_id === aid
+      const result = sortByUpdatedDesc(
+        (await sqlListKamarWithPenghuni()).filter(
+          (k) => !aid || !k.asrama_id || k.asrama_id === aid
+        )
       );
       db.kamar = result.map((row) => {
         const { terisi: _t, santriList: _s, ...base } = row;
@@ -1370,41 +1539,46 @@ async function dispatchApiCore(
       });
       return { status: 200, body: result };
     }
-    const result = kamarInScope().map((k) => {
-      const penghuni = santriInScope().filter((s) => s.kamar === k.nama);
-      return {
-        ...k,
-        terisi: penghuni.length,
-        santriList: penghuni.map((s) => ({
-          id: s.id,
-          nama: s.nama,
-          kelas: s.kelas,
-          masuk_kamar_sejak: s.masuk_kamar_sejak,
-        })),
-      };
-    });
+    const result = sortByUpdatedDesc(
+      kamarInScope().map((k) => {
+        const penghuni = santriInScope().filter((s) => s.kamar === k.nama);
+        return {
+          ...k,
+          terisi: penghuni.length,
+          santriList: penghuni.map((s) => ({
+            id: s.id,
+            nama: s.nama,
+            kelas: s.kelas,
+            masuk_kamar_sejak: s.masuk_kamar_sejak,
+          })),
+        };
+      })
+    );
     return { status: 200, body: result };
   }
 
   if (pathname === '/api/kamar' && m === 'POST' && body) {
+    const nowIso = new Date().toISOString();
     const newKamar = {
       id: newId(),
       asrama_id: activeAsramaId() ?? defaultAsramaId(db.settings),
       ...body,
       kapasitas: Number(body.kapasitas) || 4,
       fasilitas: Array.isArray(body.fasilitas) ? body.fasilitas : [],
+      updated_at: nowIso,
     };
-    db.kamar.push(newKamar);
+    db.kamar.unshift(newKamar);
     if (shouldPersistToSqlite()) {
       try {
         await sqlUpsertKamarRow(newKamar);
-        queueTursoPush();
+        await pushKamarTursoNow(newKamar as Record<string, unknown>);
       } catch (err) {
         db.kamar = db.kamar.filter((k) => k.id !== newKamar.id);
         throw err;
       }
     } else {
-      await saveDb(['kamar']);
+      // Full-online: cukup upsert baris kamar — jangan full push via saveDb.
+      await pushKamarTursoNow(newKamar as Record<string, unknown>);
     }
     return { status: 200, body: newKamar };
   }
@@ -1428,12 +1602,19 @@ async function dispatchApiCore(
       kamar_id: String(kamar.id),
       tipe: 'ketua',
     });
+    (kamar as { updated_at?: string }).updated_at = new Date().toISOString();
+    const kamarIdx = db.kamar.findIndex((k) => k.id === kamar.id);
+    if (kamarIdx > 0) {
+      const [moved] = db.kamar.splice(kamarIdx, 1);
+      db.kamar.unshift(moved);
+    }
     if (shouldPersistToSqlite()) {
       await persistSantriRow(santri);
       await sqlUpsertKamarRow(kamar as Record<string, unknown>);
       await persistRiwayatAppended(riBefore);
+      await pushKamarTursoNow(kamar as Record<string, unknown>);
     } else {
-      await saveDb(SQL_SCOPE.kamar);
+      await pushKamarTursoNow(kamar as Record<string, unknown>);
     }
     return { status: 200, body: kamar };
   }
@@ -1463,20 +1644,24 @@ async function dispatchApiCore(
         keterangan:
           body.keterangan != null ? String(body.keterangan).trim() : list[index].keterangan,
       };
+      kamar.updated_at = new Date().toISOString();
       if (shouldPersistToSqlite()) {
         await sqlUpsertKamarRow(kamar);
+        await pushKamarTursoNow(kamar);
       } else {
-        await saveDb(SQL_SCOPE.kamar);
+        await pushKamarTursoNow(kamar);
       }
       return { status: 200, body: list[index] };
     }
     if (m === 'DELETE') {
       if (index === -1) return { status: 404, body: { error: 'Fasilitas tidak ditemukan' } };
       kamar.fasilitas = list.filter((f) => f.id !== fasilitasId);
+      kamar.updated_at = new Date().toISOString();
       if (shouldPersistToSqlite()) {
         await sqlUpsertKamarRow(kamar);
+        await pushKamarTursoNow(kamar);
       } else {
-        await saveDb(SQL_SCOPE.kamar);
+        await pushKamarTursoNow(kamar);
       }
       return { status: 200, body: { success: true } };
     }
@@ -1502,10 +1687,12 @@ async function dispatchApiCore(
     };
     list.push(item);
     kamar.fasilitas = list;
+    kamar.updated_at = new Date().toISOString();
     if (shouldPersistToSqlite()) {
       await sqlUpsertKamarRow(kamar);
+      await pushKamarTursoNow(kamar);
     } else {
-      await saveDb(SQL_SCOPE.kamar);
+      await pushKamarTursoNow(kamar);
     }
     return { status: 200, body: item };
   }
@@ -1514,22 +1701,29 @@ async function dispatchApiCore(
   if (kamarIdMatch) {
     const id = kamarIdMatch[1];
     if (m === 'PUT' && body) {
-      const index = db.kamar.findIndex((k) => k.id === id);
+      let index = db.kamar.findIndex((k) => k.id === id);
       if (index === -1) return { status: 404, body: { error: 'Kamar tidak ditemukan' } };
       const oldNama = db.kamar[index].nama;
+      const nowIso = new Date().toISOString();
       db.kamar[index] = {
         ...db.kamar[index],
         ...body,
         kapasitas: Number(body.kapasitas ?? db.kamar[index].kapasitas) || 4,
+        updated_at: nowIso,
       };
       if (body.nama && body.nama !== oldNama) {
         db.santri.forEach((s) => {
           if (s.kamar === oldNama) s.kamar = body.nama;
         });
       }
+      if (index > 0) {
+        const [moved] = db.kamar.splice(index, 1);
+        db.kamar.unshift(moved);
+        index = 0;
+      }
       const updated = db.kamar[index];
       if (shouldPersistToSqlite()) {
-        await sqlUpsertKamarRow(updated);
+        await sqlUpsertKamarRow(updated as Record<string, unknown>);
         if (body.nama && body.nama !== oldNama) {
           for (const s of db.santri) {
             if (s.kamar === body.nama) {
@@ -1537,9 +1731,9 @@ async function dispatchApiCore(
             }
           }
         }
-        queueTursoPush();
+        await pushKamarTursoNow(updated as Record<string, unknown>);
       } else {
-        await saveDb(SQL_SCOPE.kamar);
+        await pushKamarTursoNow(updated as Record<string, unknown>);
       }
       return { status: 200, body: updated };
     }
@@ -1558,7 +1752,8 @@ async function dispatchApiCore(
         await sqlVacateKamarResidents(id);
         await saveDb(['kamar']);
       } else {
-        await saveDb(SQL_SCOPE.kamarDelete);
+        await recordSyncTombstone('kamar', id);
+        await flushTombstonesTursoNow('kamar');
       }
       return { status: 200, body: { success: true } };
     }
@@ -1599,7 +1794,9 @@ async function dispatchApiCore(
     }
     if (m === 'DELETE') {
       db.kelas = db.kelas.filter((k) => k.id !== id);
-      await saveDb(SQL_SCOPE.kelas);
+      await recordSyncTombstone('kelas', id);
+      if (isTursoAuthority()) await flushTombstonesTursoNow('kelas');
+      else await saveDb(SQL_SCOPE.kelas);
       return { status: 200, body: { success: true } };
     }
   }
@@ -1806,7 +2003,8 @@ async function dispatchApiCore(
       if (shouldPersistToSqlite()) {
         await sqlDeletePenjadwalanById(id);
       } else {
-        await saveDb(SQL_SCOPE.jadwal);
+        await recordSyncTombstone('penjadwalan', id);
+        await flushTombstonesTursoNow('penjadwalan');
       }
       return { status: 200, body: { success: true } };
     }
@@ -1824,7 +2022,9 @@ async function dispatchApiCore(
     }
     if (m === 'DELETE') {
       db.kegiatan = db.kegiatan.filter((k) => k.id !== id);
-      await saveDb(SQL_SCOPE.kegiatan);
+      await recordSyncTombstone('kegiatan', id);
+      if (isTursoAuthority()) await flushTombstonesTursoNow('kegiatan');
+      else await saveDb(SQL_SCOPE.kegiatan);
       return { status: 200, body: { success: true } };
     }
   }
@@ -1991,7 +2191,7 @@ async function dispatchApiCore(
     if (shouldPersistToSqlite()) {
       await sqlInsertIzin(newIzin);
     } else {
-      await saveDb(SQL_SCOPE.izin);
+      await pushIzinRowsTursoNow([newIzin as Record<string, unknown>]);
     }
     return { status: 200, body: newIzin };
   }
@@ -2009,7 +2209,7 @@ async function dispatchApiCore(
     if (shouldPersistToSqlite()) {
       await sqlUpdateIzinRow(izin);
     } else {
-      await saveDb(SQL_SCOPE.izin);
+      await pushIzinRowsTursoNow([izin]);
     }
     return { status: 200, body: { success: true, izin } };
   }
@@ -2020,7 +2220,8 @@ async function dispatchApiCore(
     if (shouldPersistToSqlite()) {
       await sqlDeleteIzinById(izinIdMatch[1]);
     } else {
-      await saveDb(SQL_SCOPE.izin);
+      await recordSyncTombstone('izin', izinIdMatch[1]);
+      await flushTombstonesTursoNow('izin');
     }
     return { status: 200, body: { success: true } };
   }
@@ -2063,7 +2264,8 @@ async function dispatchApiCore(
     if (shouldPersistToSqlite()) {
       await sqlInsertPembinaan(newPembinaan);
     } else {
-      await saveDb([...SQL_SCOPE.pembinaan, ...SQL_SCOPE.santri]);
+      const santriRows = santri ? [santri as Record<string, unknown>] : [];
+      await pushPembinaanRowsTursoNow([newPembinaan as Record<string, unknown>], santriRows);
     }
     return { status: 200, body: newPembinaan };
   }
@@ -2085,6 +2287,7 @@ async function dispatchApiCore(
         if (santri) santri.jumlah_pelanggaran = count;
       }
     } else {
+      let santriRow: Record<string, unknown> | undefined;
       if (santriId) {
         const count = db.pembinaan.filter(
           (p) => String((p as { santri_id?: string }).santri_id) === santriId &&
@@ -2093,9 +2296,14 @@ async function dispatchApiCore(
         const santri = db.santri.find((s) => String(s.id) === santriId) as
           | { jumlah_pelanggaran?: number }
           | undefined;
-        if (santri) santri.jumlah_pelanggaran = count;
+        if (santri) {
+          santri.jumlah_pelanggaran = count;
+          santriRow = santri as Record<string, unknown>;
+        }
       }
-      await saveDb([...SQL_SCOPE.pembinaan, ...SQL_SCOPE.santri]);
+      await recordSyncTombstone('pembinaan', pembinaanIdMatch[1]);
+      await flushTombstonesTursoNow('pembinaan');
+      if (santriRow) await pushSantriRowsTursoNow([santriRow]);
     }
     return { status: 200, body: { success: true } };
   }
@@ -2188,7 +2396,7 @@ async function dispatchApiCore(
       if (shouldPersistToSqlite()) {
         await sqlUpsertAbsensiRow(row, db.kegiatan);
       } else {
-        await saveDb(SQL_SCOPE.absensi);
+        await pushAbsensiRowsTursoNow([row as Record<string, unknown>]);
       }
       return { status: 200, body: row };
     }
@@ -2197,7 +2405,7 @@ async function dispatchApiCore(
     if (shouldPersistToSqlite()) {
       await sqlUpsertAbsensiRow(newAbsensi, db.kegiatan);
     } else {
-      await saveDb(SQL_SCOPE.absensi);
+      await pushAbsensiRowsTursoNow([newAbsensi as Record<string, unknown>]);
     }
     return { status: 200, body: newAbsensi };
   }
@@ -2226,7 +2434,8 @@ async function dispatchApiCore(
     if (shouldPersistToSqlite()) {
       await sqlDeleteAbsensiById(absensiIdMatch[1]);
     } else {
-      await saveDb(SQL_SCOPE.absensi);
+      await recordSyncTombstone('absensi', absensiIdMatch[1]);
+      await flushTombstonesTursoNow('absensi');
     }
     return { status: 200, body: { success: true } };
   }

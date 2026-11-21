@@ -139,7 +139,7 @@ export default function SantriKamarRiwayat() {
       ) : (
         <EmptyState
           icon={BedDouble}
-          title="Belum punya kamar"
+          title="Tanpa kamar"
           description="Penempatan lewat menu Data Kamar."
         />
       )}

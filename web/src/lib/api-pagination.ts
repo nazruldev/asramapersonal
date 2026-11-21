@@ -40,3 +40,19 @@ export function paginateInMemory<T>(
     limit,
   };
 }
+
+/** Terbaru diubah/ditambah paling atas; fallback nama A→Z. */
+export function sortByUpdatedDesc<T extends Record<string, unknown>>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => {
+    const ta = Date.parse(
+      String(a.updated_at ?? a.updatedAt ?? a.created_at ?? a.createdAt ?? '')
+    );
+    const tb = Date.parse(
+      String(b.updated_at ?? b.updatedAt ?? b.created_at ?? b.createdAt ?? '')
+    );
+    const na = Number.isFinite(ta) ? ta : 0;
+    const nb = Number.isFinite(tb) ? tb : 0;
+    if (nb !== na) return nb - na;
+    return String(a.nama ?? '').localeCompare(String(b.nama ?? ''), 'id');
+  });
+}

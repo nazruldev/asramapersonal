@@ -5,7 +5,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ThemeProvider } from './lib/theme';
 import { initClientApiStore, installNativeApiFetch } from './lib/client-api';
 import { setWebSqliteAvailable } from './lib/offline-db';
-import { startAutoSync } from './lib/sync/turso-sync';
+import { startAutoSync, runTursoPull } from './lib/sync/turso-sync';
+import { startAblyPushNotifications } from './lib/sync/ably-push';
 import { notifyAppReady } from './lib/app-update';
 import './index.css';
 import App from './App.tsx';
@@ -20,12 +21,25 @@ if (/Electron/.test(navigator.userAgent)) {
 }
 
 async function bootstrap() {
-  // Web/Electron: localStorage. Android: Capacitor SQLite.
-  // Sync penuh semua platform lewat Turso snapshot.
+  // Capgo: konfirmasi bundle SEBELUM init berat. Kalau menunggu Turso/store dulu
+  // dan init gagal, Capgo auto-rollback ke bundle lama → sheet update muncul terus.
+  await notifyAppReady();
+
+  // Full-online Turso: RAM kerja + cloud sebagai sumber kebenaran.
   setWebSqliteAvailable(false);
   installNativeApiFetch();
   await initClientApiStore();
+  // Auto-pull jalan; push tetap di-gate sampai hydrate/bootstrap sukses.
   startAutoSync();
+  // Android: FCM push. Electron/web: Ably websocket (+ Notification API jika diizinkan).
+  void startAblyPushNotifications(() => {
+    void runTursoPull().catch((err) => {
+      console.warn('[push] sync after notification failed:', err);
+    });
+  });
+  if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+    void Notification.requestPermission().catch(() => undefined);
+  }
 
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
@@ -40,9 +54,6 @@ async function bootstrap() {
       </QueryClientProvider>
     </StrictMode>
   );
-
-  // OTA Android: konfirmasi bundle aktif; pengecekan update + popup di OtaUpdatePrompt.
-  void notifyAppReady();
 }
 
 void bootstrap().catch((err) => {

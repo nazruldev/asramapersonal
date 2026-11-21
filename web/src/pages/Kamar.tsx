@@ -35,6 +35,7 @@ type KamarRow = {
   lantai?: string;
   ketua?: string;
   terisi?: number;
+  santriList?: { id: string; nama: string }[];
 };
 
 export default function Kamar() {
@@ -45,6 +46,15 @@ export default function Kamar() {
   const { theme } = useTheme();
   const kamarReady = useReloadKeyReady('kamar');
   const kamarList = useAppStore((s) => s.kamar) as KamarRow[];
+  const santriList = useAppStore((s) => s.santri) as { id: string; foto?: string }[];
+  const fotoBySantriId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const s of santriList) {
+      const foto = s.foto?.trim();
+      if (foto) map.set(s.id, foto);
+    }
+    return map;
+  }, [santriList]);
   const [showModal, setShowModal] = useState(false);
   const [editingKamar, setEditingKamar] = useState<KamarRow | null>(null);
   const [formData, setFormData] = useState({
@@ -63,8 +73,8 @@ export default function Kamar() {
   const confirmDialog = useConfirmDialog();
   const [selectedLantaiFilter, setSelectedLantaiFilter] = useState('Semua');
 
-  const invalidate = () => {
-    void reload(['kamar', 'santri', 'dashboard']);
+  const invalidate = (keys: Array<'kamar' | 'santri' | 'dashboard'> = ['kamar', 'santri', 'dashboard']) => {
+    void reload(keys);
   };
 
   const saveMutation = useMutation({
@@ -101,7 +111,8 @@ export default function Kamar() {
     },
     onSuccess: () => {
       toast.success(editingKamar ? 'Data kamar diperbarui' : 'Kamar berhasil ditambahkan');
-      invalidate();
+      // Simpan master: kamar (+ santri bila rename); skip dashboard agar cepat.
+      invalidate(editingKamar ? ['kamar', 'santri'] : ['kamar']);
       handleCloseModal();
     },
     onError: (err: Error) =>
@@ -160,13 +171,19 @@ export default function Kamar() {
     return ['Semua', ...floors];
   }, [kamarList]);
 
-  const filteredKamarList = useMemo(
-    () =>
-      kamarList.filter(
-        (k) => selectedLantaiFilter === 'Semua' || (k.lantai || '') === selectedLantaiFilter
-      ),
-    [kamarList, selectedLantaiFilter]
-  );
+  const filteredKamarList = useMemo(() => {
+    const rows = kamarList.filter(
+      (k) => selectedLantaiFilter === 'Semua' || (k.lantai || '') === selectedLantaiFilter
+    );
+    return [...rows].sort((a, b) => {
+      const ta = Date.parse(String((a as { updated_at?: string }).updated_at ?? ''));
+      const tb = Date.parse(String((b as { updated_at?: string }).updated_at ?? ''));
+      const na = Number.isFinite(ta) ? ta : 0;
+      const nb = Number.isFinite(tb) ? tb : 0;
+      if (nb !== na) return nb - na;
+      return String(a.nama ?? '').localeCompare(String(b.nama ?? ''), 'id');
+    });
+  }, [kamarList, selectedLantaiFilter]);
 
   const lantaiScrollRef = useRef<HTMLDivElement>(null);
   const openAddKamarModal = useCallback(() => setShowModal(true), []);
@@ -262,7 +279,15 @@ export default function Kamar() {
                     {kamar.ketua ? ` · Ketua: ${kamar.ketua}` : ''}
                   </p>
                   <div className="mt-2">
-                    <KamarSlotStrip terisi={terisi} kapasitas={kapasitas} />
+                    <KamarSlotStrip
+                      terisi={terisi}
+                      kapasitas={kapasitas}
+                      occupants={(kamar.santriList ?? []).map((s) => ({
+                        id: s.id,
+                        nama: s.nama,
+                        foto: fotoBySantriId.get(s.id) ?? null,
+                      }))}
+                    />
                   </div>
                 </div>
                 <ListRowActions

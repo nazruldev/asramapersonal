@@ -39,6 +39,8 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Android 13+ push notification -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Diperlukan agar update fallback bisa membuka installer APK hasil unduhan -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission

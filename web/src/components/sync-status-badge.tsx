@@ -24,7 +24,7 @@ export function SyncStatusBadge() {
   const { icon, cls, title } = status.running
     ? { icon: <Loader2 className="w-4 h-4 animate-spin" />, cls: 'text-sky-600 dark:text-sky-400', title: 'Menyinkronkan…' }
     : !status.online
-      ? { icon: <CloudOff className="w-4 h-4" />, cls: 'text-amber-600 dark:text-amber-400', title: 'Offline — perubahan tersimpan lokal, sinkron saat online' }
+      ? { icon: <CloudOff className="w-4 h-4" />, cls: 'text-rose-600 dark:text-rose-400', title: 'Offline — tidak bisa menyimpan ke Turso' }
       : { icon: <Cloud className="w-4 h-4" />, cls: 'text-emerald-600 dark:text-emerald-400', title: `Sinkron terakhir: ${relTime(status.lastSyncAt)}` };
 
   return (

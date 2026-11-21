@@ -159,27 +159,27 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     hydratePromise = (async () => {
       set({ hydrating: true, hydrateError: null, cloudBlocked: false });
-      const { pauseCloudPush } = await import('@/lib/sync/turso-sync');
-      pauseCloudPush(true);
+      const { setCloudWritesEnabled } = await import('@/lib/sync/turso-sync');
+      setCloudWritesEnabled(false);
       try {
         await Promise.race([
           ensureClientApiDbLoaded(),
           new Promise<void>((resolve) => setTimeout(resolve, HYDRATE_CRITICAL_TIMEOUT_MS)),
         ]);
 
-        // Offline-first: sync cloud best-effort; gagal → lanjut data lokal.
+        // Full-online: Turso wajib; gagal → cloudBlocked.
         const { isTursoConfigured } = await import('@/lib/sync/cloud-bootstrap');
-        if (isTursoConfigured()) {
-          await bootstrapFromCloud();
+        if (!isTursoConfigured()) {
+          throw new Error('Turso wajib. Isi VITE_TURSO_DATABASE_URL dan VITE_TURSO_AUTH_TOKEN.');
         }
-
-        pauseCloudPush(false);
+        await bootstrapFromCloud();
 
         const criticalReload = get().reload(HYDRATE_CRITICAL_KEYS);
         await Promise.race([
           criticalReload,
           new Promise<void>((resolve) => setTimeout(resolve, HYDRATE_CRITICAL_TIMEOUT_MS)),
         ]);
+        setCloudWritesEnabled(true);
         set({ hydrated: true, cloudBlocked: false, hydrateError: null });
         void criticalReload.catch((err) => {
           console.error('Critical reload after timeout:', err);
@@ -198,16 +198,15 @@ export const useAppStore = create<AppState>((set, get) => ({
         });
       } catch (err) {
         console.error('Hydrate failed:', err);
+        setCloudWritesEnabled(false);
         const message =
-          err instanceof Error ? err.message : 'Gagal memuat data. Coba buka ulang aplikasi.';
-        // Offline-first: jangan kunci UI — tampilkan error, tetap pakai data lokal.
+          err instanceof Error ? err.message : 'Gagal memuat data dari Turso.';
         set({
           hydrated: true,
           hydrateError: message,
-          cloudBlocked: false,
+          cloudBlocked: true,
         });
       } finally {
-        pauseCloudPush(false);
         set({ hydrating: false });
         hydratePromise = null;
       }

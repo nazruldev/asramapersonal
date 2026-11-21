@@ -42,6 +42,7 @@ import { useTheme } from '@/lib/theme';
 import { useScreenAddAction } from '@/lib/screen-header-actions';
 import { toast } from '@/lib/toast';
 import { formatLamaDiKamar, parseKamarIdFromPath } from '@/lib/kamar-path';
+import { SantriAvatar } from '@/components/santri-avatar';
 
 type KamarRow = {
   id: string;
@@ -57,6 +58,16 @@ type KamarRow = {
     masuk_kamar_sejak?: string;
   }[];
   fasilitas?: KamarFasilitasRow[];
+};
+
+type SantriStoreRow = {
+  id: string;
+  nama?: string;
+  kelas?: string;
+  kamar?: string;
+  foto?: string;
+  catatan_medis?: string;
+  masuk_kamar_sejak?: string;
 };
 
 type DetailTab = 'penempatan' | 'fasilitas';
@@ -75,7 +86,13 @@ export default function KamarDetail() {
   const confirmDialog = useConfirmDialog();
   const kamarReady = useReloadKeyReady('kamar');
   const kamarList = useAppStore((s) => s.kamar) as KamarRow[];
-  const santriList = useAppStore((s) => s.santri);
+  const santriList = useAppStore((s) => s.santri) as SantriStoreRow[];
+
+  const santriById = useMemo(() => {
+    const map = new Map<string, SantriStoreRow>();
+    for (const s of santriList) map.set(s.id, s);
+    return map;
+  }, [santriList]);
 
   const [detailTab, setDetailTab] = useState<DetailTab>('penempatan');
   const [showSantriModal, setShowSantriModal] = useState(false);
@@ -168,9 +185,7 @@ export default function KamarDetail() {
 
   const requestAddSantriToKamar = (santriId: string) => {
     if (!kamar) return;
-    const santri = (santriList as { id: string; nama: string; kelas?: string; kamar?: string }[]).find(
-      (s) => s.id === santriId
-    );
+    const santri = santriList.find((s) => s.id === santriId);
     if (!santri) return;
 
     const prevKamar = (santri.kamar ?? '').trim();
@@ -178,11 +193,7 @@ export default function KamarDetail() {
     const wasKetua = isSantriKetuaOfKamar(santri, kamarList);
 
     if (wasKetua && prevKamar) {
-      const candidate = pickSantriLongestInKamar(
-        santriList as { id: string; nama?: string; kamar?: string; masuk_kamar_sejak?: string }[],
-        prevKamar,
-        santri.id
-      );
+      const candidate = pickSantriLongestInKamar(santriList, prevKamar, santri.id);
       const candidateLine = candidate
         ? `Jika setuju, "${candidate.nama}" (paling lama di ${prevKamar}) otomatis jadi ketua kamar itu.`
         : `Tidak ada penghuni lain di ${prevKamar} untuk dijadikan ketua.`;
@@ -258,31 +269,41 @@ export default function KamarDetail() {
   const addSantriPickerOptions = useMemo((): BottomPickerOption[] => {
     if (!kamar) return [];
     const currentNama = kamar.nama.trim();
-    return (santriList as { id: string; nama: string; kelas?: string; kamar?: string }[])
+    return santriList
       .filter((s) => (s.kamar ?? '').trim() !== currentNama)
       .map((s) => {
         const prevKamar = (s.kamar ?? '').trim();
+        const hasKamar = Boolean(prevKamar);
         const isKetua = isSantriKetuaOfKamar(s, kamarList);
-        let badge: string | undefined;
-        let badgeTone: 'amber' | 'slate' | undefined;
+        let badge: string;
+        let badgeTone: 'amber' | 'violet' | 'slate';
         if (isKetua && prevKamar) {
           badge = 'Ketua';
           badgeTone = 'amber';
-        } else if (prevKamar) {
-          badge = 'Pindah';
+        } else if (hasKamar) {
+          // Sudah punya kamar — memilih = pindah ke kamar ini
+          badge = 'Punya kamar';
           badgeTone = 'slate';
+        } else {
+          badge = 'Tanpa kamar';
+          badgeTone = 'violet';
         }
         return {
           value: s.id,
-          label: s.nama,
-          sublabel: prevKamar
+          label: s.nama || '-',
+          sublabel: hasKamar
             ? `${s.kelas || '-'} · dari ${prevKamar}`
-            : `${s.kelas || '-'} · belum punya kamar`,
+            : `${s.kelas || '-'} · tanpa kamar`,
           badge,
           badgeTone,
+          hasKamar,
         };
       })
-      .sort((a, b) => a.label.localeCompare(b.label, 'id'));
+      .sort((a, b) => {
+        if (a.hasKamar !== b.hasKamar) return a.hasKamar ? 1 : -1;
+        return a.label.localeCompare(b.label, 'id');
+      })
+      .map(({ hasKamar: _ignored, ...opt }): BottomPickerOption => opt);
   }, [kamar, santriList, kamarList]);
 
   const moveTargetOptions = useMemo(() => {
@@ -421,113 +442,166 @@ export default function KamarDetail() {
     santri: { id: string; nama: string; kelas?: string; masuk_kamar_sejak?: string },
     opts: { isKetua?: boolean }
   ) => {
-    const medis = (
-      santriList as { id: string; catatan_medis?: string }[]
-    ).find((s) => s.id === santri.id)?.catatan_medis?.trim();
+    const full = santriById.get(santri.id);
+    const foto = full?.foto?.trim() || '';
+    const medis = full?.catatan_medis?.trim();
 
     return (
-    <div
-      key={santri.id}
-      className={cn(appCardClass, 'p-3 space-y-2')}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex items-start gap-2">
-          <div
-            className={`w-8 h-8 rounded-sm flex items-center justify-center text-[10px] font-bold shrink-0 ${
-              opts.isKetua ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
-            }`}
-          >
-            {opts.isKetua ? <Crown className="w-4 h-4" /> : santri.nama.charAt(0)}
-          </div>
-          <div className="min-w-0">
-            <p className={`text-xs font-bold truncate ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
-              {santri.nama}
+      <div
+        key={santri.id}
+        className={cn(
+          appCardClass,
+          'px-2.5 py-2.5 space-y-2',
+          opts.isKetua && 'ring-1 ring-amber-300/80 dark:ring-amber-600/50'
+        )}
+      >
+        <div className="flex gap-2 min-w-0">
+          <SantriAvatar nama={santri.nama} foto={foto || null} size="sm" />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1 min-w-0">
+              <h3
+                className={`text-xs font-bold truncate leading-tight ${
+                  theme === 'dark' ? 'text-white' : 'text-slate-900'
+                }`}
+              >
+                {santri.nama}
+              </h3>
               {opts.isKetua ? (
-                <span className="ml-1.5 text-[9px] font-bold text-amber-600">Ketua</span>
+                <Crown className="w-3 h-3 shrink-0 text-amber-600" aria-label="Ketua kamar" />
               ) : null}
-            </p>
-            <p className={`text-[10px] ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>
-              Kelas {santri.kelas || '-'}
-            </p>
-            <p className={`text-[10px] mt-0.5 ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'}`}>
-              Di kamar ini:{' '}
-              <span className="font-semibold text-emerald-700 dark:text-emerald-400">
-                {formatLamaDiKamar(santri.masuk_kamar_sejak)}
-              </span>
+            </div>
+            <p className={`text-[10px] truncate ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>
+              Kelas {santri.kelas || '-'} · di kamar {formatLamaDiKamar(santri.masuk_kamar_sejak)}
             </p>
             {medis ? (
-              <p className={`text-[10px] mt-1 line-clamp-2 ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'}`}>
+              <p
+                className={`text-[10px] mt-0.5 line-clamp-2 ${
+                  theme === 'dark' ? 'text-slate-500' : 'text-slate-400'
+                }`}
+              >
                 Medis: {medis}
               </p>
             ) : null}
           </div>
         </div>
-      </div>
-      <div className="flex flex-wrap gap-1.5 pt-1 border-t border-slate-100 dark:border-slate-700">
-        {!opts.isKetua ? (
+        <div className="flex flex-wrap gap-1.5 pt-1.5 border-t border-slate-200/80 dark:border-slate-600/80">
+          {!opts.isKetua ? (
+            <button
+              type="button"
+              onClick={() =>
+                confirmDialog.ask({
+                  message: `Jadikan "${santri.nama}" ketua kamar?`,
+                  confirmLabel: 'Ya, Tetapkan',
+                  destructive: false,
+                  onConfirm: () => handleSetKetua(santri.id),
+                })
+              }
+              className={`flex-1 min-w-[6.5rem] py-1.5 text-[10px] font-bold rounded-sm inline-flex items-center justify-center gap-1 ${
+                theme === 'dark'
+                  ? 'bg-amber-950/40 text-amber-300 border border-amber-800'
+                  : 'bg-amber-50 text-amber-800 border border-amber-200'
+              }`}
+            >
+              <Crown className="w-3 h-3" />
+              Jadikan ketua
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setChangeKetuaOpen(true)}
+              className={`flex-1 min-w-[6.5rem] py-1.5 text-[10px] font-bold rounded-sm inline-flex items-center justify-center gap-1 ${
+                theme === 'dark'
+                  ? 'bg-amber-950/40 text-amber-300 border border-amber-800'
+                  : 'bg-amber-50 text-amber-800 border border-amber-200'
+              }`}
+            >
+              <RefreshCw className="w-3 h-3" />
+              Ganti ketua
+            </button>
+          )}
+          <button
+            type="button"
+            disabled={moveTargetOptions.length === 0}
+            onClick={() => setMovePickerSantriId(santri.id)}
+            className={`flex-1 min-w-[6.5rem] py-1.5 text-[10px] font-bold rounded-sm inline-flex items-center justify-center gap-1 disabled:opacity-40 ${
+              theme === 'dark'
+                ? 'bg-slate-700/80 text-slate-200 border border-slate-600'
+                : 'bg-slate-50 text-slate-700 border border-slate-200'
+            }`}
+          >
+            <ArrowRightLeft className="w-3 h-3" />
+            Pindah
+          </button>
           <button
             type="button"
             onClick={() =>
               confirmDialog.ask({
-                message: `Jadikan "${santri.nama}" ketua kamar?`,
-                confirmLabel: 'Ya, Tetapkan',
-                destructive: false,
-                onConfirm: () => handleSetKetua(santri.id),
+                message: `Keluarkan "${santri.nama}" dari kamar ini?`,
+                confirmLabel: 'Ya, Keluarkan',
+                onConfirm: () => handleRemoveSantriFromKamar(santri.id),
               })
             }
-            className="flex-1 min-w-[7rem] py-2 text-[10px] font-bold rounded-sm bg-amber-50 text-amber-800 border border-amber-200"
+            className={`p-1.5 rounded-sm border ${
+              theme === 'dark'
+                ? 'bg-red-950/40 text-red-300 border-red-900'
+                : 'bg-red-50 text-red-600 border-red-100'
+            }`}
+            title="Keluarkan dari kamar"
           >
-            Jadikan ketua
+            <X className="w-3.5 h-3.5" />
           </button>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setChangeKetuaOpen(true)}
-            className="flex-1 min-w-[7rem] py-2 text-[10px] font-bold rounded-sm bg-amber-50 text-amber-800 border border-amber-200 inline-flex items-center justify-center gap-1"
-          >
-            <RefreshCw className="w-3 h-3" />
-            Ganti ketua
-          </button>
-        )}
-        <button
-          type="button"
-          disabled={moveTargetOptions.length === 0}
-          onClick={() => setMovePickerSantriId(santri.id)}
-          className="flex-1 min-w-[7rem] py-2 text-[10px] font-bold rounded-sm bg-slate-50 text-slate-700 border border-slate-200 disabled:opacity-40 inline-flex items-center justify-center gap-1"
-        >
-          <ArrowRightLeft className="w-3 h-3" />
-          Pindah
-        </button>
-        <button
-          type="button"
-          onClick={() =>
-            confirmDialog.ask({
-              message: `Keluarkan "${santri.nama}" dari kamar ini?`,
-              confirmLabel: 'Ya, Keluarkan',
-              onConfirm: () => handleRemoveSantriFromKamar(santri.id),
-            })
-          }
-          className="p-2 rounded-sm bg-red-50 text-red-600 border border-red-100"
-          title="Keluarkan dari kamar"
-        >
-          <X className="w-3.5 h-3.5" />
-        </button>
+        </div>
       </div>
-    </div>
     );
   };
 
   return (
     <PageWithPullRefresh keys={['kamar', 'santri', 'dashboard']} className="space-y-4">
       {kamar ? (
-        <div className={cn(appCardClass, 'p-4')}>
-          <h2 className="text-sm font-bold text-slate-900 dark:text-slate-50">
-            {kamar.nama}
-          </h2>
-          <p className={`text-[11px] mt-1 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>
-            {kamar.lantai || '-'} · Kapasitas {santriInKamar.length}/{kapasitas}
-            {kamar.ketua ? ` · Ketua: ${kamar.ketua}` : ''}
-          </p>
+        <div className={cn(appCardClass, 'px-3 py-3')}>
+          <div className="flex items-start gap-2.5">
+            <div
+              className={`w-10 h-10 rounded-sm flex items-center justify-center shrink-0 ${
+                theme === 'dark' ? 'bg-emerald-900/50 text-emerald-300' : 'bg-emerald-50 text-emerald-800'
+              }`}
+            >
+              <BedDouble className="w-5 h-5" strokeWidth={2} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h2 className="text-sm font-bold text-slate-900 dark:text-slate-50 truncate">
+                {kamar.nama}
+              </h2>
+              <p className={`text-[11px] mt-0.5 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>
+                {kamar.lantai || '-'} · {santriInKamar.length}/{kapasitas} jiwa
+                {kamar.ketua ? ` · Ketua: ${kamar.ketua}` : ''}
+              </p>
+              {santriInKamar.length > 0 ? (
+                <div className="flex items-center mt-2 -space-x-1.5">
+                  {santriInKamar.slice(0, 6).map((s) => {
+                    const foto = santriById.get(s.id)?.foto?.trim() || '';
+                    return (
+                      <SantriAvatar
+                        key={s.id}
+                        nama={s.nama}
+                        foto={foto || null}
+                        size="xs"
+                        className="ring-2 ring-card"
+                      />
+                    );
+                  })}
+                  {santriInKamar.length > 6 ? (
+                    <span
+                      className={`ml-2 text-[10px] font-semibold ${
+                        theme === 'dark' ? 'text-slate-400' : 'text-slate-500'
+                      }`}
+                    >
+                      +{santriInKamar.length - 6}
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          </div>
         </div>
       ) : null}
 
@@ -563,7 +637,7 @@ export default function KamarDetail() {
         <EmptyState
           icon={Users}
           title="Kamar masih kosong"
-          description="Ketuk + di header untuk menambahkan santri yang belum punya kamar."
+          description="Ketuk + di header untuk menambahkan santri tanpa kamar."
         />
       ) : (
         <div className="space-y-2">
@@ -697,7 +771,7 @@ export default function KamarDetail() {
         title="Tambah Santri ke Kamar"
         description={
           kamar
-            ? `${kamar.nama} · cari santri; tag Pindah/Ketua = pindah dari kamar lain`
+            ? `${kamar.nama} · Tanpa kamar di atas · Punya kamar = sudah ada, bisa dipindah`
             : undefined
         }
         searchPlaceholder="Cari nama santri..."
@@ -713,20 +787,33 @@ export default function KamarDetail() {
         description={kamar?.nama}
         className={theme === 'dark' ? 'bg-slate-800 text-white' : ''}
       >
-        <div className="space-y-2 -mx-1 max-h-[55vh] overflow-y-auto">
-          {santriInKamar.map((santri) => (
-            <button
-              key={santri.id}
-              type="button"
-              onClick={() => handleSetKetua(santri.id)}
-              className={`w-full p-3 rounded-sm border text-left flex items-center gap-2 ${
-                theme === 'dark' ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-200'
-              }`}
-            >
-              <Crown className="w-4 h-4 text-amber-600 shrink-0" />
-              <span className="text-xs font-medium">{santri.nama}</span>
-            </button>
-          ))}
+        <div className="space-y-1.5 -mx-1 max-h-[55vh] overflow-y-auto">
+          {santriInKamar.map((santri) => {
+            const foto = santriById.get(santri.id)?.foto?.trim() || '';
+            const isCurrent = kamar?.ketua === santri.nama;
+            return (
+              <button
+                key={santri.id}
+                type="button"
+                onClick={() => handleSetKetua(santri.id)}
+                className={`w-full px-2.5 py-2 rounded-sm border text-left flex items-center gap-2 ${
+                  isCurrent
+                    ? theme === 'dark'
+                      ? 'bg-amber-950/40 border-amber-700'
+                      : 'bg-amber-50 border-amber-200'
+                    : theme === 'dark'
+                      ? 'bg-slate-700 border-slate-600'
+                      : 'bg-slate-50 border-slate-200'
+                }`}
+              >
+                <SantriAvatar nama={santri.nama} foto={foto || null} size="sm" />
+                <span className="text-xs font-bold min-w-0 flex-1 truncate">{santri.nama}</span>
+                {isCurrent ? (
+                  <Crown className="w-3.5 h-3.5 text-amber-600 shrink-0" aria-label="Ketua saat ini" />
+                ) : null}
+              </button>
+            );
+          })}
         </div>
       </AppModal>
 

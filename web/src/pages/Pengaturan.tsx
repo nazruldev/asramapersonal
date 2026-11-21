@@ -19,7 +19,13 @@ import {
   normalizeIndonesiaTimezone,
 } from '@/lib/indonesia-timezone';
 import { AppSecuritySettingsForm } from '@/components/app-login-gate';
-import { getSessionUser } from '@/lib/app-auth';
+import {
+  PIN_MAX_LENGTH,
+  PIN_MIN_LENGTH,
+  clampPinInput,
+  getSessionUser,
+  pinLengthError,
+} from '@/lib/app-auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -62,8 +68,9 @@ function PinAkunSayaForm() {
   if (!user) return null;
 
   const submit = async () => {
-    if (newPin.trim().length < 4) {
-      toast.error('PIN baru minimal 4 karakter');
+    const pinErr = pinLengthError(newPin);
+    if (pinErr) {
+      toast.error(pinErr);
       return;
     }
     if (newPin !== confirmPin) {
@@ -99,23 +106,26 @@ function PinAkunSayaForm() {
       <Input
         type="password"
         inputMode="numeric"
+        maxLength={PIN_MAX_LENGTH}
         placeholder="PIN saat ini"
         value={currentPin}
-        onChange={(e) => setCurrentPin(e.target.value)}
+        onChange={(e) => setCurrentPin(clampPinInput(e.target.value))}
       />
       <Input
         type="password"
         inputMode="numeric"
-        placeholder="PIN baru"
+        maxLength={PIN_MAX_LENGTH}
+        placeholder={`PIN baru (${PIN_MIN_LENGTH}–${PIN_MAX_LENGTH} digit)`}
         value={newPin}
-        onChange={(e) => setNewPin(e.target.value)}
+        onChange={(e) => setNewPin(clampPinInput(e.target.value))}
       />
       <Input
         type="password"
         inputMode="numeric"
+        maxLength={PIN_MAX_LENGTH}
         placeholder="Ulangi PIN baru"
         value={confirmPin}
-        onChange={(e) => setConfirmPin(e.target.value)}
+        onChange={(e) => setConfirmPin(clampPinInput(e.target.value))}
       />
       <Button type="button" variant="outline" className="w-full" disabled={loading} onClick={() => void submit()}>
         {loading ? 'Menyimpan…' : 'Ganti PIN saya'}

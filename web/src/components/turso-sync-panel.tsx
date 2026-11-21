@@ -63,7 +63,7 @@ export function TursoSyncPanel() {
   const onPull = async () => {
     setBusy('pull');
     try {
-      // Push dulu baru pull — data lokal yang belum terkirim tidak hilang.
+      // Full-online: pull dari Turso (sumber kebenaran).
       const result = await runTursoSync();
       await afterCloud(result);
     } catch (err) {
@@ -99,7 +99,7 @@ export function TursoSyncPanel() {
           </h3>
           <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed mt-0.5">
             {status.configured
-              ? `Offline-first: semua data di SQLite lokal, disinkronkan otomatis ke Turso (${Capacitor.getPlatform()}).`
+              ? `Full-online Turso: sumber kebenaran cloud (${Capacitor.getPlatform()}). Internet wajib.`
               : 'Belum terhubung ke Turso. Isi kredensial cloud di web/.env.'}
           </p>
           {status.configured && host ? (
@@ -118,7 +118,7 @@ export function TursoSyncPanel() {
               ? 'Belum dikonfigurasi'
               : status.online
                 ? 'Terhubung'
-                : 'Offline (sinkron nanti)'}
+                : 'Offline (diblokir)'}
           </dd>
         </div>
         <div className="rounded-sm bg-slate-50 dark:bg-slate-900/50 p-2">
@@ -138,8 +138,7 @@ export function TursoSyncPanel() {
         </p>
       ) : (
         <p className="text-[11px] text-slate-600 dark:text-slate-300">
-          Perubahan disimpan lokal lalu dikirim otomatis. "Sinkronkan" = kirim lalu
-          tarik data terbaru dari cloud.
+          Perubahan disimpan langsung ke Turso (internet wajib). "Sinkronkan" = tarik data terbaru dari cloud.
         </p>
       )}
 

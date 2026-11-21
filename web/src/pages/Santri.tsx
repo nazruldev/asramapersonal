@@ -37,6 +37,7 @@ import { appFieldThemed } from '@/lib/form-styles';
 import { appCardClass } from '@/lib/surface-styles';
 import { cn } from '@/lib/utils';
 import { SantriFormFields } from '@/components/santri-form-fields';
+import { SantriAvatar } from '@/components/santri-avatar';
 import { emptyWilayahForm, wilayahFromSantri } from '@/components/wilayah-asal-fields';
 import { formatAsalWilayahShort } from '@/lib/wilayah-types';
 import { useTheme } from '../lib/theme';
@@ -347,11 +348,6 @@ export default function Santri() {
     requestDeleteSantri(santri);
   };
 
-  const getInitials = (name: string) => {
-    if (!name) return 'S';
-    return name.split(' ').slice(0, 2).map((n) => n[0]).join('').toUpperCase();
-  };
-
   const hasMore = pageItems.length < totalSantri;
 
   const availableRooms: string[] = [
@@ -492,17 +488,7 @@ export default function Santri() {
                   'px-2.5 py-2 flex gap-2 cursor-pointer active:scale-[0.99] transition-transform'
                 )}
               >
-                {santri.foto ? (
-                  <img
-                    src={santri.foto}
-                    alt={santri.nama}
-                    className="w-9 h-9 rounded-sm object-cover shrink-0"
-                  />
-                ) : (
-                  <div className="w-9 h-9 rounded-sm bg-emerald-700 text-white font-bold text-[10px] flex items-center justify-center shrink-0">
-                    {getInitials(santri.nama)}
-                  </div>
-                )}
+                <SantriAvatar nama={santri.nama} foto={santri.foto} size="sm" />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1 min-w-0">
                     <h3

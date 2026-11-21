@@ -11,6 +11,15 @@ import { normalizeDateKey } from '@/lib/db/date-normalize';
 import type { PenjadwalanPreset } from '@/lib/penjadwalan';
 import type { SantriKamarRiwayatRow } from '@/lib/santri-kamar-riwayat';
 
+/** ISO UTC — satu format di cloud agar delta/LWW tidak putus antar device. */
+function isoNow(raw?: unknown): string {
+  if (typeof raw === 'string' && raw.trim()) {
+    const t = Date.parse(raw.includes('T') ? raw : raw.replace(' ', 'T') + 'Z');
+    if (!Number.isNaN(t)) return new Date(t).toISOString();
+  }
+  return new Date().toISOString();
+}
+
 function str(row: Record<string, unknown>, key: string): string {
   const v = row[key];
   return v === undefined || v === null ? '' : String(v);
@@ -54,12 +63,22 @@ function resolveKegiatanId(kegiatan: Record<string, unknown>[], label: string): 
   return hit ? String(hit.id) : null;
 }
 
+/** Base64 foto besar membuat batch gagal/lambat — push terpisah 1 baris. */
+const FOTO_INLINE_MAX_CHARS = 12_000;
+
 async function execMany(client: Client, stmts: InStatement[]): Promise<void> {
   if (!stmts.length) return;
   const chunk = 40;
   for (let i = 0; i < stmts.length; i += chunk) {
     await client.batch(stmts.slice(i, i + chunk), 'write');
   }
+}
+
+function fotoForInlineBatch(raw: unknown): string | null {
+  if (raw === undefined || raw === null || raw === '') return null;
+  const s = String(raw);
+  if (s.length > FOTO_INLINE_MAX_CHARS) return null;
+  return s;
 }
 
 function stmt(sql: string, args: InArgs = []): InStatement {
@@ -105,25 +124,45 @@ export async function ensureTursoSchemaPatches(client: Client): Promise<void> {
 }
 
 /**
+ * Snapshot penuh atau partial (hanya field yang di-set).
+ * mode 'upsert' + field undefined = lewati entity itu (remote DB scoped write).
+ * mode 'replace': field missing dianggap [] (wipe penuh seperti migrasi).
+ */
+export type TursoWriteSnapshot = Partial<OfflineDbSnapshot>;
+
+/**
  * mode 'replace': wipe lalu isi ulang (migrasi satu arah).
- * mode 'upsert' : upsert per baris tanpa wipe — aman multi-device.
+ * mode 'upsert' : upsert per baris tanpa wipe — aman multi-device / partial.
  */
 export async function writeSnapshotToTursoTables(
   client: Client,
-  snapshot: OfflineDbSnapshot,
+  snapshot: TursoWriteSnapshot,
   mode: 'replace' | 'upsert' = 'replace'
 ): Promise<void> {
   await ensureTursoSchemaPatches(client);
-  const kelas = (snapshot.kelas ?? []) as Record<string, unknown>[];
-  const kamar = (snapshot.kamar ?? []) as Record<string, unknown>[];
-  const santri = (snapshot.santri ?? []) as Record<string, unknown>[];
-  const kegiatan = (snapshot.kegiatan ?? []) as Record<string, unknown>[];
-  const presets = snapshot.penjadwalanPreset ?? [];
-  const penjadwalan = (snapshot.penjadwalan ?? []) as Record<string, unknown>[];
-  const absensi = (snapshot.absensi ?? []) as Record<string, unknown>[];
-  const izin = (snapshot.izin ?? []) as Record<string, unknown>[];
-  const pembinaan = (snapshot.pembinaan ?? []) as Record<string, unknown>[];
-  const riwayat = (snapshot.riwayat_kamar ?? []) as SantriKamarRiwayatRow[];
+  const partial = mode === 'upsert';
+  const includeKelas = !partial || snapshot.kelas !== undefined;
+  const includeKamar = !partial || snapshot.kamar !== undefined;
+  const includeSantri = !partial || snapshot.santri !== undefined;
+  const includeKegiatan = !partial || snapshot.kegiatan !== undefined;
+  const includePresets = !partial || snapshot.penjadwalanPreset !== undefined;
+  const includePenjadwalan = !partial || snapshot.penjadwalan !== undefined;
+  const includeAbsensi = !partial || snapshot.absensi !== undefined;
+  const includeIzin = !partial || snapshot.izin !== undefined;
+  const includePembinaan = !partial || snapshot.pembinaan !== undefined;
+  const includeRiwayat = !partial || snapshot.riwayat_kamar !== undefined;
+  const includeSettings = !partial || snapshot.settings !== undefined;
+
+  const kelas = (includeKelas ? snapshot.kelas ?? [] : []) as Record<string, unknown>[];
+  const kamar = (includeKamar ? snapshot.kamar ?? [] : []) as Record<string, unknown>[];
+  const santri = (includeSantri ? snapshot.santri ?? [] : []) as Record<string, unknown>[];
+  const kegiatan = (includeKegiatan ? snapshot.kegiatan ?? [] : []) as Record<string, unknown>[];
+  const presets = (includePresets ? snapshot.penjadwalanPreset ?? [] : []) as PenjadwalanPreset[];
+  const penjadwalan = (includePenjadwalan ? snapshot.penjadwalan ?? [] : []) as Record<string, unknown>[];
+  const absensi = (includeAbsensi ? snapshot.absensi ?? [] : []) as Record<string, unknown>[];
+  const izin = (includeIzin ? snapshot.izin ?? [] : []) as Record<string, unknown>[];
+  const pembinaan = (includePembinaan ? snapshot.pembinaan ?? [] : []) as Record<string, unknown>[];
+  const riwayat = (includeRiwayat ? snapshot.riwayat_kamar ?? [] : []) as SantriKamarRiwayatRow[];
   const now = new Date().toISOString();
 
   if (mode === 'upsert') {
@@ -143,16 +182,28 @@ export async function writeSnapshotToTursoTables(
           const t = (v: string) => Date.parse(v.replace(' ', 'T') + (v.includes('Z') ? '' : 'Z')) || 0;
           return upd ? t(upd) > t(del) : false;
         });
-      kelas.splice(0, kelas.length, ...alive(kelas, 'kelas'));
-      kamar.splice(0, kamar.length, ...alive(kamar, 'kamar'));
-      santri.splice(0, santri.length, ...alive(santri, 'santri'));
-      kegiatan.splice(0, kegiatan.length, ...alive(kegiatan, 'kegiatan'));
-      presets.splice(0, presets.length, ...(alive(presets as unknown as Record<string, unknown>[], 'penjadwalan_preset') as unknown as typeof presets));
-      penjadwalan.splice(0, penjadwalan.length, ...alive(penjadwalan, 'penjadwalan'));
-      absensi.splice(0, absensi.length, ...alive(absensi, 'absensi'));
-      izin.splice(0, izin.length, ...alive(izin, 'izin'));
-      pembinaan.splice(0, pembinaan.length, ...alive(pembinaan, 'pembinaan'));
-      riwayat.splice(0, riwayat.length, ...alive(riwayat as unknown as Record<string, unknown>[], 'riwayat_kamar') as unknown as SantriKamarRiwayatRow[]);
+      if (includeKelas) kelas.splice(0, kelas.length, ...alive(kelas, 'kelas'));
+      if (includeKamar) kamar.splice(0, kamar.length, ...alive(kamar, 'kamar'));
+      if (includeSantri) santri.splice(0, santri.length, ...alive(santri, 'santri'));
+      if (includeKegiatan) kegiatan.splice(0, kegiatan.length, ...alive(kegiatan, 'kegiatan'));
+      if (includePresets) {
+        presets.splice(
+          0,
+          presets.length,
+          ...(alive(presets as unknown as Record<string, unknown>[], 'penjadwalan_preset') as unknown as typeof presets)
+        );
+      }
+      if (includePenjadwalan) penjadwalan.splice(0, penjadwalan.length, ...alive(penjadwalan, 'penjadwalan'));
+      if (includeAbsensi) absensi.splice(0, absensi.length, ...alive(absensi, 'absensi'));
+      if (includeIzin) izin.splice(0, izin.length, ...alive(izin, 'izin'));
+      if (includePembinaan) pembinaan.splice(0, pembinaan.length, ...alive(pembinaan, 'pembinaan'));
+      if (includeRiwayat) {
+        riwayat.splice(
+          0,
+          riwayat.length,
+          ...(alive(riwayat as unknown as Record<string, unknown>[], 'riwayat_kamar') as unknown as SantriKamarRiwayatRow[])
+        );
+      }
     }
   }
 
@@ -175,283 +226,327 @@ export async function writeSnapshotToTursoTables(
 
   const inserts: InStatement[] = [];
 
-  for (const row of kelas) {
-    inserts.push(
-      stmt(
-        `INSERT INTO kelas (id, nama, tingkat, updated_at) VALUES (?, ?, ?, ?)`,
-        [String(row.id), str(row, 'nama'), normalizeTingkat(row.tingkat), opt(row, 'updated_at') ?? now]
-      )
-    );
+  if (includeKelas) {
+    for (const row of kelas) {
+      inserts.push(
+        stmt(
+          `INSERT INTO kelas (id, nama, tingkat, updated_at) VALUES (?, ?, ?, ?)`,
+          [String(row.id), str(row, 'nama'), normalizeTingkat(row.tingkat), opt(row, 'updated_at') ?? now]
+        )
+      );
+    }
   }
 
-  for (const row of kegiatan) {
-    inserts.push(
-      stmt(
-        `INSERT INTO kegiatan (
-          id, nama, jenis, icon, jam_mulai, jam_selesai, waktu, urutan, untuk_absensi, hari_aktif_json, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          String(row.id),
-          str(row, 'nama'),
-          opt(row, 'jenis'),
-          opt(row, 'icon'),
-          opt(row, 'jam_mulai'),
-          opt(row, 'jam_selesai'),
-          opt(row, 'waktu'),
-          Number(row.urutan) || 0,
-          row.untuk_absensi === false ? 0 : 1,
-          JSON.stringify(row.hari_aktif ?? []),
-          opt(row, 'updated_at') ?? now,
-        ]
-      )
-    );
+  if (includeKegiatan) {
+    for (const row of kegiatan) {
+      inserts.push(
+        stmt(
+          `INSERT INTO kegiatan (
+            id, nama, jenis, icon, jam_mulai, jam_selesai, waktu, urutan, untuk_absensi, hari_aktif_json, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            String(row.id),
+            str(row, 'nama'),
+            opt(row, 'jenis'),
+            opt(row, 'icon'),
+            opt(row, 'jam_mulai'),
+            opt(row, 'jam_selesai'),
+            opt(row, 'waktu'),
+            Number(row.urutan) || 0,
+            row.untuk_absensi === false ? 0 : 1,
+            JSON.stringify(row.hari_aktif ?? []),
+            opt(row, 'updated_at') ?? now,
+          ]
+        )
+      );
+    }
   }
 
   // Kamar dulu tanpa ketua (hindari FK santri belum ada)
-  for (const row of kamar) {
-    inserts.push(
-      stmt(
-        `INSERT INTO kamar (id, nama, kapasitas, lantai, ketua_santri_id, fasilitas_json, asrama_id, updated_at)
-         VALUES (?, ?, ?, ?, NULL, ?, ?, ?)`,
-        [
-          String(row.id),
-          str(row, 'nama'),
-          Number(row.kapasitas) || 4,
-          opt(row, 'lantai'),
-          JSON.stringify(row.fasilitas ?? []),
-          opt(row, 'asrama_id'),
-          opt(row, 'updated_at') ?? now,
-        ]
-      )
-    );
+  if (includeKamar) {
+    for (const row of kamar) {
+      inserts.push(
+        stmt(
+          `INSERT INTO kamar (id, nama, kapasitas, lantai, ketua_santri_id, fasilitas_json, asrama_id, updated_at)
+           VALUES (?, ?, ?, ?, NULL, ?, ?, ?)`,
+          [
+            String(row.id),
+            str(row, 'nama'),
+            Number(row.kapasitas) || 4,
+            opt(row, 'lantai'),
+            JSON.stringify(row.fasilitas ?? []),
+            opt(row, 'asrama_id'),
+            isoNow(row.updated_at ?? now),
+          ]
+        )
+      );
+    }
   }
 
   const fallbackKelasId = kelas[0] ? String(kelas[0].id) : null;
-  for (const row of santri) {
-    const kelasId =
-      resolveKelasId(kelas, row.kelas_id) ??
-      resolveKelasId(kelas, row.kelas) ??
-      fallbackKelasId;
-    if (!kelasId) continue;
-    const kamarId =
-      row.kamar_id && kamar.some((k) => String(k.id) === String(row.kamar_id))
-        ? String(row.kamar_id)
-        : resolveKamarId(kamar, str(row, 'kamar'));
-    inserts.push(
-      stmt(
-        `INSERT INTO santri (
-          id, nama, kelas_id, kamar_id, nomor_wali, jenis_kelamin, include_wa, catatan, catatan_medis, foto,
-          jumlah_pelanggaran, masuk_kamar_sejak,
-          asal_provinsi_code, asal_provinsi_nama, asal_kota_code, asal_kota_nama,
-          asal_kecamatan_code, asal_kecamatan_nama, asal_desa_code, asal_desa_nama,
-          asrama_id, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          String(row.id),
-          str(row, 'nama'),
-          kelasId,
-          kamarId,
-          opt(row, 'nomor_wali'),
-          opt(row, 'jenis_kelamin'),
-          row.include_wa === false ? 0 : 1,
-          opt(row, 'catatan'),
-          opt(row, 'catatan_medis'),
-          opt(row, 'foto'),
-          Number(row.jumlah_pelanggaran) || 0,
-          opt(row, 'masuk_kamar_sejak'),
-          opt(row, 'asal_provinsi_code'),
-          opt(row, 'asal_provinsi_nama'),
-          opt(row, 'asal_kota_code'),
-          opt(row, 'asal_kota_nama'),
-          opt(row, 'asal_kecamatan_code'),
-          opt(row, 'asal_kecamatan_nama'),
-          opt(row, 'asal_desa_code'),
-          opt(row, 'asal_desa_nama'),
-          opt(row, 'asrama_id'),
-          opt(row, 'created_at') ?? now,
-          opt(row, 'updated_at') ?? now,
-        ]
-      )
-    );
+  const largeFotos: { id: string; foto: string; updatedAt: string }[] = [];
+  if (includeSantri) {
+    for (const row of santri) {
+      const kelasId =
+        (row.kelas_id != null && String(row.kelas_id) !== ''
+          ? String(row.kelas_id)
+          : null) ??
+        resolveKelasId(kelas, row.kelas_id) ??
+        resolveKelasId(kelas, row.kelas) ??
+        fallbackKelasId;
+      if (!kelasId) continue;
+      const kamarId =
+        row.kamar_id && String(row.kamar_id)
+          ? String(row.kamar_id)
+          : includeKamar
+            ? resolveKamarId(kamar, str(row, 'kamar'))
+            : null;
+      const rawFoto = opt(row, 'foto');
+      const inlineFoto = fotoForInlineBatch(rawFoto);
+      if (rawFoto && !inlineFoto) {
+        largeFotos.push({
+          id: String(row.id),
+          foto: rawFoto,
+          updatedAt: opt(row, 'updated_at') ?? now,
+        });
+      }
+      inserts.push(
+        stmt(
+          `INSERT INTO santri (
+            id, nama, kelas_id, kamar_id, nomor_wali, jenis_kelamin, include_wa, catatan, catatan_medis, foto,
+            jumlah_pelanggaran, masuk_kamar_sejak,
+            asal_provinsi_code, asal_provinsi_nama, asal_kota_code, asal_kota_nama,
+            asal_kecamatan_code, asal_kecamatan_nama, asal_desa_code, asal_desa_nama,
+            asrama_id, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            String(row.id),
+            str(row, 'nama'),
+            kelasId,
+            kamarId,
+            opt(row, 'nomor_wali'),
+            opt(row, 'jenis_kelamin'),
+            row.include_wa === false ? 0 : 1,
+            opt(row, 'catatan'),
+            opt(row, 'catatan_medis'),
+            inlineFoto,
+            Number(row.jumlah_pelanggaran) || 0,
+            opt(row, 'masuk_kamar_sejak'),
+            opt(row, 'asal_provinsi_code'),
+            opt(row, 'asal_provinsi_nama'),
+            opt(row, 'asal_kota_code'),
+            opt(row, 'asal_kota_nama'),
+            opt(row, 'asal_kecamatan_code'),
+            opt(row, 'asal_kecamatan_nama'),
+            opt(row, 'asal_desa_code'),
+            opt(row, 'asal_desa_nama'),
+            opt(row, 'asrama_id'),
+            opt(row, 'created_at') ?? now,
+            opt(row, 'updated_at') ?? now,
+          ]
+        )
+      );
+    }
   }
 
   // Set ketua kamar setelah santri ada
-  for (const row of kamar) {
-    const ketuaName = row.ketua ? String(row.ketua).trim() : '';
-    let ketuaId: string | null = row.ketua_santri_id ? String(row.ketua_santri_id) : null;
-    if (!ketuaId && ketuaName) {
-      const hit = santri.find(
-        (s) =>
-          String(s.nama ?? '').trim() === ketuaName &&
-          (String(s.kamar ?? '') === String(row.nama ?? '') ||
-            String(s.kamar_id ?? '') === String(row.id))
-      );
-      if (hit) ketuaId = String(hit.id);
+  if (includeKamar) {
+    for (const row of kamar) {
+      const ketuaName = row.ketua ? String(row.ketua).trim() : '';
+      let ketuaId: string | null = row.ketua_santri_id ? String(row.ketua_santri_id) : null;
+      if (!ketuaId && ketuaName && includeSantri) {
+        const hit = santri.find(
+          (s) =>
+            String(s.nama ?? '').trim() === ketuaName &&
+            (String(s.kamar ?? '') === String(row.nama ?? '') ||
+              String(s.kamar_id ?? '') === String(row.id))
+        );
+        if (hit) ketuaId = String(hit.id);
+      }
+      if (ketuaId) {
+        inserts.push(
+          stmt(`UPDATE kamar SET ketua_santri_id = ?, updated_at = ? WHERE id = ?`, [
+            ketuaId,
+            now,
+            String(row.id),
+          ])
+        );
+      }
     }
-    if (ketuaId) {
+  }
+
+  if (includePresets) {
+    for (const p of presets) {
       inserts.push(
-        stmt(`UPDATE kamar SET ketua_santri_id = ?, updated_at = ? WHERE id = ?`, [
-          ketuaId,
-          now,
-          String(row.id),
-        ])
+        stmt(
+          `INSERT INTO penjadwalan_preset (id, jenis, mode, mulai, bulan_ke_depan, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [
+            p.id,
+            p.jenis,
+            p.mode,
+            p.mulai,
+            p.bulanKeDepan,
+            p.updatedAt || now,
+          ]
+        )
       );
     }
   }
 
-  for (const p of presets) {
-    inserts.push(
-      stmt(
-        `INSERT INTO penjadwalan_preset (id, jenis, mode, mulai, bulan_ke_depan, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [
-          p.id,
-          p.jenis,
-          p.mode,
-          p.mulai,
-          p.bulanKeDepan,
-          p.updatedAt || now,
-        ]
-      )
-    );
+  if (includePenjadwalan) {
+    for (const row of penjadwalan) {
+      const entry = penjadwalanRowToEntry(row);
+      if (!entry.assignee_nama || entry.assignee_nama === '-') continue;
+      const params = penjadwalanInsertParams(entry);
+      inserts.push(
+        stmt(
+          `INSERT OR IGNORE INTO penjadwalan (
+            id, jenis, tanggal, mode,
+            assignee_santri_id, assignee_kamar_id, assignee_nama, assignee_detail,
+            catatan, generated_at, generate_batch_id, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [...params, opt(row, 'updated_at') ?? now]
+        )
+      );
+    }
   }
 
-  for (const row of penjadwalan) {
-    const entry = penjadwalanRowToEntry(row);
-    if (!entry.assignee_nama || entry.assignee_nama === '-') continue;
-    const params = penjadwalanInsertParams(entry);
-    inserts.push(
-      stmt(
-        `INSERT OR IGNORE INTO penjadwalan (
-          id, jenis, tanggal, mode,
-          assignee_santri_id, assignee_kamar_id, assignee_nama, assignee_detail,
-          catatan, generated_at, generate_batch_id, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [...params, opt(row, 'updated_at') ?? now]
-      )
-    );
-  }
-
+  // Partial upsert: jangan filter anak vs santri batch — FK sudah ada di cloud.
   const santriIds = new Set(santri.map((s) => String(s.id)));
-  for (const row of absensi) {
-    const sid = str(row, 'santri_id');
-    if (!santriIds.has(sid)) continue;
-    const label = str(row, 'kegiatan');
-    const kegiatanId = row.kegiatan_id
-      ? String(row.kegiatan_id)
-      : resolveKegiatanId(kegiatan, label);
-    if (!kegiatanId) continue;
+  const requireSantriInBatch = includeSantri && !partial;
+
+  if (includeAbsensi) {
+    for (const row of absensi) {
+      const sid = str(row, 'santri_id');
+      if (requireSantriInBatch && !santriIds.has(sid)) continue;
+      const label = str(row, 'kegiatan');
+      const kegiatanId = row.kegiatan_id
+        ? String(row.kegiatan_id)
+        : resolveKegiatanId(kegiatan, label);
+      if (!kegiatanId) continue;
+      inserts.push(
+        stmt(
+          `INSERT OR IGNORE INTO absensi (id, santri_id, kegiatan_id, tanggal, status, catatan, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [
+            String(row.id),
+            sid,
+            kegiatanId,
+            normalizeDateKey(row.tanggal),
+            str(row, 'status'),
+            opt(row, 'catatan'),
+            opt(row, 'updated_at') ?? now,
+          ]
+        )
+      );
+    }
+  }
+
+  if (includeIzin) {
+    for (const row of izin) {
+      const sid = str(row, 'santri_id');
+      if (requireSantriInBatch && !santriIds.has(sid)) continue;
+      inserts.push(
+        stmt(
+          `INSERT INTO izin (
+            id, santri_id, alasan, tanggal_keluar, batas_kembali, status_kembali,
+            penjemput, waktu_kembali_aktual, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            String(row.id),
+            sid,
+            str(row, 'alasan'),
+            str(row, 'tanggal_keluar'),
+            str(row, 'batas_kembali'),
+            str(row, 'status_kembali') || 'Belum',
+            opt(row, 'penjemput'),
+            opt(row, 'waktu_kembali_aktual'),
+            opt(row, 'created_at') ?? now,
+            opt(row, 'updated_at') ?? now,
+          ]
+        )
+      );
+    }
+  }
+
+  if (includePembinaan) {
+    for (const row of pembinaan) {
+      const sid = str(row, 'santri_id');
+      if (requireSantriInBatch && !santriIds.has(sid)) continue;
+      inserts.push(
+        stmt(
+          `INSERT INTO pembinaan (
+            id, santri_id, jenis, keterangan, tanggal, tindak_lanjut, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            String(row.id),
+            sid,
+            str(row, 'jenis'),
+            str(row, 'keterangan'),
+            str(row, 'tanggal'),
+            opt(row, 'tindak_lanjut'),
+            opt(row, 'created_at') ?? now,
+            opt(row, 'updated_at') ?? now,
+          ]
+        )
+      );
+    }
+  }
+
+  if (includeRiwayat) {
+    for (const row of riwayat) {
+      const sid = String(row.santri_id);
+      if (requireSantriInBatch && !santriIds.has(sid)) continue;
+      const kamarId =
+        row.kamar_id
+          ? String(row.kamar_id)
+          : includeKamar
+            ? resolveKamarId(kamar, row.kamar_nama)
+            : null;
+      const prevId =
+        row.kamar_sebelumnya_id
+          ? String(row.kamar_sebelumnya_id)
+          : null;
+      inserts.push(
+        stmt(
+          `INSERT INTO riwayat_kamar (
+            id, santri_id, kamar_id, kamar_nama, kamar_sebelumnya_id, kamar_sebelumnya_nama,
+            tipe, tanggal, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            row.id,
+            sid,
+            kamarId,
+            row.kamar_nama,
+            prevId,
+            row.kamar_sebelumnya_nama ?? null,
+            row.tipe,
+            row.tanggal,
+            opt(row as Record<string, unknown>, 'updated_at') ?? now,
+          ]
+        )
+      );
+    }
+  }
+
+  if (includeSettings) {
+    const settingsPayload = JSON.stringify(
+      mergeAppSettings({ ...(snapshot.settings ?? {}), setupSelesai: true })
+    );
     inserts.push(
       stmt(
-        `INSERT OR IGNORE INTO absensi (id, santri_id, kegiatan_id, tanggal, status, catatan, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [
-          String(row.id),
-          sid,
-          kegiatanId,
-          normalizeDateKey(row.tanggal),
-          str(row, 'status'),
-          opt(row, 'catatan'),
-          opt(row, 'updated_at') ?? now,
-        ]
+        `INSERT INTO app_settings (id, payload, updated_at) VALUES ('default', ?, ?)
+         ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at`,
+        [settingsPayload, now]
       )
     );
   }
-
-  for (const row of izin) {
-    const sid = str(row, 'santri_id');
-    if (!santriIds.has(sid)) continue;
-    inserts.push(
-      stmt(
-        `INSERT INTO izin (
-          id, santri_id, alasan, tanggal_keluar, batas_kembali, status_kembali,
-          penjemput, waktu_kembali_aktual, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          String(row.id),
-          sid,
-          str(row, 'alasan'),
-          str(row, 'tanggal_keluar'),
-          str(row, 'batas_kembali'),
-          str(row, 'status_kembali') || 'Belum',
-          opt(row, 'penjemput'),
-          opt(row, 'waktu_kembali_aktual'),
-          opt(row, 'created_at') ?? now,
-          opt(row, 'updated_at') ?? now,
-        ]
-      )
-    );
-  }
-
-  for (const row of pembinaan) {
-    const sid = str(row, 'santri_id');
-    if (!santriIds.has(sid)) continue;
-    inserts.push(
-      stmt(
-        `INSERT INTO pembinaan (
-          id, santri_id, jenis, keterangan, tanggal, tindak_lanjut, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          String(row.id),
-          sid,
-          str(row, 'jenis'),
-          str(row, 'keterangan'),
-          str(row, 'tanggal'),
-          opt(row, 'tindak_lanjut'),
-          opt(row, 'created_at') ?? now,
-          opt(row, 'updated_at') ?? now,
-        ]
-      )
-    );
-  }
-
-  for (const row of riwayat) {
-    const sid = String(row.santri_id);
-    if (!santriIds.has(sid)) continue;
-    const kamarId =
-      row.kamar_id && kamar.some((k) => String(k.id) === String(row.kamar_id))
-        ? String(row.kamar_id)
-        : resolveKamarId(kamar, row.kamar_nama);
-    const prevId =
-      row.kamar_sebelumnya_id &&
-      kamar.some((k) => String(k.id) === String(row.kamar_sebelumnya_id))
-        ? String(row.kamar_sebelumnya_id)
-        : null;
-    inserts.push(
-      stmt(
-        `INSERT INTO riwayat_kamar (
-          id, santri_id, kamar_id, kamar_nama, kamar_sebelumnya_id, kamar_sebelumnya_nama,
-          tipe, tanggal, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          row.id,
-          sid,
-          kamarId,
-          row.kamar_nama,
-          prevId,
-          row.kamar_sebelumnya_nama ?? null,
-          row.tipe,
-          row.tanggal,
-          opt(row, 'updated_at') ?? now,
-        ]
-      )
-    );
-  }
-
-  const settingsPayload = JSON.stringify(
-    mergeAppSettings({ ...snapshot.settings, setupSelesai: true })
-  );
-  inserts.push(
-    stmt(
-      `INSERT INTO app_settings (id, payload, updated_at) VALUES ('default', ?, ?)
-       ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at`,
-      [settingsPayload, now]
-    )
-  );
 
   if (mode === 'upsert') {
     // INSERT OR REPLACE = delete+insert → melanggar FK. Pakai upsert murni.
     // + LWW per baris: versi lama device lain tidak menimpa data yang lebih baru.
+    // Bandingkan teks ISO (lexicographic) — semua writer wajib tulis ISO via isoNow.
     for (const st of inserts) {
       if (typeof st === 'string') continue;
       if (/ON CONFLICT/i.test(st.sql)) continue;
@@ -460,16 +555,35 @@ export async function writeSnapshotToTursoTables(
       const table = mm[1];
       const cols = mm[2].split(',').map((c) => c.trim()).filter((c) => c && c !== 'id');
       if (!cols.length) continue;
-      let sql = ` ON CONFLICT(id) DO UPDATE SET ${cols
-        .map((c) => `${c} = excluded.${c}`)
-        .join(', ')}`;
+      // Foto besar dikirim terpisah — jangan overwrite foto cloud dengan NULL.
+      const setCols =
+        table === 'santri' && cols.includes('foto')
+          ? cols.map((c) =>
+              c === 'foto'
+                ? `foto = COALESCE(excluded.foto, ${table}.foto)`
+                : `${c} = excluded.${c}`
+            )
+          : cols.map((c) => `${c} = excluded.${c}`);
+      let sql = ` ON CONFLICT(id) DO UPDATE SET ${setCols.join(', ')}`;
       if (cols.includes('updated_at')) {
-        sql += ` WHERE datetime(excluded.updated_at) > datetime(${table}.updated_at)`;
+        sql += ` WHERE excluded.updated_at >= ${table}.updated_at OR ${table}.updated_at IS NULL`;
       }
       st.sql += sql;
     }
   }
   await execMany(client, inserts);
+
+  // Foto besar: 1 UPDATE per santri (hindari batch gagal / timeout).
+  for (const f of largeFotos) {
+    try {
+      await client.execute({
+        sql: `UPDATE santri SET foto = ?, updated_at = ? WHERE id = ?`,
+        args: [f.foto, f.updatedAt, f.id],
+      });
+    } catch (err) {
+      console.warn('[turso] push foto santri gagal:', f.id, err);
+    }
+  }
 
   // Audit remote: isi created_by/updated_by untuk baris yang belum punya.
   const actor = currentActorName();
@@ -604,6 +718,50 @@ export async function countTursoOperationalRows(client: Client): Promise<{
 }
 
 /**
+ * Upsert baris kamar saja ke Turso (tanpa full snapshot).
+ * Dipakai setelah CRUD kamar agar push tidak tergantung batch santri/foto besar.
+ */
+export async function upsertKamarRowsToTurso(
+  client: Client,
+  rows: Record<string, unknown>[]
+): Promise<void> {
+  if (!rows.length) return;
+  await ensureTursoSchemaPatches(client);
+  const stmts: InStatement[] = [];
+  for (const row of rows) {
+    const updatedAt = isoNow(row.updated_at ?? row.updatedAt);
+    const ketuaId = opt(row, 'ketua_santri_id');
+    stmts.push(
+      stmt(
+        `INSERT INTO kamar (id, nama, kapasitas, lantai, ketua_santri_id, fasilitas_json, asrama_id, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           nama = excluded.nama,
+           kapasitas = excluded.kapasitas,
+           lantai = excluded.lantai,
+           ketua_santri_id = excluded.ketua_santri_id,
+           fasilitas_json = excluded.fasilitas_json,
+           asrama_id = excluded.asrama_id,
+           updated_at = excluded.updated_at
+         WHERE excluded.updated_at >= kamar.updated_at
+            OR kamar.updated_at IS NULL`,
+        [
+          String(row.id),
+          str(row, 'nama'),
+          Number(row.kapasitas) || 4,
+          opt(row, 'lantai'),
+          ketuaId,
+          JSON.stringify(row.fasilitas ?? []),
+          opt(row, 'asrama_id'),
+          updatedAt,
+        ]
+      )
+    );
+  }
+  await execMany(client, stmts);
+}
+
+/**
  * Baca tabel entity → snapshot app.
  * asramaId terisi = isolasi per asrama: santri/kamar hanya asrama itu
  * (+ baris tanpa asrama_id untuk kompatibilitas data lama), tabel anak
@@ -641,7 +799,7 @@ export async function readSnapshotFromTursoTables(
     client.execute(`SELECT * FROM kelas ORDER BY nama`),
     client.execute({
       sql: `SELECT k.*, s.nama AS ketua_nama FROM kamar k LEFT JOIN santri s ON s.id = k.ketua_santri_id
-            ${scoped ? 'WHERE (k.asrama_id = ? OR k.asrama_id IS NULL)' : ''} ORDER BY k.nama`,
+            ${scoped ? 'WHERE (k.asrama_id = ? OR k.asrama_id IS NULL)' : ''} ORDER BY datetime(k.updated_at) DESC, k.nama`,
       args: scopeArgs,
     }),
     client.execute({
@@ -650,7 +808,7 @@ export async function readSnapshotFromTursoTables(
        LEFT JOIN kamar k ON k.id = s.kamar_id
        LEFT JOIN kelas kl ON kl.id = s.kelas_id
        ${santriScope}
-       ORDER BY s.nama`,
+       ORDER BY datetime(COALESCE(s.updated_at, s.created_at)) DESC, s.nama`,
       args: scopeArgs,
     }),
     client.execute(`SELECT * FROM kegiatan ORDER BY urutan, nama`),
@@ -895,7 +1053,8 @@ export async function readDeltaFromTursoTables(
       const s = scopeFor(t);
       const res = await client
         .execute({
-          sql: `SELECT * FROM ${t} WHERE updated_at > ? ${s.sql}`,
+          // datetime() agar ISO vs "YYYY-MM-DD HH:MM:SS" tetap kebaca lintas device.
+          sql: `SELECT * FROM ${t} WHERE datetime(updated_at) > datetime(?) ${s.sql}`,
           args: [sinceIso, ...s.extraArgs],
         })
         .catch(() => ({ rows: [] as Record<string, unknown>[] }));
