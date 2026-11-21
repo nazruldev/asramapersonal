@@ -19,6 +19,7 @@ import {
   getSyncMeta,
   listSyncTombstones,
   setSyncMeta,
+  shouldPersistToSqlite,
 } from '@/lib/offline-db';
 import {
   sqlApplyRemoteRows,
@@ -278,8 +279,8 @@ export async function pullFromTurso(): Promise<string> {
   const nextCursor = new Date(Date.now() - 30_000).toISOString();
 
   if (counts.santri > 0 || counts.kamar > 0 || counts.kelas > 0) {
-    // Delta pull hanya valid kalau scope sama dengan baseline terakhir.
-    if (cursor && savedScope === scopeKey) {
+    // Delta SQLite hanya untuk Android/iOS. Web/Electron = localStorage → full snapshot.
+    if (shouldPersistToSqlite() && cursor && savedScope === scopeKey) {
       const delta = await readDeltaFromTursoTables(client, cursor, scope);
       const applied = await applyDeltaLocally(delta);
       await setSyncMeta(PULL_CURSOR_KEY, nextCursor);
@@ -539,6 +540,10 @@ export function startAutoSync(): void {
       });
     }, delay);
   };
-  scheduleNext();
+  // Sync segera saat boot (jangan tunggu interval 2 menit) — penting Electron lokal kosong.
+  void maybeSync().then((ok) => {
+    delay = ok ? BASE_DELAY : Math.min(delay * 2, MAX_DELAY);
+    scheduleNext();
+  });
   console.info('[sync] mode=offline-first-delta-sync');
 }

@@ -1,5 +1,4 @@
 import {
-  useCallback,
   useEffect,
   useRef,
   useState,
@@ -8,26 +7,6 @@ import {
   type ReactNode,
 } from 'react';
 import { cn } from '@/lib/utils';
-
-type Snap = 'half' | 'full';
-
-type SheetMetrics = {
-  half: number;
-  full: number;
-};
-
-function measureSheetHeights(): SheetMetrics {
-  const vv = window.visualViewport;
-  const vh = vv?.height ?? window.innerHeight;
-  const available = Math.max(240, vh - 8);
-  return {
-    half: Math.round(available * 0.7),
-    full: Math.round(available * 0.94),
-  };
-}
-
-const DRAG_CLOSE_PX = 80;
-const DRAG_SNAP_PX = 56;
 
 type BottomSheetFrameProps = {
   open: boolean;
@@ -38,6 +17,10 @@ type BottomSheetFrameProps = {
   elevated?: boolean;
 };
 
+/** Tinggi panel fixed 85% — hanya bisa di-tarik ke bawah untuk tutup. */
+const PANEL_HEIGHT = '85dvh';
+const DRAG_CLOSE_PX = 80;
+
 export function BottomSheetFrame({
   open,
   onClose,
@@ -46,66 +29,20 @@ export function BottomSheetFrame({
   panelClassName,
   elevated = false,
 }: BottomSheetFrameProps) {
-  const [snap, setSnap] = useState<Snap>('half');
-  const [metrics, setMetrics] = useState<SheetMetrics>(() => measureSheetHeights());
-  const [contentHeight, setContentHeight] = useState(0);
   const [dragY, setDragY] = useState(0);
   const dragging = useRef(false);
   const movedRef = useRef(false);
   const startY = useRef(0);
-  const snapRef = useRef<Snap>('half');
-  const contentRef = useRef<HTMLDivElement>(null);
-
-  const remeasure = useCallback(() => {
-    setMetrics(measureSheetHeights());
-    // Tinggi konten -> snap bawah mengikuti isi (max 94%)
-    const el = contentRef.current;
-    if (el) setContentHeight(el.scrollHeight);
-  }, []);
 
   useEffect(() => {
     if (!open) return;
-    setSnap('half');
-    snapRef.current = 'half';
     setDragY(0);
-    remeasure();
-  }, [open, remeasure]);
-
-  useEffect(() => {
-    if (!open) return;
-    const vv = window.visualViewport;
-    vv?.addEventListener('resize', remeasure);
-    window.addEventListener('resize', remeasure);
-    return () => {
-      vv?.removeEventListener('resize', remeasure);
-      window.removeEventListener('resize', remeasure);
-    };
-  }, [open, remeasure]);
-
-  // Ukur ulang tinggi saat isi berubah (form panjang -> sheet naik otomatis)
-  useEffect(() => {
-    if (!open) return;
-    const el = contentRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(() => {
-      setContentHeight(el.scrollHeight);
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
       document.body.style.overflow = prev;
     };
   }, [open]);
-
-  useEffect(() => {
-    snapRef.current = snap;
-  }, [snap]);
 
   const onHandlePointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement;
@@ -119,10 +56,8 @@ export function BottomSheetFrame({
   const onHandlePointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (!dragging.current) return;
     const dy = e.clientY - startY.current;
-    const maxDown = snapRef.current === 'full' ? metrics.full * 0.45 : metrics.half * 0.55;
-    const clamped =
-      dy > 0 ? Math.min(dy, maxDown) : snapRef.current === 'full' ? dy : Math.max(dy, -metrics.half * 0.35);
-    setDragY(clamped);
+    // Hanya tarik ke bawah (tutup), tidak naikkan sheet
+    setDragY(Math.max(0, Math.min(dy, window.innerHeight * 0.55)));
   };
 
   const onHandlePointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -132,19 +67,7 @@ export function BottomSheetFrame({
     const dy = e.clientY - startY.current;
     if (Math.abs(dy) > 6) movedRef.current = true;
     setDragY(0);
-
-    if (dy > DRAG_CLOSE_PX) {
-      if (snapRef.current === 'full') {
-        setSnap('half');
-      } else {
-        onClose();
-      }
-      return;
-    }
-    if (dy < -DRAG_SNAP_PX) {
-      setSnap('full');
-      return;
-    }
+    if (dy > DRAG_CLOSE_PX) onClose();
   };
 
   const onHandlePointerCancel = () => {
@@ -162,12 +85,6 @@ export function BottomSheetFrame({
 
   if (!open) return null;
 
-  // Snap bawah mengikuti isi: min 52%, naik sampai max 94% kalau konten panjang
-  const autoHeight =
-    contentHeight > 0
-      ? Math.min(metrics.full, Math.max(metrics.half, contentHeight))
-      : metrics.half;
-  const panelHeight = snap === 'full' ? metrics.full : autoHeight;
   const isAnimating = !dragging.current;
 
   return (
@@ -197,10 +114,10 @@ export function BottomSheetFrame({
           panelClassName
         )}
         style={{
-          height: panelHeight,
+          height: PANEL_HEIGHT,
           maxHeight: `calc(100dvh - var(--keyboard-inset, 0px) - 0.5rem)`,
           transform: dragY ? `translateY(${dragY}px)` : undefined,
-          transition: isAnimating ? 'height 0.28s ease-out, transform 0.28s ease-out' : 'none',
+          transition: isAnimating ? 'transform 0.28s ease-out' : 'none',
         }}
         onPointerDown={onHandlePointerDown}
         onPointerMove={onHandlePointerMove}
@@ -216,7 +133,7 @@ export function BottomSheetFrame({
         >
           <div className="w-12 h-1.5 rounded-full bg-slate-300 dark:bg-slate-600 mx-auto" />
         </div>
-        <div ref={contentRef} className="flex flex-col flex-1 min-h-0 overflow-hidden">{children}</div>
+        <div className="flex flex-col flex-1 min-h-0 overflow-hidden">{children}</div>
       </div>
     </div>
   );

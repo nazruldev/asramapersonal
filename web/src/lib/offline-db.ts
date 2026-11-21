@@ -916,6 +916,7 @@ async function ensureSchemaPatches(): Promise<void> {
 
 export async function recordSyncTombstone(tableName: string, rowId: string): Promise<void> {
   if (!tableName || !rowId) return;
+  if (!shouldPersistToSqlite()) return;
   await initOfflineSqlite();
   await runSqlExclusive(async (db) => {
     await db.run(
@@ -931,6 +932,7 @@ export async function recordSyncTombstones(
   rowIds: string[]
 ): Promise<void> {
   if (!rowIds.length) return;
+  if (!shouldPersistToSqlite()) return;
   await initOfflineSqlite();
   await runSqlExclusive(async (db) => {
     for (const rowId of rowIds) {
@@ -947,6 +949,7 @@ export async function recordSyncTombstones(
 export async function listSyncTombstones(): Promise<
   { table_name: string; row_id: string; deleted_at: string }[]
 > {
+  if (!shouldPersistToSqlite()) return [];
   await initOfflineSqlite();
   return runSqlExclusive(async (db) => {
     const result = await db.query(
@@ -964,6 +967,7 @@ export async function listSyncTombstones(): Promise<
 }
 
 export async function touchUpdatedAt(tableName: string, rowId?: string): Promise<void> {
+  if (!shouldPersistToSqlite()) return;
   await runSqlExclusive(async (db) => {
     if (rowId) {
       await db.run(`UPDATE ${tableName} SET updated_at = datetime('now') WHERE id = ?`, [rowId]);
@@ -973,7 +977,13 @@ export async function touchUpdatedAt(tableName: string, rowId?: string): Promise
   });
 }
 
+const WEB_SYNC_META_PREFIX = 'asrama_sync_meta:';
+
 export async function getSyncMeta(key: string): Promise<string | null> {
+  if (!shouldPersistToSqlite()) {
+    if (typeof localStorage === 'undefined') return null;
+    return localStorage.getItem(`${WEB_SYNC_META_PREFIX}${key}`);
+  }
   return runSqlExclusive(async (db) => {
     const result = await db.query(`SELECT value FROM sync_meta WHERE key = ?`, [key]);
     if (result.values?.length) {
@@ -984,6 +994,11 @@ export async function getSyncMeta(key: string): Promise<string | null> {
 }
 
 export async function setSyncMeta(key: string, value: string): Promise<void> {
+  if (!shouldPersistToSqlite()) {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(`${WEB_SYNC_META_PREFIX}${key}`, value);
+    return;
+  }
   await runSqlExclusive(async (db) => {
     await db.run(`INSERT OR REPLACE INTO sync_meta (key, value) VALUES (?, ?)`, [key, value]);
   });
@@ -991,6 +1006,10 @@ export async function setSyncMeta(key: string, value: string): Promise<void> {
 
 /** Terapkan settings hasil pull (tanpa replace seluruh snapshot). */
 export async function applyRemoteAppSettings(settings: AppSettings): Promise<void> {
+  if (!shouldPersistToSqlite()) {
+    await setSyncMeta('settings_updated_at', new Date().toISOString());
+    return;
+  }
   await runSqlExclusive(async (db) => {
     await db.run(`INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)`, [
       'settings',

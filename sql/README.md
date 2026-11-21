@@ -8,6 +8,9 @@ File di folder ini **tidak dijalankan otomatis** ke production.
 2. Jalankan berurutan:
    - `001_schema_v4.sql`
    - `002_sync_meta.sql`
+   - `003_app_data_snapshot.sql` (jika belum)
+   - `004_multi_asrama.sql` (jika belum)
+   - `005_pembayaran_tables.sql` ← tabel `tagihan_jenis`, `tagihan`, `pembayaran`
 3. Atau di Windows: `powershell -File sql/apply-manual.ps1`
 4. Review hasil (`SELECT name FROM sqlite_master WHERE type='table'`).
 

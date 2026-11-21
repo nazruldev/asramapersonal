@@ -7,9 +7,7 @@ import { useAppReload } from '@/hooks/use-app-reload';
 import { PageWithPullRefresh } from '@/components/page-with-pull-refresh';
 import { useLocation, useNavigate } from 'react-router';
 import {
-  BedDouble,
   Filter,
-  GraduationCap,
   ShieldAlert,
   ClockAlert,
   ChevronDown,
@@ -20,6 +18,7 @@ import {
   X,
 } from 'lucide-react';
 import { BottomPicker } from '@/components/ui/bottom-picker';
+import { KelasKamarFilterSheet } from '@/components/kelas-kamar-filter-sheet';
 import { EmptyState } from '@/components/ui/empty-state';
 import {
   appFieldClass,
@@ -35,12 +34,11 @@ import {
   appCardClass,
   appChipInactiveClass,
   appListCardButtonClass,
-  appSectionTitleClass,
 } from '@/lib/surface-styles';
 import { cn } from '@/lib/utils';
 import { useTheme } from '@/lib/theme';
 import { useScreenAddAction } from '@/lib/screen-header-actions';
-import { AppModal } from '@/components/ui/app-modal';
+import { AppModal, AppModalFooter } from '@/components/ui/app-modal';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/lib/toast';
 import { getPelanggaranTier } from '@/lib/app-settings';
@@ -68,8 +66,6 @@ export default function Pembinaan() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [selectedKelas, setSelectedKelas] = useState<string[]>([]);
   const [selectedKamar, setSelectedKamar] = useState<string[]>([]);
-  const [draftKelas, setDraftKelas] = useState<string[]>([]);
-  const [draftKamar, setDraftKamar] = useState<string[]>([]);
 
   const settings = useAppStore((s) => s.settings);
   const pembinaanReady = useReloadKeyReady('pembinaan');
@@ -214,28 +210,7 @@ export default function Pembinaan() {
 
   const hasActiveFilter = selectedKelas.length > 0 || selectedKamar.length > 0;
 
-  const toggleDraft = (list: string[], value: string) =>
-    list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
-
-  const openFilterDrawer = () => {
-    setDraftKelas(selectedKelas);
-    setDraftKamar(selectedKamar);
-    setFilterOpen(true);
-  };
-
-  const applyFilters = () => {
-    setSelectedKelas(draftKelas);
-    setSelectedKamar(draftKamar);
-    setFilterOpen(false);
-  };
-
-  const resetFilters = () => {
-    setDraftKelas([]);
-    setDraftKamar([]);
-    setSelectedKelas([]);
-    setSelectedKamar([]);
-    setFilterOpen(false);
-  };
+  const openFilterDrawer = () => setFilterOpen(true);
 
   const totalPages = Math.max(1, Math.ceil(groupedBySantri.length / PEMBINAAN_PAGE_SIZE));
 
@@ -355,79 +330,24 @@ export default function Pembinaan() {
         </p>
       )}
 
-      <AppModal
+      <KelasKamarFilterSheet
         open={filterOpen}
         onClose={() => setFilterOpen(false)}
-        title="Filter lanjutan"
-        description="Pilih satu atau lebih kelas dan kamar (kosong = semua)"
-      >
-        <div className="flex flex-col flex-1 min-h-0 gap-5 text-sm -mx-1">
-          <div className="space-y-2 shrink-0">
-            <p className={appSectionTitleClass}>Kelas</p>
-            {kelasOptions.length === 0 ? (
-              <EmptyState icon={GraduationCap} title="Belum ada data kelas" variant="minimal" />
-            ) : (
-              <div className="flex flex-wrap gap-1.5">
-                {kelasOptions.map((kelas) => {
-                  const active = draftKelas.includes(kelas);
-                  return (
-                    <button
-                      key={kelas}
-                      type="button"
-                      onClick={() => setDraftKelas((prev) => toggleDraft(prev, kelas))}
-                      className={cn(
-                        'px-3 py-1.5 rounded-sm text-xs font-bold border transition-all',
-                        active
-                          ? 'bg-slate-900 text-white border-slate-900 dark:bg-slate-700 dark:text-white dark:border-slate-600'
-                          : cn(appChipInactiveClass, 'text-slate-600')
-                      )}
-                    >
-                      {kelas}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          <div className="flex flex-col flex-1 min-h-0 space-y-2">
-            <p className={`${appSectionTitleClass} shrink-0`}>Kamar</p>
-            {kamarOptions.length === 0 ? (
-              <EmptyState icon={BedDouble} title="Belum ada data kamar" variant="minimal" />
-            ) : (
-              <div className="flex flex-wrap gap-1.5 flex-1 min-h-0 overflow-y-auto overscroll-contain pr-0.5 content-start">
-                {kamarOptions.map((kamar) => {
-                  const active = draftKamar.includes(kamar);
-                  return (
-                    <button
-                      key={kamar}
-                      type="button"
-                      onClick={() => setDraftKamar((prev) => toggleDraft(prev, kamar))}
-                      className={cn(
-                        'px-3 py-1.5 rounded-sm text-xs font-bold border transition-all text-left',
-                        active
-                          ? 'bg-emerald-800 text-white border-emerald-800'
-                          : cn(appChipInactiveClass, 'text-slate-600')
-                      )}
-                    >
-                      {kamar}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          <div className="flex gap-2 shrink-0 sticky bottom-0 -mx-3 sm:-mx-4 -mb-4 px-3 sm:px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-card border-t border-slate-200 dark:border-slate-700">
-            <Button type="button" variant="outline" className="flex-1 text-xs" onClick={resetFilters}>
-              Reset filter
-            </Button>
-            <Button type="button" className="flex-1 text-xs" onClick={applyFilters}>
-              Terapkan
-            </Button>
-          </div>
-        </div>
-      </AppModal>
+        kelasOptions={kelasOptions}
+        kamarOptions={kamarOptions}
+        selectedKelas={selectedKelas}
+        selectedKamar={selectedKamar}
+        onApply={(kelas, kamar) => {
+          setSelectedKelas(kelas);
+          setSelectedKamar(kamar);
+          setFilterOpen(false);
+        }}
+        onReset={() => {
+          setSelectedKelas([]);
+          setSelectedKamar([]);
+          setFilterOpen(false);
+        }}
+      />
 
       {/* Pembinaan Card Feed */}
       <div className="space-y-3">
@@ -558,8 +478,24 @@ export default function Pembinaan() {
         onClose={closeAddModal}
         title="Catat Pelanggaran dan Teguran"
         description="Catat kejadian disiplin santri untuk arsip BK"
+        footer={
+          <AppModalFooter>
+            <button
+              type="submit"
+              form="pembinaan-add-form"
+              disabled={addPembinaanMutation.isPending || !selectedSantriIds.length}
+              className="w-full py-3 bg-emerald-700 hover:bg-emerald-800 text-white rounded-sm font-bold text-xs shadow-md shadow-emerald-700/20 active:scale-[0.98] transition-all disabled:opacity-50"
+            >
+              {addPembinaanMutation.isPending
+                ? 'Menyimpan...'
+                : selectedSantriIds.length > 1
+                  ? `Simpan catatan (${selectedSantriIds.length} santri)`
+                  : 'Simpan catatan'}
+            </button>
+          </AppModalFooter>
+        }
       >
-            <form onSubmit={handleSubmit} className="space-y-3.5 -mx-1">
+            <form id="pembinaan-add-form" onSubmit={handleSubmit} className="space-y-3.5 -mx-1">
               <div className={appFormStack}>
                 <label className={appLabelClass}>Pilih Santri *</label>
                 <button
@@ -619,20 +555,6 @@ export default function Pembinaan() {
                   placeholder="Arahan nasihat, hukuman mendidik, atau tindak lanjut pengurus..."
                   className={appTextareaClass}
                 />
-              </div>
-
-              <div className="pt-2">
-                <button
-                  type="submit"
-                  disabled={addPembinaanMutation.isPending || !selectedSantriIds.length}
-                  className="w-full py-3 bg-emerald-700 hover:bg-emerald-800 text-white rounded-sm font-bold text-xs shadow-md shadow-emerald-700/20 active:scale-[0.98] transition-all disabled:opacity-50"
-                >
-                  {addPembinaanMutation.isPending
-                    ? 'Menyimpan...'
-                    : selectedSantriIds.length > 1
-                      ? `Simpan catatan (${selectedSantriIds.length} santri)`
-                      : 'Simpan catatan'}
-                </button>
               </div>
             </form>
       </AppModal>

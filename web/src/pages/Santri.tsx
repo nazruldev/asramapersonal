@@ -28,7 +28,7 @@ import { izinDetailPath } from '@/lib/izin-group';
 import { santriKamarRiwayatPath } from '@/lib/santri-kamar-riwayat';
 import { withBackTo } from '@/lib/app-navigation';
 import { santriDetailPath } from '@/lib/santri-detail';
-import { AppModal } from '@/components/ui/app-modal';
+import { AppModal, AppModalFooter } from '@/components/ui/app-modal';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { BottomPicker } from '@/components/ui/bottom-picker';
 import { Button } from '@/components/ui/button';
@@ -573,6 +573,22 @@ export default function Santri() {
         title="Tambah Santri"
         description="Lengkapi data santri baru"
         className={theme === 'dark' ? 'bg-slate-800 text-white' : ''}
+        footer={
+          <AppModalFooter>
+            <Button type="button" variant="outline" className="flex-1" onClick={handleCloseAddModal}>
+              Batal
+            </Button>
+            <Button
+              type="button"
+              className="flex-1"
+              disabled={saveMutation.isPending}
+              onClick={handleSave}
+            >
+              <Save className="w-4 h-4" />
+              Simpan
+            </Button>
+          </AppModalFooter>
+        }
       >
             <SantriFormFields
               jenisAsrama={jenisAsrama}
@@ -587,21 +603,6 @@ export default function Santri() {
               wilayah={wilayahForm}
               onWilayahChange={setWilayahForm}
             />
-
-            <div className="flex gap-2 mt-5 pb-1">
-              <Button type="button" variant="outline" className="flex-1" onClick={handleCloseAddModal}>
-                Batal
-              </Button>
-              <Button
-                type="button"
-                className="flex-1"
-                disabled={saveMutation.isPending}
-                onClick={handleSave}
-              >
-                <Save className="w-4 h-4" />
-                Simpan
-              </Button>
-            </div>
       </AppModal>
 
       <AppModal
@@ -610,6 +611,17 @@ export default function Santri() {
         title="Ubah Santri"
         description="Perbarui data santri"
         className={theme === 'dark' ? 'bg-slate-800 text-white' : ''}
+        footer={
+          <AppModalFooter>
+            <Button type="button" variant="outline" className="flex-1" onClick={handleCloseEditModal}>
+              Batal
+            </Button>
+            <Button type="button" className="flex-1" disabled={saveMutation.isPending} onClick={handleSave}>
+              <Save className="w-4 h-4" />
+              Simpan
+            </Button>
+          </AppModalFooter>
+        }
       >
             <SantriFormFields
               jenisAsrama={jenisAsrama}
@@ -625,16 +637,6 @@ export default function Santri() {
               wilayah={wilayahForm}
               onWilayahChange={setWilayahForm}
             />
-
-            <div className="flex gap-2 mt-5 pb-1">
-              <Button type="button" variant="outline" className="flex-1" onClick={handleCloseEditModal}>
-                Batal
-              </Button>
-              <Button type="button" className="flex-1" disabled={saveMutation.isPending} onClick={handleSave}>
-                <Save className="w-4 h-4" />
-                Simpan
-              </Button>
-            </div>
       </AppModal>
 
       {formPickersOpen && (

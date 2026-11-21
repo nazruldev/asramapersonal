@@ -3,7 +3,18 @@ import { normalizeAppPathname } from '@/lib/app-navigation';
 /** Nilai batas_kembali jika tanggal pulang belum diketahui (mis. sakit). */
 export const IZIN_BATAS_BELUM_PASTI = '9999-12-31T23:59:59.999Z';
 
-export type IzinDurasiPreset = '1hari' | '2hari' | '1minggu' | '1bulan' | 'custom' | 'belum_pasti';
+export type IzinDurasiPreset =
+  | '30menit'
+  | '1jam'
+  | '2jam'
+  | '3jam'
+  | '6jam'
+  | '1hari'
+  | '2hari'
+  | '1minggu'
+  | '1bulan'
+  | 'custom'
+  | 'belum_pasti';
 
 export type IzinRow = {
   id: string;
@@ -50,6 +61,21 @@ export function batasKembaliLocalFromKeluar(
 ): string {
   const end = parseDatetimeLocal(keluarLocal);
   switch (preset) {
+    case '30menit':
+      end.setMinutes(end.getMinutes() + 30);
+      break;
+    case '1jam':
+      end.setHours(end.getHours() + 1);
+      break;
+    case '2jam':
+      end.setHours(end.getHours() + 2);
+      break;
+    case '3jam':
+      end.setHours(end.getHours() + 3);
+      break;
+    case '6jam':
+      end.setHours(end.getHours() + 6);
+      break;
     case '1hari':
       end.setDate(end.getDate() + 1);
       break;

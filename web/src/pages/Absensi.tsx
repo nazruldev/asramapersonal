@@ -7,16 +7,19 @@ import { PageWithPullRefresh } from '@/components/page-with-pull-refresh';
 import { format, subDays } from 'date-fns';
 import { id as localeId } from 'date-fns/locale';
 import {
+  BedDouble,
   CalendarOff,
+  Check,
   CheckCheck,
   CheckCircle2,
   Clock,
+  GraduationCap,
   SlidersHorizontal,
   Undo2,
   Users,
 } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
-import { AppModal } from '@/components/ui/app-modal';
+import { AppModal, AppModalFooter } from '@/components/ui/app-modal';
 import { Button } from '@/components/ui/button';
 import { useScreenHeaderActions } from '@/lib/screen-header-actions';
 import { ScrollNavButtons } from '@/components/scroll-nav-buttons';
@@ -98,6 +101,7 @@ export default function Absensi() {
   const agendaScrollRef = useRef<HTMLDivElement>(null);
   const [activeKegiatan, setActiveKegiatan] = useState('');
   const [selectedRoomFilter, setSelectedRoomFilter] = useState('Semua Kamar');
+  const [selectedKelasFilter, setSelectedKelasFilter] = useState('Semua Kelas');
   const [selectedDateKey, setSelectedDateKey] = useState(() => toDateKey(new Date()));
   const [presensiTab, setPresensiTab] = useState<'belum' | 'sudah'>('belum');
   const [filterOpen, setFilterOpen] = useState(false);
@@ -266,14 +270,24 @@ export default function Absensi() {
     });
   };
 
-  const roomNames = [
-    'Semua Kamar',
-    ...Array.from(new Set(santriList.map((s: { kamar?: string }) => s.kamar).filter(Boolean))),
+  const kelasNames = [
+    'Semua Kelas',
+    ...Array.from(
+      new Set(santriList.map((s: { kelas?: string }) => s.kelas).filter(Boolean) as string[])
+    ).sort((a, b) => a.localeCompare(b, 'id')),
   ];
 
-  const visibleSantri = santriList.filter((s: { kamar?: string }) => {
-    if (selectedRoomFilter === 'Semua Kamar') return true;
-    return s.kamar === selectedRoomFilter;
+  const roomNames = [
+    'Semua Kamar',
+    ...Array.from(
+      new Set(santriList.map((s: { kamar?: string }) => s.kamar).filter(Boolean) as string[])
+    ).sort((a, b) => a.localeCompare(b, 'id')),
+  ];
+
+  const visibleSantri = santriList.filter((s: { kamar?: string; kelas?: string }) => {
+    if (selectedKelasFilter !== 'Semua Kelas' && s.kelas !== selectedKelasFilter) return false;
+    if (selectedRoomFilter !== 'Semua Kamar' && s.kamar !== selectedRoomFilter) return false;
+    return true;
   });
 
   const santriSedangIzin = visibleSantri.filter((s: { id: string }) =>
@@ -405,7 +419,9 @@ export default function Absensi() {
   }, [activeKegiatanMeta]);
 
   const hasActiveFilter =
-    selectedDateKey !== todayKey || selectedRoomFilter !== 'Semua Kamar';
+    selectedDateKey !== todayKey ||
+    selectedRoomFilter !== 'Semua Kamar' ||
+    selectedKelasFilter !== 'Semua Kelas';
 
   const openFilter = useCallback(() => setFilterOpen(true), []);
 
@@ -413,7 +429,7 @@ export default function Absensi() {
     () => (
       <HeaderNeutralButton
         onClick={openFilter}
-        label="Filter tanggal dan kamar"
+        label="Filter tanggal, kelas, dan kamar"
         className="relative"
       >
         <SlidersHorizontal className="w-5 h-5" />
@@ -463,6 +479,7 @@ export default function Absensi() {
 
   const resetFilters = () => {
     setSelectedDateKey(todayKey);
+    setSelectedKelasFilter('Semua Kelas');
     setSelectedRoomFilter('Semua Kamar');
     setPresensiTab('belum');
     setFilterOpen(false);
@@ -488,12 +505,33 @@ export default function Absensi() {
             {liveTimeLabel} {zonaShort}
           </p>
         ) : null}
-        {selectedRoomFilter !== 'Semua Kamar' ? (
-          <p className="text-[11px] text-slate-500 truncate">{selectedRoomFilter}</p>
-        ) : null}
+        {(selectedKelasFilter !== 'Semua Kelas' || selectedRoomFilter !== 'Semua Kamar') && (
+          <p className="text-[11px] text-slate-500 truncate">
+            {[
+              selectedKelasFilter !== 'Semua Kelas' ? selectedKelasFilter : null,
+              selectedRoomFilter !== 'Semua Kamar' ? selectedRoomFilter : null,
+            ]
+              .filter(Boolean)
+              .join(' · ')}
+          </p>
+        )}
       </div>
 
-      <AppModal open={filterOpen} onClose={() => setFilterOpen(false)} title="Filter">
+      <AppModal
+        open={filterOpen}
+        onClose={() => setFilterOpen(false)}
+        title="Filter"
+        footer={
+          <AppModalFooter>
+            <Button type="button" variant="outline" className="flex-1 text-xs" onClick={resetFilters}>
+              Reset filter
+            </Button>
+            <Button type="button" className="flex-1 text-xs" onClick={() => setFilterOpen(false)}>
+              Tutup
+            </Button>
+          </AppModalFooter>
+        }
+      >
         <div className="space-y-4 text-sm">
           <div className="space-y-2">
             <p className="text-xs font-semibold text-slate-700">Tanggal</p>
@@ -522,35 +560,68 @@ export default function Absensi() {
               })}
             </div>
           </div>
-          <div className="space-y-2">
-            <p className="text-xs font-semibold text-slate-700">Kamar</p>
-            <div className="flex flex-wrap gap-1.5">
-              {roomNames.map((room) => {
-                const isSelected = selectedRoomFilter === room;
-                return (
-                  <button
-                    key={room as string}
-                    type="button"
-                    onClick={() => setSelectedRoomFilter(room as string)}
-                    className={`whitespace-nowrap px-2.5 py-1 rounded-sm text-xs font-bold transition-all ${
-                      isSelected
-                        ? 'bg-slate-900 text-white'
-                        : 'bg-slate-50 text-slate-600 border border-slate-200/70'
-                    }`}
-                  >
-                    {room as string}
-                  </button>
-                );
-              })}
-            </div>
+          <div className="space-y-2 -mx-4 sm:-mx-5">
+            <p className="text-xs font-semibold text-slate-700 px-4 sm:px-5">Kelas</p>
+            {kelasNames.length <= 1 ? (
+              <EmptyState icon={GraduationCap} title="Belum ada data kelas" variant="minimal" />
+            ) : (
+              <ul className="divide-y divide-slate-200 dark:divide-slate-700 border-y border-slate-200 dark:border-slate-700 max-h-[min(28vh,14rem)] overflow-y-auto overscroll-contain">
+                {kelasNames.map((name) => {
+                  const isSelected = selectedKelasFilter === name;
+                  return (
+                    <li key={name}>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedKelasFilter(name)}
+                        className={cn(
+                          'w-full text-left px-4 sm:px-5 py-3 text-xs transition-colors flex items-center justify-between gap-2',
+                          isSelected
+                            ? 'bg-emerald-50 text-emerald-900 font-semibold dark:bg-emerald-950/40 dark:text-emerald-200'
+                            : 'text-slate-800 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-700/80'
+                        )}
+                      >
+                        <span className="truncate">{name}</span>
+                        {isSelected && (
+                          <Check className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </div>
-          <div className="flex gap-2 pt-1">
-            <Button type="button" variant="outline" className="flex-1 text-xs" onClick={resetFilters}>
-              Reset filter
-            </Button>
-            <Button type="button" className="flex-1 text-xs" onClick={() => setFilterOpen(false)}>
-              Tutup
-            </Button>
+
+          <div className="space-y-2 -mx-4 sm:-mx-5">
+            <p className="text-xs font-semibold text-slate-700 px-4 sm:px-5">Kamar</p>
+            {roomNames.length <= 1 ? (
+              <EmptyState icon={BedDouble} title="Belum ada data kamar" variant="minimal" />
+            ) : (
+              <ul className="divide-y divide-slate-200 dark:divide-slate-700 border-y border-slate-200 dark:border-slate-700 max-h-[min(28vh,14rem)] overflow-y-auto overscroll-contain">
+                {roomNames.map((name) => {
+                  const isSelected = selectedRoomFilter === name;
+                  return (
+                    <li key={name}>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedRoomFilter(name)}
+                        className={cn(
+                          'w-full text-left px-4 sm:px-5 py-3 text-xs transition-colors flex items-center justify-between gap-2',
+                          isSelected
+                            ? 'bg-emerald-50 text-emerald-900 font-semibold dark:bg-emerald-950/40 dark:text-emerald-200'
+                            : 'text-slate-800 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-700/80'
+                        )}
+                      >
+                        <span className="truncate">{name}</span>
+                        {isSelected && (
+                          <Check className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </div>
         </div>
       </AppModal>

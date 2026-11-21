@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { useLocation } from 'react-router';
 import { Edit2, Trash2, Save, CalendarDays } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
+import { ListRowActions } from '@/components/list-row-actions';
 import { useScreenAddAction } from '@/lib/screen-header-actions';
 import { useMutation } from '@tanstack/react-query';
 import { useAppStore } from '@/store/app-store';
@@ -9,7 +10,7 @@ import { useReloadKeyReady } from '@/hooks/use-reload-key';
 import { ListSkeleton } from '@/components/ui/list-skeleton';
 import { useAppReload } from '@/hooks/use-app-reload';
 import { PageWithPullRefresh } from '@/components/page-with-pull-refresh';
-import { AppModal } from '@/components/ui/app-modal';
+import { AppModal, AppModalFooter } from '@/components/ui/app-modal';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import { useConfirmDialog } from '@/lib/use-confirm-dialog';
@@ -35,22 +36,18 @@ import { KegiatanMark } from '@/components/kegiatan-mark';
 type KegiatanForm = {
   nama: string;
   jenis: string;
-  icon: string;
   jam_mulai: string;
   jam_selesai: string;
   hari_aktif: number[];
-  urutan: string;
   untuk_absensi: boolean;
 };
 
 const emptyForm = (): KegiatanForm => ({
   nama: '',
   jenis: '',
-  icon: '',
   jam_mulai: '',
   jam_selesai: '',
   hari_aktif: [...ALL_DAYS],
-  urutan: '',
   untuk_absensi: true,
 });
 
@@ -60,25 +57,21 @@ function formFromKegiatan(kegiatan: KegiatanSchedule): KegiatanForm {
   return {
     nama: kegiatan.nama,
     jenis: kegiatan.jenis,
-    icon: kegiatan.icon ?? '',
     jam_mulai: kegiatan.jam_mulai ?? '',
     jam_selesai: kegiatan.jam_selesai ?? '',
     hari_aktif: hari,
-    urutan: kegiatan.urutan != null ? String(kegiatan.urutan) : '',
     untuk_absensi: kegiatan.untuk_absensi !== false,
   };
 }
 
-function payloadFromForm(form: KegiatanForm) {
+function payloadFromForm(form: KegiatanForm, urutan?: number) {
   const hariAktif =
     form.hari_aktif.length === 7 || form.hari_aktif.length === 0 ? ALL_DAYS : form.hari_aktif;
   const jam_mulai = form.jam_mulai.trim();
   const jam_selesai = form.jam_selesai.trim();
-  const urutan = form.urutan.trim() ? Number(form.urutan) : undefined;
   return {
     nama: form.nama.trim(),
     jenis: form.jenis,
-    icon: form.icon.trim() || undefined,
     jam_mulai: jam_mulai || undefined,
     jam_selesai: jam_selesai || undefined,
     waktu: formatWaktuKegiatan(jam_mulai, jam_selesai) || undefined,
@@ -105,7 +98,11 @@ export default function Kegiatan() {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const payload = payloadFromForm(formData);
+      // Urutan otomatis: edit → pertahankan; baru → max + 1.
+      const urutan =
+        editingKegiatan?.urutan ??
+        (kegiatanList.reduce((m, k) => Math.max(m, Number(k.urutan) || 0), 0) + 1);
+      const payload = payloadFromForm(formData, urutan);
       if (editingKegiatan) {
         const res = await fetch(`/api/kegiatan/${editingKegiatan.id}`, {
           method: 'PUT',
@@ -232,22 +229,25 @@ export default function Kegiatan() {
                     {kegiatan.untuk_absensi === false ? ' · tidak di absensi' : ''}
                   </p>
                 </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => handleEdit(kegiatan)}
-                    className="p-2 rounded-sm bg-blue-50 hover:bg-blue-100 text-blue-600 transition-colors"
-                  >
-                    <Edit2 className="w-4 h-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => requestDeleteKegiatan(kegiatan)}
-                    className="p-2 rounded-sm bg-red-50 hover:bg-red-100 text-red-600 transition-colors"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
+                <ListRowActions
+                  title={kegiatan.nama}
+                  subtitle={`Jenis: ${kegiatan.jenis}`}
+                  actions={[
+                    {
+                      id: 'edit',
+                      label: 'Ubah',
+                      icon: <Edit2 className="w-4 h-4 text-blue-600" />,
+                      onSelect: () => handleEdit(kegiatan),
+                    },
+                    {
+                      id: 'delete',
+                      label: 'Hapus',
+                      icon: <Trash2 className="w-4 h-4" />,
+                      destructive: true,
+                      onSelect: () => requestDeleteKegiatan(kegiatan),
+                    },
+                  ]}
+                />
               </div>
             </div>
           ))
@@ -258,8 +258,19 @@ export default function Kegiatan() {
         open={showModal}
         onClose={handleCloseModal}
         title={editingKegiatan ? 'Ubah Kegiatan' : 'Tambah Kegiatan'}
+        footer={
+          <AppModalFooter>
+            <Button type="button" variant="outline" className="flex-1" onClick={handleCloseModal}>
+              Batal
+            </Button>
+            <Button type="button" className="flex-1" disabled={saveMutation.isPending} onClick={handleSave}>
+              <Save className="w-4 h-4" />
+              Simpan
+            </Button>
+          </AppModalFooter>
+        }
       >
-        <div className="space-y-3 -mx-1 max-h-[60vh] overflow-y-auto pr-1">
+        <div className="space-y-3 -mx-1">
           <div>
             <label className={appLabelClass}>Nama Kegiatan</label>
             <input
@@ -269,30 +280,6 @@ export default function Kegiatan() {
               placeholder="Contoh: Masuk Asrama"
               className={appFieldClass}
             />
-          </div>
-          <div className={appFormGrid2}>
-            <div className="min-w-0">
-              <label className={appLabelClass}>Singkatan (opsional)</label>
-              <input
-                type="text"
-                value={formData.icon}
-                onChange={(e) => setFormData({ ...formData, icon: e.target.value })}
-                placeholder="SB"
-                maxLength={2}
-                className={appFieldClass}
-              />
-            </div>
-            <div className="min-w-0">
-              <label className={appLabelClass}>Urutan</label>
-              <input
-                type="number"
-                min={1}
-                value={formData.urutan}
-                onChange={(e) => setFormData({ ...formData, urutan: e.target.value })}
-                placeholder="1"
-                className={appFieldClass}
-              />
-            </div>
           </div>
           <div>
             <label className={appLabelClass}>Jenis Kegiatan</label>
@@ -362,15 +349,6 @@ export default function Kegiatan() {
             />
             Tampilkan di halaman Absensi
           </label>
-        </div>
-        <div className="flex gap-2 mt-5 pb-1">
-          <Button type="button" variant="outline" className="flex-1" onClick={handleCloseModal}>
-            Batal
-          </Button>
-          <Button type="button" className="flex-1" disabled={saveMutation.isPending} onClick={handleSave}>
-            <Save className="w-4 h-4" />
-            Simpan
-          </Button>
         </div>
       </AppModal>
 

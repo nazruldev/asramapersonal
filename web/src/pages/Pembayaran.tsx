@@ -6,14 +6,16 @@ import {
   CheckCircle2,
   Edit2,
   MessageCircle,
-  Plus,
   Receipt,
   Search,
+  SlidersHorizontal,
   Trash2,
   Wallet,
+  X,
 } from 'lucide-react';
 import { PageWithPullRefresh } from '@/components/page-with-pull-refresh';
-import { AppModal } from '@/components/ui/app-modal';
+import { ListRowActions } from '@/components/list-row-actions';
+import { AppModal, AppModalFooter } from '@/components/ui/app-modal';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -30,6 +32,7 @@ import {
 import { appCardClass } from '@/lib/surface-styles';
 import { cn } from '@/lib/utils';
 import { toast } from '@/lib/toast';
+import { getSessionUser } from '@/lib/app-auth';
 import type {
   PembayaranTransaksi,
   TagihanJenis,
@@ -55,7 +58,15 @@ type TunggakanRow = {
   tagihan: TagihanView[];
 };
 
-type SantriRow = { id: string; nama?: string; kelas?: string; kamar?: string };
+type SantriRow = {
+  id: string;
+  nama?: string;
+  kelas?: string;
+  kamar?: string;
+  asrama_id?: string;
+};
+
+type AsramaLite = { id: string; nama: string };
 
 const rupiah = (n: number) =>
   `Rp ${new Intl.NumberFormat('id-ID', { maximumFractionDigits: 0 }).format(n || 0)}`;
@@ -71,6 +82,29 @@ function labelPeriode(periode: string): string {
   const m = periode.match(/^(\d{4})-(\d{2})$/);
   if (!m) return periode || '-';
   return `${NAMA_BULAN[Number(m[2]) - 1] ?? m[2]} ${m[1]}`;
+}
+
+/** Format lokal YYYY-MM-DD (hindari geser hari karena UTC). */
+function toDateInputValue(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/** Default jatuh tempo: 3 hari setelah akhir periode (bulan YYYY-MM), atau hari ini + 3. */
+function defaultJatuhTempo(periode: string): string {
+  const m = periode.match(/^(\d{4})-(\d{2})$/);
+  if (m) {
+    const year = Number(m[1]);
+    const month = Number(m[2]); // 1–12
+    const akhirBulan = new Date(year, month, 0); // hari terakhir bulan periode
+    akhirBulan.setDate(akhirBulan.getDate() + 3);
+    return toDateInputValue(akhirBulan);
+  }
+  const d = new Date();
+  d.setDate(d.getDate() + 3);
+  return toDateInputValue(d);
 }
 
 function waLink(nomorWali: string, text: string): string | null {
@@ -111,11 +145,19 @@ export default function Pembayaran() {
   const [tagihan, setTagihan] = useState<TagihanView[]>([]);
   const [tunggakan, setTunggakan] = useState<TunggakanRow[]>([]);
 
-  // filter tagihan
+  // filter aktif (diterapkan)
   const [fPeriode, setFPeriode] = useState(bulanIni());
   const [fJenis, setFJenis] = useState('');
   const [fStatus, setFStatus] = useState('');
   const [fSearch, setFSearch] = useState('');
+  const [fJenisAktif, setFJenisAktif] = useState<'semua' | 'aktif' | 'nonaktif'>('semua');
+
+  // draft filter di bottom sheet
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [draftPeriode, setDraftPeriode] = useState(bulanIni());
+  const [draftJenis, setDraftJenis] = useState('');
+  const [draftStatus, setDraftStatus] = useState('');
+  const [draftJenisAktif, setDraftJenisAktif] = useState<'semua' | 'aktif' | 'nonaktif'>('semua');
 
   // modals
   const [showGenerate, setShowGenerate] = useState(false);
@@ -158,11 +200,63 @@ export default function Pembayaran() {
   }, [load]);
 
   const isPembayaranScreen = location.pathname === '/master/pembayaran';
-  const headerAddAction = useMemo(
-    () => ({ onClick: () => setShowGenerate(true), label: 'Buat Tagihan' }),
-    []
-  );
-  useScreenAddAction(isPembayaranScreen ? headerAddAction : null, [isPembayaranScreen, headerAddAction]);
+  const headerAddAction = useMemo(() => {
+    if (!isPembayaranScreen) return null;
+    if (tab === 'tagihan') {
+      return { onClick: () => setShowGenerate(true), label: 'Buat Tagihan' };
+    }
+    if (tab === 'jenis') {
+      return {
+        onClick: () => {
+          setEditingJenis(null);
+          setShowJenisForm(true);
+        },
+        label: 'Tambah jenis',
+      };
+    }
+    return null;
+  }, [isPembayaranScreen, tab]);
+  useScreenAddAction(headerAddAction, [headerAddAction]);
+
+  const hasActiveFilter =
+    tab === 'jenis'
+      ? fJenisAktif !== 'semua'
+      : Boolean(fPeriode !== bulanIni() || fJenis || (tab === 'tagihan' && fStatus));
+
+  const openFilter = () => {
+    setDraftPeriode(fPeriode);
+    setDraftJenis(fJenis);
+    setDraftStatus(fStatus);
+    setDraftJenisAktif(fJenisAktif);
+    setFilterOpen(true);
+  };
+
+  const applyFilters = () => {
+    if (tab === 'jenis') {
+      setFJenisAktif(draftJenisAktif);
+    } else {
+      setFPeriode(draftPeriode);
+      setFJenis(draftJenis);
+      if (tab === 'tagihan') setFStatus(draftStatus);
+    }
+    setFilterOpen(false);
+  };
+
+  const resetFilters = () => {
+    if (tab === 'jenis') {
+      setDraftJenisAktif('semua');
+      setFJenisAktif('semua');
+    } else {
+      const p = bulanIni();
+      setDraftPeriode(p);
+      setDraftJenis('');
+      setDraftStatus('');
+      setFPeriode(p);
+      setFJenis('');
+      setFStatus('');
+    }
+    setFilterOpen(false);
+  };
 
   const filteredTagihan = useMemo(() => {
     const q = fSearch.trim().toLowerCase();
@@ -174,6 +268,27 @@ export default function Pembayaran() {
         t.santri_kamar.toLowerCase().includes(q)
     );
   }, [tagihan, fSearch]);
+
+  const filteredTunggakan = useMemo(() => {
+    const q = fSearch.trim().toLowerCase();
+    if (!q) return tunggakan;
+    return tunggakan.filter(
+      (r) =>
+        r.santri_nama.toLowerCase().includes(q) ||
+        r.santri_kamar.toLowerCase().includes(q) ||
+        r.santri_kelas.toLowerCase().includes(q)
+    );
+  }, [tunggakan, fSearch]);
+
+  const filteredJenis = useMemo(() => {
+    const q = fSearch.trim().toLowerCase();
+    return jenis.filter((j) => {
+      if (fJenisAktif === 'aktif' && !j.aktif) return false;
+      if (fJenisAktif === 'nonaktif' && j.aktif) return false;
+      if (!q) return true;
+      return j.nama.toLowerCase().includes(q);
+    });
+  }, [jenis, fSearch, fJenisAktif]);
 
   const ringkasan = useMemo(() => {
     const total = tagihan.reduce((a, t) => a + t.nominal, 0);
@@ -217,7 +332,10 @@ export default function Pembayaran() {
           <button
             key={key}
             type="button"
-            onClick={() => setTab(key)}
+            onClick={() => {
+              setTab(key);
+              setFSearch('');
+            }}
             className={cn(
               'flex-1 flex items-center justify-center gap-1.5 py-2 rounded-sm text-xs font-semibold transition-all',
               tab === key
@@ -231,63 +349,67 @@ export default function Pembayaran() {
         ))}
       </div>
 
-      {tab !== 'jenis' && (
-        <div className={cn(appCardClass, 'p-3 space-y-2')}>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className={appLabelThemed(theme)}>Periode</label>
-              <input
-                type="month"
-                value={fPeriode}
-                onChange={(e) => setFPeriode(e.target.value)}
-                className={appFieldThemed(theme)}
-              />
-            </div>
-            <div>
-              <label className={appLabelThemed(theme)}>Jenis</label>
-              <select
-                value={fJenis}
-                onChange={(e) => setFJenis(e.target.value)}
-                className={appSelectClass}
-              >
-                <option value="">Semua jenis</option>
-                {jenis.map((j) => (
-                  <option key={j.id} value={j.id}>{j.nama}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-          {tab === 'tagihan' && (
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className={appLabelThemed(theme)}>Status</label>
-                <select
-                  value={fStatus}
-                  onChange={(e) => setFStatus(e.target.value)}
-                  className={appSelectClass}
-                >
-                  <option value="">Semua status</option>
-                  <option value="belum">Belum Bayar</option>
-                  <option value="sebagian">Sebagian</option>
-                  <option value="lunas">Lunas</option>
-                </select>
-              </div>
-              <div>
-                <label className={appLabelThemed(theme)}>Cari</label>
-                <div className="relative">
-                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    value={fSearch}
-                    onChange={(e) => setFSearch(e.target.value)}
-                    placeholder="Nama santri…"
-                    className={cn(appFieldThemed(theme), 'pl-9')}
-                  />
-                </div>
-              </div>
-            </div>
-          )}
+      {/* Search tetap + filter di samping (seperti Izin/Absensi) */}
+      <div className="flex gap-2 items-stretch">
+        <div className="relative flex-1 min-w-0">
+          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            value={fSearch}
+            onChange={(e) => setFSearch(e.target.value)}
+            placeholder={
+              tab === 'jenis'
+                ? 'Cari jenis pembayaran…'
+                : tab === 'tunggakan'
+                  ? 'Cari nama santri…'
+                  : 'Cari santri / jenis…'
+            }
+            className={cn(appFieldThemed(theme), 'w-full pl-9 pr-8 shadow-xs text-xs')}
+          />
+          {fSearch ? (
+            <button
+              type="button"
+              onClick={() => setFSearch('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600"
+              aria-label="Hapus pencarian"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          ) : null}
         </div>
-      )}
+        <button
+          type="button"
+          onClick={openFilter}
+          aria-label="Buka filter"
+          className={cn(
+            'relative shrink-0 px-3 rounded-sm border shadow-xs flex items-center justify-center gap-1.5 text-xs font-bold transition-colors',
+            hasActiveFilter
+              ? 'border-emerald-600 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200'
+              : 'border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200'
+          )}
+        >
+          <SlidersHorizontal className="w-4 h-4" />
+          <span className="hidden sm:inline">Filter</span>
+          {hasActiveFilter ? (
+            <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-emerald-600 ring-2 ring-white dark:ring-slate-900" />
+          ) : null}
+        </button>
+      </div>
+
+      {hasActiveFilter ? (
+        <p className="text-[11px] text-slate-500 px-0.5 leading-relaxed">
+          Filter aktif:
+          {tab === 'jenis'
+            ? ` ${fJenisAktif === 'aktif' ? 'hanya aktif' : 'hanya nonaktif'}`
+            : [
+                fPeriode ? ` ${labelPeriode(fPeriode)}` : '',
+                fJenis ? ` · ${jenis.find((j) => j.id === fJenis)?.nama ?? 'jenis'}` : '',
+                tab === 'tagihan' && fStatus
+                  ? ` · ${STATUS_META[fStatus]?.label ?? fStatus}`
+                  : '',
+              ].join('')}
+        </p>
+      ) : null}
 
       {loading ? (
         <ListSkeleton />
@@ -364,15 +486,19 @@ export default function Pembayaran() {
           )}
         </>
       ) : tab === 'tunggakan' ? (
-        tunggakan.length === 0 ? (
+        filteredTunggakan.length === 0 ? (
           <EmptyState
             icon={CheckCircle2}
             title="Tidak ada tunggakan"
-            description={`Semua tagihan ${labelPeriode(fPeriode)} sudah lunas.`}
+            description={
+              fSearch
+                ? 'Tidak ada hasil pencarian.'
+                : `Semua tagihan ${labelPeriode(fPeriode)} sudah lunas.`
+            }
           />
         ) : (
           <div className="space-y-2">
-            {tunggakan.map((r) => {
+            {filteredTunggakan.map((r) => {
               const wa = waLink(
                 r.santri_wali,
                 `Assalamu'alaikum Bapak/Ibu Wali dari ${r.santri_nama}. Mengingatkan tagihan yang belum lunas sebesar ${rupiah(r.total_sisa)} (${r.jumlah_tagihan} tagihan). Mohon segera diselesaikan. Terima kasih.`
@@ -430,28 +556,19 @@ export default function Pembayaran() {
         )
       ) : (
         <>
-          <button
-            type="button"
-            onClick={() => {
-              setEditingJenis(null);
-              setShowJenisForm(true);
-            }}
-            className={cn(
-              appCardClass,
-              'w-full p-3 flex items-center justify-center gap-2 text-sm font-semibold text-emerald-700 dark:text-emerald-400 border-dashed'
-            )}
-          >
-            <Plus className="w-4 h-4" /> Tambah Jenis Pembayaran
-          </button>
-          {jenis.length === 0 ? (
+          {filteredJenis.length === 0 ? (
             <EmptyState
               icon={Wallet}
-              title="Belum ada jenis pembayaran"
-              description="Contoh: SPP Bulanan, Uang Makan, Laundry, Kas Kelas."
+              title={jenis.length === 0 ? 'Belum ada jenis pembayaran' : 'Tidak ada hasil'}
+              description={
+                jenis.length === 0
+                  ? 'Contoh: SPP Bulanan, Uang Makan, Laundry. Ketuk Tambah jenis di bawah.'
+                  : 'Coba kata kunci lain atau reset filter.'
+              }
             />
           ) : (
             <div className="space-y-2">
-              {jenis.map((j) => (
+              {filteredJenis.map((j) => (
                 <div key={j.id} className={cn(appCardClass, 'p-3 flex items-center gap-3')}>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-bold text-slate-900 dark:text-slate-50 truncate">{j.nama}</p>
@@ -460,39 +577,127 @@ export default function Pembayaran() {
                       {!j.aktif ? ' · nonaktif' : ''}
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingJenis(j);
-                      setShowJenisForm(true);
-                    }}
-                    className="p-2 rounded-sm text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
-                    aria-label="Ubah"
-                  >
-                    <Edit2 className="w-4 h-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      confirm.ask({
-                        title: 'Hapus jenis pembayaran?',
-                        message: `"${j.nama}" akan dihapus. Tagihan yang sudah dibuat tetap tersimpan.`,
-                        confirmLabel: 'Hapus',
+                  <ListRowActions
+                    title={j.nama}
+                    subtitle={`${PERIODE_JENIS_LABEL[j.periode_jenis] ?? j.periode_jenis} · ${rupiah(j.nominal_default)}`}
+                    actions={[
+                      {
+                        id: 'edit',
+                        label: 'Ubah',
+                        icon: <Edit2 className="w-4 h-4 text-blue-600" />,
+                        onSelect: () => {
+                          setEditingJenis(j);
+                          setShowJenisForm(true);
+                        },
+                      },
+                      {
+                        id: 'delete',
+                        label: 'Hapus',
+                        icon: <Trash2 className="w-4 h-4" />,
                         destructive: true,
-                        onConfirm: () => hapusJenis(j.id),
-                      })
-                    }
-                    className="p-2 rounded-sm text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10"
-                    aria-label="Hapus"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                        onSelect: () =>
+                          confirm.ask({
+                            title: 'Hapus jenis pembayaran?',
+                            message: `"${j.nama}" akan dihapus. Tagihan yang sudah dibuat tetap tersimpan.`,
+                            confirmLabel: 'Hapus',
+                            destructive: true,
+                            onConfirm: () => hapusJenis(j.id),
+                          }),
+                      },
+                    ]}
+                  />
                 </div>
               ))}
             </div>
           )}
         </>
       )}
+
+      <AppModal
+        open={filterOpen}
+        onClose={() => setFilterOpen(false)}
+        title="Filter"
+        description={
+          tab === 'jenis'
+            ? 'Saring jenis pembayaran'
+            : tab === 'tunggakan'
+              ? 'Saring tunggakan'
+              : 'Saring tagihan'
+        }
+        footer={
+          <AppModalFooter>
+            <Button type="button" variant="outline" className="flex-1 text-xs" onClick={resetFilters}>
+              Reset
+            </Button>
+            <Button type="button" className="flex-1 text-xs" onClick={applyFilters}>
+              Terapkan
+            </Button>
+          </AppModalFooter>
+        }
+      >
+        <div className="space-y-3 -mx-1">
+          {tab === 'jenis' ? (
+            <div>
+              <label className={appLabelThemed(theme)}>Status jenis</label>
+              <select
+                value={draftJenisAktif}
+                onChange={(e) =>
+                  setDraftJenisAktif(e.target.value as 'semua' | 'aktif' | 'nonaktif')
+                }
+                className={appSelectClass}
+              >
+                <option value="semua">Semua</option>
+                <option value="aktif">Aktif saja</option>
+                <option value="nonaktif">Nonaktif saja</option>
+              </select>
+            </div>
+          ) : (
+            <>
+              <div>
+                <label className={appLabelThemed(theme)}>Periode</label>
+                <input
+                  type="month"
+                  value={draftPeriode}
+                  onChange={(e) => setDraftPeriode(e.target.value)}
+                  className={appFieldThemed(theme)}
+                />
+              </div>
+              {tab === 'tagihan' ? (
+                <>
+                  <div>
+                    <label className={appLabelThemed(theme)}>Jenis</label>
+                    <select
+                      value={draftJenis}
+                      onChange={(e) => setDraftJenis(e.target.value)}
+                      className={appSelectClass}
+                    >
+                      <option value="">Semua jenis</option>
+                      {jenis.map((j) => (
+                        <option key={j.id} value={j.id}>
+                          {j.nama}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={appLabelThemed(theme)}>Status</label>
+                    <select
+                      value={draftStatus}
+                      onChange={(e) => setDraftStatus(e.target.value)}
+                      className={appSelectClass}
+                    >
+                      <option value="">Semua status</option>
+                      <option value="belum">Belum Bayar</option>
+                      <option value="sebagian">Sebagian</option>
+                      <option value="lunas">Lunas</option>
+                    </select>
+                  </div>
+                </>
+              ) : null}
+            </>
+          )}
+        </div>
+      </AppModal>
 
       <GenerateTagihanModal
         open={showGenerate}
@@ -574,42 +779,96 @@ function GenerateTagihanModal({
   const { theme } = useTheme();
   const [jenisId, setJenisId] = useState('');
   const [periode, setPeriode] = useState(bulanIni());
+  const [lingkupAsrama, setLingkupAsrama] = useState<'semua' | 'pilih'>('semua');
+  const [asramaList, setAsramaList] = useState<AsramaLite[]>([]);
+  const [asramaIds, setAsramaIds] = useState<string[]>([]);
   const [target, setTarget] = useState<'semua' | 'kelas' | 'santri'>('semua');
   const [kelasIds, setKelasIds] = useState<string[]>([]);
   const [santriIds, setSantriIds] = useState<string[]>([]);
   const [santriQuery, setSantriQuery] = useState('');
-  const [nominal, setNominal] = useState('');
-  const [perSantriNominal, setPerSantriNominal] = useState<Record<string, string>>({});
   const [jatuhTempo, setJatuhTempo] = useState('');
   const [saving, setSaving] = useState(false);
+  const [sudahAda, setSudahAda] = useState(0);
 
   const selectedJenis = jenis.find((j) => j.id === jenisId) ?? null;
+  const periodeAktif =
+    selectedJenis?.periode_jenis === 'bulanan' ? periode : periode.trim();
+  const multiAsrama = asramaList.length > 1;
 
   useEffect(() => {
     if (!open) return;
+    const p = bulanIni();
     setJenisId(jenis[0]?.id ?? '');
-    setPeriode(bulanIni());
+    setPeriode(p);
+    setLingkupAsrama('semua');
+    setAsramaIds([]);
     setTarget('semua');
     setKelasIds([]);
     setSantriIds([]);
     setSantriQuery('');
-    setNominal('');
-    setPerSantriNominal({});
-    setJatuhTempo('');
+    setJatuhTempo(defaultJatuhTempo(p));
+    setSudahAda(0);
+    void fetch('/api/asrama')
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => {
+        const all = data as AsramaLite[];
+        const user = getSessionUser();
+        const dibatasi =
+          user && user.role !== 'super_admin' && user.asramaIds.length > 0;
+        setAsramaList(
+          dibatasi ? all.filter((a) => user.asramaIds.includes(a.id)) : all
+        );
+      })
+      .catch(() => setAsramaList([]));
   }, [open, jenis]);
+
+  // Isi ulang default saat periode berubah (tetap bisa diubah manual setelahnya)
+  useEffect(() => {
+    if (!open || !periodeAktif) return;
+    setJatuhTempo(defaultJatuhTempo(periodeAktif));
+  }, [open, periodeAktif]);
+
+  useEffect(() => {
+    if (!open || !jenisId || !periodeAktif) {
+      setSudahAda(0);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const params = new URLSearchParams({
+          jenis_id: jenisId,
+          periode: periodeAktif,
+        });
+        const rows = await api<TagihanView[]>(`/api/pembayaran/tagihan?${params}`);
+        if (!cancelled) setSudahAda(rows.length);
+      } catch {
+        if (!cancelled) setSudahAda(0);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, jenisId, periodeAktif]);
+
+  const santriDalamLingkup = useMemo(() => {
+    if (lingkupAsrama !== 'pilih' || !asramaIds.length) return santri;
+    const set = new Set(asramaIds);
+    return santri.filter((s) => !s.asrama_id || set.has(s.asrama_id));
+  }, [santri, lingkupAsrama, asramaIds]);
 
   const filteredSantri = useMemo(() => {
     const q = santriQuery.trim().toLowerCase();
     const list = q
-      ? santri.filter(
+      ? santriDalamLingkup.filter(
           (s) =>
             (s.nama ?? '').toLowerCase().includes(q) ||
             (s.kelas ?? '').toLowerCase().includes(q) ||
             (s.kamar ?? '').toLowerCase().includes(q)
         )
-      : santri;
+      : santriDalamLingkup;
     return list.slice(0, 60);
-  }, [santri, santriQuery]);
+  }, [santriDalamLingkup, santriQuery]);
 
   const toggle = (list: string[], id: string, set: (v: string[]) => void) =>
     set(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
@@ -619,13 +878,12 @@ function GenerateTagihanModal({
       toast.error('Pilih jenis pembayaran dulu.');
       return;
     }
+    if (lingkupAsrama === 'pilih' && !asramaIds.length) {
+      toast.error('Pilih minimal satu asrama.');
+      return;
+    }
     setSaving(true);
     try {
-      const overrides: Record<string, number> = {};
-      for (const [sid, v] of Object.entries(perSantriNominal)) {
-        const n = Number(v);
-        if (Number.isFinite(n) && n > 0) overrides[sid] = Math.floor(n);
-      }
       const result = await api<{ created: number; skipped: number }>(
         '/api/pembayaran/tagihan/generate',
         {
@@ -633,17 +891,28 @@ function GenerateTagihanModal({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             jenis_id: selectedJenis.id,
-            periode: selectedJenis.periode_jenis === 'bulanan' ? periode : periode.trim(),
-            target,
+            periode: periodeAktif,
+            target: lingkupAsrama === 'pilih' && target === 'semua' ? 'asrama' : target,
+            asrama_ids: lingkupAsrama === 'pilih' ? asramaIds : undefined,
             kelas_ids: kelasIds,
             santri_ids: santriIds,
-            nominal: nominal !== '' ? Number(nominal) : undefined,
-            nominal_per_santri: Object.keys(overrides).length ? overrides : undefined,
             jatuh_tempo: jatuhTempo || undefined,
           }),
         }
       );
-      toast.success(`${result.created} tagihan dibuat${result.skipped ? `, ${result.skipped} dilewati (sudah ada)` : ''}`);
+      if (result.created === 0 && result.skipped > 0) {
+        toast.success(
+          `Tidak ada tagihan baru. ${result.skipped} sudah ada — data bayar tetap aman, tidak diganti.`
+        );
+      } else {
+        toast.success(
+          `${result.created} tagihan baru dibuat${
+            result.skipped
+              ? ` · ${result.skipped} dilewati (sudah ada, termasuk yang sudah bayar)`
+              : ''
+          }`
+        );
+      }
       onDone();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Gagal membuat tagihan');
@@ -657,14 +926,28 @@ function GenerateTagihanModal({
       open={open}
       onClose={onClose}
       title="Buat Tagihan Sekaligus"
-      description="Santri yang sudah punya tagihan dengan jenis dan periode yang sama otomatis dilewati, jadi tidak dobel."
+      description="Tetap membuat tagihan baru untuk yang belum ada, skip yang sudah ada (termasuk sudah bayar). Bisa untuk semua asrama atau asrama tertentu."
+      footer={
+        jenis.length > 0 ? (
+          <AppModalFooter>
+            <Button onClick={submit} disabled={saving} className="w-full">
+              {saving ? 'Membuat…' : 'Buat Tagihan'}
+            </Button>
+          </AppModalFooter>
+        ) : (
+          <AppModalFooter>
+            <Button onClick={onNeedJenis} className="w-full">
+              Buat Jenis Pembayaran
+            </Button>
+          </AppModalFooter>
+        )
+      }
     >
       {jenis.length === 0 ? (
         <div className="space-y-3">
           <p className="text-sm text-slate-600 dark:text-slate-300">
             Belum ada jenis pembayaran. Buat dulu jenisnya (mis. SPP, Uang Makan).
           </p>
-          <Button onClick={onNeedJenis} className="w-full">Buat Jenis Pembayaran</Button>
         </div>
       ) : (
         <div className="space-y-3">
@@ -699,21 +982,76 @@ function GenerateTagihanModal({
               )}
             </div>
             <div>
-              <label className={appLabelThemed(theme)}>Jatuh Tempo (opsional)</label>
+              <label className={appLabelThemed(theme)}>Jatuh Tempo</label>
               <input
                 type="date"
                 value={jatuhTempo}
                 onChange={(e) => setJatuhTempo(e.target.value)}
                 className={appFieldThemed(theme)}
               />
+              <p className="text-[10px] text-slate-400 mt-1 leading-snug">
+                Default: 3 hari setelah akhir periode (bisa diubah).
+              </p>
             </div>
           </div>
+
+          {multiAsrama && (
+            <div>
+              <label className={appLabelThemed(theme)}>Lingkup Asrama</label>
+              <div className="flex gap-1 p-1 rounded-sm bg-slate-200/60 dark:bg-slate-800">
+                {([
+                  ['semua', 'Semua asrama'],
+                  ['pilih', 'Pilih asrama'],
+                ] as const).map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => {
+                      setLingkupAsrama(key);
+                      if (key === 'semua') setAsramaIds([]);
+                    }}
+                    className={cn(
+                      'flex-1 py-1.5 rounded-sm text-xs font-semibold transition-all',
+                      lingkupAsrama === key
+                        ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-400 shadow-sm'
+                        : 'text-slate-500 dark:text-slate-400'
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {lingkupAsrama === 'pilih' && (
+                <div className="mt-2 max-h-36 overflow-y-auto space-y-1 rounded-sm border border-slate-200 dark:border-slate-700 p-2">
+                  {asramaList.map((a) => (
+                    <label
+                      key={a.id}
+                      className="flex items-center gap-2 text-sm py-1 text-slate-700 dark:text-slate-200"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={asramaIds.includes(a.id)}
+                        onChange={() => toggle(asramaIds, a.id, setAsramaIds)}
+                        className="accent-emerald-600"
+                      />
+                      {a.nama}
+                    </label>
+                  ))}
+                </div>
+              )}
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                {lingkupAsrama === 'semua'
+                  ? 'Tagihan dibuat untuk santri di semua asrama yang Anda kelola.'
+                  : 'Hanya santri di asrama yang dicentang.'}
+              </p>
+            </div>
+          )}
 
           <div>
             <label className={appLabelThemed(theme)}>Ditagihkan Kepada</label>
             <div className="flex gap-1 p-1 rounded-sm bg-slate-200/60 dark:bg-slate-800">
               {([
-                ['semua', 'Semua'],
+                ['semua', multiAsrama && lingkupAsrama === 'semua' ? 'Semua santri' : 'Semua'],
                 ['kelas', 'Per Kelas'],
                 ['santri', 'Pilih Santri'],
               ] as const).map(([key, label]) => (
@@ -765,59 +1103,38 @@ function GenerateTagihanModal({
                 {filteredSantri.map((s) => {
                   const selected = santriIds.includes(s.id);
                   return (
-                    <div key={s.id} className="flex items-center gap-2 py-1">
-                      <label className="flex items-center gap-2 text-sm flex-1 min-w-0 text-slate-700 dark:text-slate-200">
-                        <input
-                          type="checkbox"
-                          checked={selected}
-                          onChange={() => toggle(santriIds, s.id, setSantriIds)}
-                          className="accent-emerald-600 shrink-0"
-                        />
-                        <span className="truncate">
-                          {s.nama}
-                          <span className="text-[10px] text-slate-400 ml-1">
-                            {[s.kelas, s.kamar].filter(Boolean).join(' · ')}
-                          </span>
+                    <label
+                      key={s.id}
+                      className="flex items-center gap-2 text-sm py-1 text-slate-700 dark:text-slate-200"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={() => toggle(santriIds, s.id, setSantriIds)}
+                        className="accent-emerald-600 shrink-0"
+                      />
+                      <span className="truncate">
+                        {s.nama}
+                        <span className="text-[10px] text-slate-400 ml-1">
+                          {[s.kelas, s.kamar].filter(Boolean).join(' · ')}
                         </span>
-                      </label>
-                      {selected && (
-                        <input
-                          value={perSantriNominal[s.id] ?? ''}
-                          onChange={(e) =>
-                            setPerSantriNominal({ ...perSantriNominal, [s.id]: e.target.value })
-                          }
-                          inputMode="numeric"
-                          placeholder="Nominal"
-                          className="w-24 h-8 px-2 text-xs rounded-sm border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-50"
-                        />
-                      )}
-                    </div>
+                      </span>
+                    </label>
                   );
                 })}
               </div>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                {santriIds.length} santri dipilih · kolom nominal yang dikosongkan memakai nominal bawaan jenis pembayaran.
+                {santriIds.length} santri dipilih · nominal mengikuti jenis pembayaran.
               </p>
             </div>
           )}
 
-          <div>
-            <label className={appLabelThemed(theme)}>Nominal Khusus (boleh dikosongkan)</label>
-            <input
-              value={nominal}
-              onChange={(e) => setNominal(e.target.value.replace(/[^0-9]/g, ''))}
-              inputMode="numeric"
-              placeholder={`Bawaan: ${rupiah(selectedJenis?.nominal_default ?? 0)}`}
-              className={appFieldThemed(theme)}
-            />
-            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-              Isi jika semua santri ditagih nominal yang sama dan berbeda dari bawaan.
+          {sudahAda > 0 && (
+            <p className="text-[11px] text-amber-700 dark:text-amber-400 leading-snug rounded-sm border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-3 py-2">
+              Sudah ada {sudahAda} tagihan untuk jenis & periode ini. Saat dibuat ulang, yang sudah
+              ada (termasuk sudah bayar) dilewati — tidak diganti.
             </p>
-          </div>
-
-          <Button onClick={submit} disabled={saving} className="w-full">
-            {saving ? 'Membuat…' : 'Buat Tagihan'}
-          </Button>
+          )}
         </div>
       )}
     </AppModal>
@@ -884,6 +1201,13 @@ function JenisFormModal({
       open={open}
       onClose={onClose}
       title={editing ? 'Ubah Jenis Pembayaran' : 'Jenis Pembayaran Baru'}
+      footer={
+        <AppModalFooter>
+          <Button onClick={submit} disabled={saving} className="w-full">
+            {saving ? 'Menyimpan…' : 'Simpan'}
+          </Button>
+        </AppModalFooter>
+      }
     >
       <div className="space-y-3">
         <div>
@@ -928,9 +1252,6 @@ function JenisFormModal({
           />
           Aktif (bisa dipilih saat membuat tagihan)
         </label>
-        <Button onClick={submit} disabled={saving} className="w-full">
-          {saving ? 'Menyimpan…' : 'Simpan'}
-        </Button>
       </div>
     </AppModal>
   );

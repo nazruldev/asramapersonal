@@ -10,12 +10,34 @@ type AppModalProps = {
   title?: string;
   description?: string;
   children: ReactNode;
+  /** Sticky footer (Submit/Batal/dll) — di luar area scroll */
+  footer?: ReactNode;
   className?: string;
   /** Bottom sheet on mobile by default */
   sheet?: boolean;
   /** Tampil di atas modal lain (konfirmasi) */
   elevated?: boolean;
 };
+
+type AppModalFooterProps = {
+  children: ReactNode;
+  className?: string;
+};
+
+/** Sticky footer: border atas, padding kiri/kanan sejajar body modal. */
+export function AppModalFooter({ children, className }: AppModalFooterProps) {
+  return (
+    <div
+      className={cn(
+        'flex gap-2 shrink-0 border-t border-slate-200 dark:border-slate-700 bg-card',
+        'pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] px-4 sm:px-5',
+        className
+      )}
+    >
+      {children}
+    </div>
+  );
+}
 
 function useMobileSheetEnabled(sheet: boolean) {
   const [mobile, setMobile] = useState(() => {
@@ -44,6 +66,7 @@ export function AppModal({
   title,
   description,
   children,
+  footer,
   className,
   sheet = true,
   elevated = false,
@@ -52,27 +75,45 @@ export function AppModal({
 
   if (!open || typeof document === 'undefined') return null;
 
+  const header =
+    title || description ? (
+      <div
+        {...(mobileSheet ? { 'data-sheet-handle': true } : {})}
+        className={cn(
+          'px-4 sm:px-5 pb-3 border-b border-slate-200 dark:border-slate-700 shrink-0',
+          mobileSheet
+            ? 'touch-none select-none'
+            : 'flex items-start justify-between gap-3'
+        )}
+      >
+        <div className="min-w-0">
+          {title && <h3 className="text-base font-semibold leading-tight">{title}</h3>}
+          {description && <p className="text-xs text-muted-foreground mt-0.5">{description}</p>}
+        </div>
+        {!mobileSheet && (
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 rounded-sm hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 shrink-0"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        )}
+      </div>
+    ) : null;
+
+  const body = (
+    <div className="overflow-y-auto overscroll-contain px-4 sm:px-5 py-4 flex-1 min-h-0 flex flex-col">
+      {children}
+    </div>
+  );
+
   if (mobileSheet) {
     return createPortal(
       <BottomSheetFrame open={open} onClose={onClose} elevated={elevated} panelClassName={className}>
-        {(title || description) && (
-          <div data-sheet-handle className="flex items-start justify-between gap-3 px-4 sm:px-5 pb-3 border-b border-slate-200 dark:border-slate-700 shrink-0 touch-none select-none">
-            <div className="min-w-0">
-              {title && <h3 className="text-base font-semibold leading-tight">{title}</h3>}
-              {description && (
-                <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
-              )}
-            </div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="p-1.5 rounded-sm hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 shrink-0"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        )}
-        <div className="overflow-y-auto overscroll-contain px-4 sm:px-5 py-4 flex-1 min-h-0 flex flex-col">{children}</div>
+        {header}
+        {body}
+        {footer}
       </BottomSheetFrame>,
       document.body
     );
@@ -108,24 +149,9 @@ export function AppModal({
         {sheet && (
           <div className="w-10 h-1 rounded-full bg-slate-200 dark:bg-slate-600 mx-auto mt-3 shrink-0 sm:hidden" />
         )}
-        {(title || description) && (
-          <div className="flex items-start justify-between gap-3 px-4 sm:px-5 pt-4 pb-3 border-b border-slate-200 dark:border-slate-700 shrink-0">
-            <div className="min-w-0">
-              {title && <h3 className="text-base font-semibold leading-tight">{title}</h3>}
-              {description && (
-                <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
-              )}
-            </div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="p-1.5 rounded-sm hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 shrink-0"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        )}
-        <div className="overflow-y-auto overscroll-contain px-4 sm:px-5 py-4 flex-1 min-h-0">{children}</div>
+        {header}
+        {body}
+        {footer}
       </div>
     </div>,
     document.body

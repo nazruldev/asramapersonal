@@ -163,50 +163,52 @@ export default function Dashboard() {
     [absensiKegiatanHari]
   );
 
+  const menuIconStyle = { tone: 'text-emerald-700', tile: 'bg-emerald-100 dark:bg-emerald-500/15' };
+
   const quickActions = [
-    { label: 'Absensi', path: '/laporan/absensi', icon: CalendarCheck, tone: 'text-emerald-700', tile: 'bg-emerald-100 dark:bg-emerald-500/15' },
-    { label: 'Izin', path: '/laporan/izin', icon: ClockAlert, tone: 'text-amber-700', tile: 'bg-amber-100 dark:bg-amber-500/15' },
-    { label: 'Catatan BK', path: '/laporan/pembinaan', icon: ShieldAlert, tone: 'text-rose-700', tile: 'bg-rose-100 dark:bg-rose-500/15' },
-    { label: 'Santri', path: '/master/santri', icon: Users, tone: 'text-blue-700', tile: 'bg-blue-100 dark:bg-blue-500/15' },
-    { label: 'Kamar', path: '/master/kamar', icon: BedDouble, tone: 'text-purple-700', tile: 'bg-purple-100 dark:bg-purple-500/15' },
-    { label: 'Pembayaran', path: '/master/pembayaran', icon: Wallet, tone: 'text-teal-700', tile: 'bg-teal-100 dark:bg-teal-500/15' },
-    { label: 'Laporan', path: '/laporan', icon: FileText, tone: 'text-slate-700 dark:text-slate-200', tile: 'bg-slate-200 dark:bg-slate-500/20' },
+    { label: 'Absensi', path: '/laporan/absensi', icon: CalendarCheck, ...menuIconStyle },
+    { label: 'Izin', path: '/laporan/izin', icon: ClockAlert, ...menuIconStyle },
+    { label: 'Catatan BK', path: '/laporan/pembinaan', icon: ShieldAlert, ...menuIconStyle },
+    { label: 'Santri', path: '/master/santri', icon: Users, ...menuIconStyle },
+    { label: 'Kamar', path: '/master/kamar', icon: BedDouble, ...menuIconStyle },
+    { label: 'Pembayaran', path: '/master/pembayaran', icon: Wallet, ...menuIconStyle },
+    { label: 'Laporan', path: '/laporan', icon: FileText, ...menuIconStyle },
   ];
 
   const allMenuGroups = [
     {
       title: 'Operasional Harian',
       items: [
-        { label: 'Absensi', path: '/laporan/absensi', icon: CalendarCheck, tone: 'text-emerald-700', tile: 'bg-emerald-100 dark:bg-emerald-500/15' },
-        { label: 'Izin', path: '/laporan/izin', icon: ClockAlert, tone: 'text-amber-700', tile: 'bg-amber-100 dark:bg-amber-500/15' },
-        { label: 'Catatan BK', path: '/laporan/pembinaan', icon: ShieldAlert, tone: 'text-rose-700', tile: 'bg-rose-100 dark:bg-rose-500/15' },
-        { label: 'Penjadwalan', path: '/penjadwalan', icon: CalendarRange, tone: 'text-violet-700', tile: 'bg-violet-100 dark:bg-violet-500/15' },
-        { label: 'Pembayaran', path: '/master/pembayaran', icon: Wallet, tone: 'text-teal-700', tile: 'bg-teal-100 dark:bg-teal-500/15' },
+        { label: 'Absensi', path: '/laporan/absensi', icon: CalendarCheck, ...menuIconStyle },
+        { label: 'Izin', path: '/laporan/izin', icon: ClockAlert, ...menuIconStyle },
+        { label: 'Catatan BK', path: '/laporan/pembinaan', icon: ShieldAlert, ...menuIconStyle },
+        { label: 'Penjadwalan', path: '/penjadwalan', icon: CalendarRange, ...menuIconStyle },
+        { label: 'Pembayaran', path: '/master/pembayaran', icon: Wallet, ...menuIconStyle },
       ],
     },
     {
       title: 'Data Master',
       items: [
-        { label: 'Santri', path: '/master/santri', icon: Users, tone: 'text-blue-700', tile: 'bg-blue-100 dark:bg-blue-500/15' },
-        { label: 'Kamar', path: '/master/kamar', icon: BedDouble, tone: 'text-purple-700', tile: 'bg-purple-100 dark:bg-purple-500/15' },
-        { label: 'Kelas', path: '/master/kelas', icon: GraduationCap, tone: 'text-indigo-700', tile: 'bg-indigo-100 dark:bg-indigo-500/15' },
-        { label: 'Kegiatan', path: '/master/kegiatan', icon: CalendarDays, tone: 'text-orange-700', tile: 'bg-orange-100 dark:bg-orange-500/15' },
-        { label: 'Kelola Data', path: '/master', icon: Database, tone: 'text-teal-700', tile: 'bg-teal-100 dark:bg-teal-500/15' },
+        { label: 'Santri', path: '/master/santri', icon: Users, ...menuIconStyle },
+        { label: 'Kamar', path: '/master/kamar', icon: BedDouble, ...menuIconStyle },
+        { label: 'Kelas', path: '/master/kelas', icon: GraduationCap, ...menuIconStyle },
+        { label: 'Kegiatan', path: '/master/kegiatan', icon: CalendarDays, ...menuIconStyle },
+        { label: 'Kelola Data', path: '/master', icon: Database, ...menuIconStyle },
       ],
     },
     {
       title: 'Laporan & Analisis',
       items: [
-        { label: 'Laporan', path: '/laporan', icon: FileText, tone: 'text-slate-700 dark:text-slate-200', tile: 'bg-slate-200 dark:bg-slate-500/20' },
-        { label: 'Peringkat', path: '/laporan/peringkat', icon: Trophy, tone: 'text-orange-700', tile: 'bg-orange-100 dark:bg-orange-500/15' },
-        { label: 'Sebaran Wilayah', path: '/laporan/wilayah', icon: MapPin, tone: 'text-sky-700', tile: 'bg-sky-100 dark:bg-sky-500/15' },
+        { label: 'Laporan', path: '/laporan', icon: FileText, ...menuIconStyle },
+        { label: 'Peringkat', path: '/laporan/peringkat', icon: Trophy, ...menuIconStyle },
+        { label: 'Sebaran Wilayah', path: '/laporan/wilayah', icon: MapPin, ...menuIconStyle },
       ],
     },
     {
       title: 'Sistem',
       items: [
-        { label: 'Pengaturan', path: '/pengaturan', icon: Settings, tone: 'text-slate-700 dark:text-slate-200', tile: 'bg-slate-200 dark:bg-slate-500/20' },
-        { label: 'Cadangan Data', path: '/database', icon: Database, tone: 'text-cyan-700', tile: 'bg-cyan-100 dark:bg-cyan-500/15' },
+        { label: 'Pengaturan', path: '/pengaturan', icon: Settings, ...menuIconStyle },
+        { label: 'Cadangan Data', path: '/database', icon: Database, ...menuIconStyle },
       ],
     },
   ];
@@ -276,12 +278,12 @@ export default function Dashboard() {
               <span className="text-[11px] font-semibold text-emerald-50">Di Asrama</span>
             </div>
             <div className="rounded-sm px-3 py-1.5 bg-black/25 dark:bg-black/35 border border-white/30 backdrop-blur-sm flex items-center gap-2">
-              <span className="font-black text-sm tabular-nums text-amber-200">{activeIzin.length}</span>
+              <span className="font-black text-sm tabular-nums text-white">{activeIzin.length}</span>
               <span className="text-[11px] font-semibold text-emerald-50">Sedang Izin</span>
             </div>
             {slotTotals.kapasitas > 0 ? (
               <div className="rounded-sm px-3 py-1.5 bg-black/25 dark:bg-black/35 border border-white/30 backdrop-blur-sm flex items-center gap-2">
-                <span className="font-black text-sm tabular-nums text-sky-100">
+                <span className="font-black text-sm tabular-nums text-white">
                   {slotTotals.terisi}/{slotTotals.kapasitas}
                 </span>
                 <span className="text-[11px] font-semibold text-emerald-50">Slot jiwa</span>
@@ -389,7 +391,7 @@ export default function Dashboard() {
         >
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-500">Total Santri</span>
-            <Users className="w-5 h-5 text-blue-600" />
+            <Users className="w-5 h-5 text-emerald-600" />
           </div>
           <div className="mt-3">
             <div className="flex items-baseline gap-1">
@@ -415,16 +417,16 @@ export default function Dashboard() {
         >
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-500">Sedang Izin</span>
-            <ClockAlert className="w-5 h-5 text-amber-600" />
+            <ClockAlert className="w-5 h-5 text-emerald-600" />
           </div>
           <div className="mt-3">
             <div className="flex items-baseline gap-1">
-              <span className="text-2xl font-black text-amber-600 tabular-nums">
+              <span className="text-2xl font-black text-slate-900 dark:text-slate-100 tabular-nums">
                 {loadingStats ? '-' : activeIzin.length}
               </span>
               <span className="text-xs font-semibold text-slate-400">santri</span>
             </div>
-            <p className="text-[10px] text-amber-700/80 mt-0.5 font-medium">
+            <p className={cn('text-[10px] mt-0.5 font-medium', izinTerlambat > 0 ? 'text-amber-600' : 'text-slate-400')}>
               {izinTerlambat > 0
                 ? `${izinTerlambat} lewat batas kembali`
                 : activeIzin.length > 0
@@ -467,16 +469,16 @@ export default function Dashboard() {
         >
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-500">Slot Kosong</span>
-            <BedDouble className="w-5 h-5 text-purple-600" />
+            <BedDouble className="w-5 h-5 text-emerald-600" />
           </div>
           <div className="mt-3">
             <div className="flex items-baseline gap-1">
-              <span className="text-2xl font-black text-purple-600 tabular-nums">
+              <span className="text-2xl font-black text-slate-900 dark:text-slate-100 tabular-nums">
                 {loadingStats ? '-' : slotTotals.kosong}
               </span>
               <span className="text-xs font-semibold text-slate-400">slot</span>
             </div>
-            <p className="text-[10px] text-purple-700/80 mt-0.5 font-medium">
+            <p className="text-[10px] text-slate-400 mt-0.5 font-medium truncate">
               {slotTotals.kapasitas > 0
                 ? `Dari ${slotTotals.kapasitas} slot jiwa di ${slotTotals.jumlahKamar} kamar`
                 : 'Belum ada data kamar'}
@@ -553,7 +555,7 @@ export default function Dashboard() {
               Slot Kamar
             </h3>
             {slotTotals.kapasitas > 0 ? (
-              <span className="px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 dark:bg-purple-950/50 dark:text-purple-200 font-bold text-[10px] tabular-nums shrink-0">
+              <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200 font-bold text-[10px] tabular-nums shrink-0">
                 {slotTotals.kosong} kosong
               </span>
             ) : null}
@@ -635,10 +637,12 @@ export default function Dashboard() {
                 onClick={() => navigate(kamarDetailPath(row.id))}
                 className={cn(
                   appCardClass,
-                  'w-56 shrink-0 snap-start p-3 text-left active:scale-[0.99] transition-transform hover:border-emerald-300/80 dark:hover:border-emerald-700'
+                  // Button di flex row ikut stretch tinggi — pin konten ke atas (bukan center UA).
+                  'w-56 shrink-0 snap-start p-3 text-left flex flex-col justify-start items-stretch',
+                  'active:scale-[0.99] transition-transform hover:border-emerald-300/80 dark:hover:border-emerald-700'
                 )}
               >
-                <div className="flex items-start justify-between gap-2">
+                <div className="flex items-start justify-between gap-2 shrink-0">
                   <div className="min-w-0">
                     <p className="text-xs font-bold text-slate-900 dark:text-slate-50 truncate">{row.nama}</p>
                     <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate mt-0.5">

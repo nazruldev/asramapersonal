@@ -19,7 +19,7 @@ import {
   GraduationCap,
   MapPin,
 } from 'lucide-react';
-import { AppModal } from '@/components/ui/app-modal';
+import { AppModal, AppModalFooter } from '@/components/ui/app-modal';
 import { Button } from '@/components/ui/button';
 import { HeaderNeutralButton } from '@/components/header-action-button';
 import { useScreenHeaderActions } from '@/lib/screen-header-actions';
@@ -70,12 +70,12 @@ type ReportScope = 'lengkap' | 'persantri' | LaporanReportId;
 
 const SINGLE_REPORTS: { id: LaporanReportId; title: string; desc: string; icon: typeof FileDown; tone: string; perSantri?: boolean }[] = [
   { id: 'absensi', title: 'Rekap Absensi', desc: 'Ringkasan kehadiran santri pada periode terpilih.', icon: CalendarCheck, tone: 'text-emerald-600', perSantri: true },
-  { id: 'izin', title: 'Rekap Perizinan', desc: 'Daftar izin keluar, kembali, dan yang melewati batas.', icon: ClockAlert, tone: 'text-amber-600', perSantri: true },
-  { id: 'pembinaan', title: 'Rekap Pembinaan', desc: 'Catatan pembinaan per jenis pada periode terpilih.', icon: ShieldAlert, tone: 'text-violet-600', perSantri: true },
-  { id: 'pelanggaran', title: 'Peringkat Pelanggaran', desc: 'Santri dengan poin pelanggaran terbanyak.', icon: Trophy, tone: 'text-rose-600' },
-  { id: 'kamar', title: 'Rekap Hunian Kamar', desc: 'Okupansi dan penghuni tiap kamar.', icon: BedDouble, tone: 'text-blue-600' },
-  { id: 'kelas', title: 'Rekap Santri per Kelas', desc: 'Jumlah dan daftar santri per kelas.', icon: GraduationCap, tone: 'text-indigo-600' },
-  { id: 'wilayah', title: 'Sebaran Asal Wilayah', desc: 'Distribusi santri berdasarkan wilayah asal.', icon: MapPin, tone: 'text-cyan-600' },
+  { id: 'izin', title: 'Rekap Perizinan', desc: 'Daftar izin keluar, kembali, dan yang melewati batas.', icon: ClockAlert, tone: 'text-emerald-600', perSantri: true },
+  { id: 'pembinaan', title: 'Rekap Pembinaan', desc: 'Catatan pembinaan per jenis pada periode terpilih.', icon: ShieldAlert, tone: 'text-emerald-600', perSantri: true },
+  { id: 'pelanggaran', title: 'Peringkat Pelanggaran', desc: 'Santri dengan poin pelanggaran terbanyak.', icon: Trophy, tone: 'text-emerald-600' },
+  { id: 'kamar', title: 'Rekap Hunian Kamar', desc: 'Okupansi dan penghuni tiap kamar.', icon: BedDouble, tone: 'text-emerald-600' },
+  { id: 'kelas', title: 'Rekap Santri per Kelas', desc: 'Jumlah dan daftar santri per kelas.', icon: GraduationCap, tone: 'text-emerald-600' },
+  { id: 'wilayah', title: 'Sebaran Asal Wilayah', desc: 'Distribusi santri berdasarkan wilayah asal.', icon: MapPin, tone: 'text-emerald-600' },
 ];
 
 export default function Laporan() {
@@ -572,7 +572,21 @@ export default function Laporan() {
         </div>
       </AppModal>
 
-      <AppModal open={filterOpen} onClose={() => setFilterOpen(false)} title="Periode rekap">
+      <AppModal
+        open={filterOpen}
+        onClose={() => setFilterOpen(false)}
+        title="Periode rekap"
+        footer={
+          <AppModalFooter>
+            <Button type="button" variant="outline" className="flex-1 text-xs" onClick={resetRekapFilter}>
+              Reset filter
+            </Button>
+            <Button type="button" className="flex-1 text-xs" onClick={applyRekapFilter}>
+              Terapkan
+            </Button>
+          </AppModalFooter>
+        }
+      >
         <div className="space-y-4 text-sm">
           <div className="space-y-2">
             <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">Periode cepat</p>
@@ -630,14 +644,6 @@ export default function Laporan() {
             <p className="text-[10px] text-slate-400 leading-snug">
               Rekap pelanggaran/pembinaan mengikuti periode yang dipilih.
             </p>
-          </div>
-          <div className="flex gap-2 shrink-0 sticky bottom-0 -mx-4 sm:-mx-5 -mb-4 px-4 sm:px-5 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-card border-t border-slate-200 dark:border-slate-700">
-            <Button type="button" variant="outline" className="flex-1 text-xs" onClick={resetRekapFilter}>
-              Reset filter
-            </Button>
-            <Button type="button" className="flex-1 text-xs" onClick={applyRekapFilter}>
-              Terapkan
-            </Button>
           </div>
         </div>
       </AppModal>

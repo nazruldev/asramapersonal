@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
+import { ListRowActions } from '@/components/list-row-actions';
 import {
   appFieldThemed,
   appLabelThemed,
@@ -35,7 +36,7 @@ import {
 import { BottomPicker, type BottomPickerOption } from '@/components/ui/bottom-picker';
 import { isSantriKetuaOfKamar, pickSantriLongestInKamar } from '@/lib/kamar-ketua';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import { AppModal } from '@/components/ui/app-modal';
+import { AppModal, AppModalFooter } from '@/components/ui/app-modal';
 import { useConfirmDialog } from '@/lib/use-confirm-dialog';
 import { useTheme } from '@/lib/theme';
 import { useScreenAddAction } from '@/lib/screen-header-actions';
@@ -263,13 +264,13 @@ export default function KamarDetail() {
         const prevKamar = (s.kamar ?? '').trim();
         const isKetua = isSantriKetuaOfKamar(s, kamarList);
         let badge: string | undefined;
-        let badgeTone: 'amber' | 'violet' | undefined;
+        let badgeTone: 'amber' | 'slate' | undefined;
         if (isKetua && prevKamar) {
           badge = 'Ketua';
           badgeTone = 'amber';
         } else if (prevKamar) {
           badge = 'Pindah';
-          badgeTone = 'violet';
+          badgeTone = 'slate';
         }
         return {
           value: s.id,
@@ -606,24 +607,25 @@ export default function KamarDetail() {
                     </p>
                   ) : null}
                 </div>
-                <div className="flex items-center gap-0.5 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => openEditFasilitas(row)}
-                    className={`p-1.5 rounded-sm ${theme === 'dark' ? 'text-blue-400 hover:bg-slate-700' : 'text-blue-600 hover:bg-blue-50'}`}
-                    title="Ubah"
-                  >
-                    <Edit2 className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteFasilitas(row)}
-                    className={`p-1.5 rounded-sm ${theme === 'dark' ? 'text-red-400 hover:bg-slate-700' : 'text-red-600 hover:bg-red-50'}`}
-                    title="Hapus"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+                <ListRowActions
+                  title={row.nama}
+                  subtitle={`Sejak ${formatTanggalFasilitas(row.tanggal)}`}
+                  actions={[
+                    {
+                      id: 'edit',
+                      label: 'Ubah',
+                      icon: <Edit2 className="w-4 h-4 text-blue-600" />,
+                      onSelect: () => openEditFasilitas(row),
+                    },
+                    {
+                      id: 'delete',
+                      label: 'Hapus',
+                      icon: <Trash2 className="w-4 h-4" />,
+                      destructive: true,
+                      onSelect: () => handleDeleteFasilitas(row),
+                    },
+                  ]}
+                />
               </div>
             </div>
           ))}
@@ -636,6 +638,22 @@ export default function KamarDetail() {
         title={editingFasilitas ? 'Ubah Fasilitas' : 'Tambah Fasilitas'}
         description={kamar?.nama}
         className={theme === 'dark' ? 'bg-slate-800 text-white' : ''}
+        footer={
+          <AppModalFooter>
+            <Button type="button" variant="outline" className="flex-1" onClick={closeFasilitasModal}>
+              Batal
+            </Button>
+            <Button
+              type="button"
+              className="flex-1"
+              disabled={fasilitasSaving}
+              onClick={() => void handleSaveFasilitas()}
+            >
+              <Save className="w-4 h-4" />
+              Simpan
+            </Button>
+          </AppModalFooter>
+        }
       >
         <div className="space-y-3 -mx-1">
           <div>
@@ -670,20 +688,6 @@ export default function KamarDetail() {
               className={`${appTextareaClass} ${appFieldThemed(theme)} min-h-[4rem]`}
             />
           </div>
-        </div>
-        <div className="flex gap-2 mt-5 pb-1">
-          <Button type="button" variant="outline" className="flex-1" onClick={closeFasilitasModal}>
-            Batal
-          </Button>
-          <Button
-            type="button"
-            className="flex-1"
-            disabled={fasilitasSaving}
-            onClick={() => void handleSaveFasilitas()}
-          >
-            <Save className="w-4 h-4" />
-            Simpan
-          </Button>
         </div>
       </AppModal>
 

@@ -56,9 +56,12 @@ export function AppLoginGate({ onSuccess }: { onSuccess: () => void }) {
       }
       setSessionUser(sessionUserFromPengguna(result.user as Pengguna));
       markAuthenticated();
-      void import('@/lib/sync/turso-sync')
-        .then((m) => m.runTursoSync())
-        .catch(() => undefined);
+      // Tunggu pull Turso dulu supaya Electron/web kosong tidak masuk UI kosong.
+      try {
+        await import('@/lib/sync/turso-sync').then((m) => m.runTursoSync());
+      } catch {
+        /* offline — pakai lokal */
+      }
       onSuccess();
     } finally {
       setLoading(false);

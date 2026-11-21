@@ -372,6 +372,30 @@ function scopeAsramaIds(): Set<string> | null {
   return null;
 }
 
+/**
+ * Lingkup tugas akun (abaikan switcher asrama aktif).
+ * Dipakai generate tagihan agar bisa pilih "semua asrama" / beberapa asrama.
+ */
+function tugasAsramaIds(): Set<string> | null {
+  const user = getSessionUser();
+  if (!user) return null;
+  if (user.role === 'pengawas') {
+    const id = user.asramaIds[0] ?? user.activeAsramaId;
+    return id ? new Set([id]) : null;
+  }
+  if (user.role === 'bendahara' && user.asramaIds.length > 0) {
+    return new Set(user.asramaIds);
+  }
+  // super_admin / bendahara tanpa tugas = semua asrama
+  return null;
+}
+
+function santriInTugasScope(): Record<string, unknown>[] {
+  const scope = tugasAsramaIds();
+  if (!scope) return db.santri;
+  return db.santri.filter((s) => !s.asrama_id || scope.has(String(s.asrama_id)));
+}
+
 /** Baris lama tanpa asrama_id diberi asrama pertama (migrasi multi-asrama). */
 function assignDefaultAsramaToRows(): void {
   const fallback = defaultAsramaId(db.settings);
@@ -818,6 +842,7 @@ async function dispatchApiCore(
   if (pathname.startsWith('/api/pembayaran')) {
     const pembayaranResult = await handlePembayaranApi(m, pathname, searchParams, body, {
       listSantri: () => santriInScope(),
+      listSantriTugas: () => santriInTugasScope(),
     });
     if (pembayaranResult) return pembayaranResult;
   }
@@ -1074,6 +1099,7 @@ async function dispatchApiCore(
             asal_desa_nama: s.asal_desa_nama,
             jumlah_pelanggaran: s.jumlah_pelanggaran,
             masuk_kamar_sejak: s.masuk_kamar_sejak,
+            asrama_id: s.asrama_id ?? undefined,
           })),
         };
       }

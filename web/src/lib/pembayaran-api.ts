@@ -34,6 +34,8 @@ type SantriLite = {
 
 export type PembayaranApiCtx = {
   listSantri: () => Record<string, unknown>[];
+  /** Santri dalam lingkup tugas akun (bisa lintas asrama aktif). */
+  listSantriTugas?: () => Record<string, unknown>[];
 };
 
 const TAGIHAN_STATUS: TagihanStatus[] = ['belum', 'sebagian', 'lunas'];
@@ -130,7 +132,19 @@ export async function handlePembayaranApi(
         return err(400, 'Periode bulanan wajib format YYYY-MM (mis. 2026-11).');
       }
 
-      const santri = ctx.listSantri();
+      const pool = (ctx.listSantriTugas ?? ctx.listSantri)();
+      const asramaIdsRaw = Array.isArray(body.asrama_ids)
+        ? body.asrama_ids.map(String).filter(Boolean)
+        : [];
+      const asramaFilter = asramaIdsRaw.length ? new Set(asramaIdsRaw) : null;
+      const santri = asramaFilter
+        ? pool.filter((s) => {
+            const aid = s.asrama_id ? String(s.asrama_id) : '';
+            // Tanpa asrama_id ikut serta agar data lama tidak terlewat
+            return !aid || asramaFilter.has(aid);
+          })
+        : pool;
+
       const target = String(body.target ?? 'semua');
       let santriIds: string[] = [];
       if (target === 'kelas') {
@@ -142,8 +156,14 @@ export async function handlePembayaranApi(
           .filter((s) => kelasIds.has(String(s.kelas_id ?? '')))
           .map((s) => String(s.id));
       } else if (target === 'santri') {
-        santriIds = (Array.isArray(body.santri_ids) ? body.santri_ids : []).map(String);
+        const allowed = new Set(santri.map((s) => String(s.id)));
+        santriIds = (Array.isArray(body.santri_ids) ? body.santri_ids : [])
+          .map(String)
+          .filter((id) => allowed.has(id));
         if (!santriIds.length) return err(400, 'Pilih minimal satu santri.');
+      } else if (target === 'asrama') {
+        if (!asramaFilter?.size) return err(400, 'Pilih minimal satu asrama.');
+        santriIds = santri.map((s) => String(s.id));
       } else {
         santriIds = santri.map((s) => String(s.id));
       }

@@ -7,18 +7,17 @@ import { useAppReload } from '@/hooks/use-app-reload';
 import { PageWithPullRefresh } from '@/components/page-with-pull-refresh';
 import { useLocation, useNavigate } from 'react-router';
 import {
-  BedDouble,
   ClockAlert,
   AlertTriangle,
   ChevronDown,
   Filter,
-  GraduationCap,
   ShieldAlert,
   ChevronRight,
   Search,
   SlidersHorizontal,
   X,
 } from 'lucide-react';
+import { KelasKamarFilterSheet } from '@/components/kelas-kamar-filter-sheet';
 import {
   IZIN_BATAS_BELUM_PASTI,
   batasKembaliLocalFromKeluar,
@@ -50,7 +49,6 @@ import {
   appCardClass,
   appChipInactiveClass,
   appListCardButtonClass,
-  appSectionTitleClass,
 } from '@/lib/surface-styles';
 import { cn } from '@/lib/utils';
 import { useTheme } from '@/lib/theme';
@@ -59,14 +57,14 @@ import {
   kamarOptionsFromSantri,
   kelasOptionsFromSantri,
   matchesSantriSearchAndRoomFilters,
-  toggleMultiSelect,
 } from '@/lib/santri-multi-filter';
 import { useScreenAddAction } from '@/lib/screen-header-actions';
 import { ScrollNavButtons } from '@/components/scroll-nav-buttons';
-import { AppModal } from '@/components/ui/app-modal';
+import { AppModal, AppModalFooter } from '@/components/ui/app-modal';
 import { toast } from '@/lib/toast';
 
 const IZIN_ALASAN_PRESETS = [
+  'Izin keluar saja',
   'Sakit / Berobat',
   'Acara keluarga',
   'Pulang ke rumah',
@@ -77,7 +75,16 @@ const IZIN_ALASAN_PRESETS = [
 
 const DEFAULT_IZIN_ALASAN = IZIN_ALASAN_PRESETS[0];
 
-const IZIN_DURASI_SHORTCUTS: { id: IzinDurasiPreset; label: string }[] = [
+const IZIN_DURASI_JAM: { id: IzinDurasiPreset; label: string }[] = [
+  { id: '30menit', label: '30 menit' },
+  { id: '1jam', label: '1 jam' },
+  { id: '2jam', label: '2 jam' },
+  { id: '3jam', label: '3 jam' },
+  { id: '6jam', label: '6 jam' },
+  { id: 'custom', label: 'Atur sendiri' },
+];
+
+const IZIN_DURASI_HARI: { id: IzinDurasiPreset; label: string }[] = [
   { id: '1hari', label: '1 hari' },
   { id: '2hari', label: '2 hari' },
   { id: '1minggu', label: '1 minggu' },
@@ -105,8 +112,6 @@ export default function Izin() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [selectedKelas, setSelectedKelas] = useState<string[]>([]);
   const [selectedKamar, setSelectedKamar] = useState<string[]>([]);
-  const [draftKelas, setDraftKelas] = useState<string[]>([]);
-  const [draftKamar, setDraftKamar] = useState<string[]>([]);
   const [alasanJenis, setAlasanJenis] = useState<string>(DEFAULT_IZIN_ALASAN);
   const [alasanLainnya, setAlasanLainnya] = useState('');
   const [tanggalKeluar, setTanggalKeluar] = useState(defaultKeluarLocal);
@@ -124,6 +129,11 @@ export default function Izin() {
     setTanggalKeluar(keluar);
     if (alasan === 'Sakit / Berobat') {
       setDurasiPreset('belum_pasti');
+      return;
+    }
+    if (alasan === 'Izin keluar saja') {
+      setDurasiPreset('1jam');
+      setBatasKembaliLocal(batasKembaliLocalFromKeluar(keluar, '1jam'));
       return;
     }
     setDurasiPreset('1hari');
@@ -263,25 +273,7 @@ export default function Izin() {
 
   const hasActiveFilter = selectedKelas.length > 0 || selectedKamar.length > 0;
 
-  const openFilterDrawer = () => {
-    setDraftKelas(selectedKelas);
-    setDraftKamar(selectedKamar);
-    setFilterOpen(true);
-  };
-
-  const applyFilters = () => {
-    setSelectedKelas(draftKelas);
-    setSelectedKamar(draftKamar);
-    setFilterOpen(false);
-  };
-
-  const resetFilters = () => {
-    setDraftKelas([]);
-    setDraftKamar([]);
-    setSelectedKelas([]);
-    setSelectedKamar([]);
-    setFilterOpen(false);
-  };
+  const openFilterDrawer = () => setFilterOpen(true);
 
   const groupedIzin = useMemo(() => {
     const all = groupIzinBySantri(izinList as IzinRow[]);
@@ -420,79 +412,24 @@ export default function Izin() {
       <ScrollNavButtons target={statusScrollRef} />
       </div>
 
-      <AppModal
+      <KelasKamarFilterSheet
         open={filterOpen}
         onClose={() => setFilterOpen(false)}
-        title="Filter lanjutan"
-        description="Pilih satu atau lebih kelas dan kamar (kosong = semua)"
-      >
-        <div className="flex flex-col flex-1 min-h-0 gap-5 text-sm -mx-1">
-          <div className="space-y-2 shrink-0">
-            <p className={appSectionTitleClass}>Kelas</p>
-            {kelasOptions.length === 0 ? (
-              <EmptyState icon={GraduationCap} title="Belum ada data kelas" variant="minimal" />
-            ) : (
-              <div className="flex flex-wrap gap-1.5">
-                {kelasOptions.map((kelas) => {
-                  const active = draftKelas.includes(kelas);
-                  return (
-                    <button
-                      key={kelas}
-                      type="button"
-                      onClick={() => setDraftKelas((prev) => toggleMultiSelect(prev, kelas))}
-                      className={cn(
-                        'px-3 py-1.5 rounded-sm text-xs font-bold border transition-all',
-                        active
-                          ? 'bg-slate-900 text-white border-slate-900 dark:bg-slate-700 dark:text-white dark:border-slate-600'
-                          : cn(appChipInactiveClass, 'text-slate-600')
-                      )}
-                    >
-                      {kelas}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          <div className="flex flex-col flex-1 min-h-0 space-y-2">
-            <p className={`${appSectionTitleClass} shrink-0`}>Kamar</p>
-            {kamarOptions.length === 0 ? (
-              <EmptyState icon={BedDouble} title="Belum ada data kamar" variant="minimal" />
-            ) : (
-              <div className="flex flex-wrap gap-1.5 flex-1 min-h-0 overflow-y-auto overscroll-contain pr-0.5 content-start">
-                {kamarOptions.map((kamar) => {
-                  const active = draftKamar.includes(kamar);
-                  return (
-                    <button
-                      key={kamar}
-                      type="button"
-                      onClick={() => setDraftKamar((prev) => toggleMultiSelect(prev, kamar))}
-                      className={cn(
-                        'px-3 py-1.5 rounded-sm text-xs font-bold border transition-all text-left',
-                        active
-                          ? 'bg-emerald-800 text-white border-emerald-800'
-                          : cn(appChipInactiveClass, 'text-slate-600')
-                      )}
-                    >
-                      {kamar}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          <div className="flex gap-2 shrink-0 sticky bottom-0 -mx-3 sm:-mx-4 -mb-4 px-3 sm:px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-card border-t border-slate-200 dark:border-slate-700">
-            <Button type="button" variant="outline" className="flex-1 text-xs" onClick={resetFilters}>
-              Reset filter
-            </Button>
-            <Button type="button" className="flex-1 text-xs" onClick={applyFilters}>
-              Terapkan
-            </Button>
-          </div>
-        </div>
-      </AppModal>
+        kelasOptions={kelasOptions}
+        kamarOptions={kamarOptions}
+        selectedKelas={selectedKelas}
+        selectedKamar={selectedKamar}
+        onApply={(kelas, kamar) => {
+          setSelectedKelas(kelas);
+          setSelectedKamar(kamar);
+          setFilterOpen(false);
+        }}
+        onReset={() => {
+          setSelectedKelas([]);
+          setSelectedKamar([]);
+          setFilterOpen(false);
+        }}
+      />
 
       {/* Izin Card Feed */}
       <div className="space-y-3">
@@ -590,8 +527,24 @@ export default function Izin() {
         onClose={closeAddModal}
         title="Buat Izin Keluar Santri"
         description="Catat izin keluar komplek atau kepulangan"
+        footer={
+          <AppModalFooter>
+            <button
+              type="submit"
+              form="izin-add-form"
+              disabled={
+                addIzinMutation.isPending ||
+                !selectedSantriId ||
+                santriPickerOptions.length === 0
+              }
+              className="w-full py-3 bg-emerald-700 hover:bg-emerald-800 text-white rounded-sm font-bold text-xs shadow-md shadow-emerald-700/20 active:scale-[0.98] transition-all disabled:opacity-50"
+            >
+              {addIzinMutation.isPending ? 'Menyimpan...' : 'Simpan Surat Izin'}
+            </button>
+          </AppModalFooter>
+        }
       >
-            <form onSubmit={handleSubmit} className="space-y-3.5 -mx-1">
+            <form id="izin-add-form" onSubmit={handleSubmit} className="space-y-3.5 -mx-1">
               {santriPickerOptions.length === 0 ? (
                 <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-sm px-3 py-2">
                   Semua santri sedang dalam status izin. Tandai yang sudah kembali dulu sebelum membuat
@@ -627,7 +580,19 @@ export default function Izin() {
                   onChange={(e) => {
                     const v = e.target.value;
                     setAlasanJenis(v);
-                    if (v === 'Sakit / Berobat') setDurasiPreset('belum_pasti');
+                    if (v === 'Sakit / Berobat') {
+                      setDurasiPreset('belum_pasti');
+                    } else if (v === 'Izin keluar saja') {
+                      setDurasiPreset('1jam');
+                      setBatasKembaliLocal(
+                        batasKembaliLocalFromKeluar(tanggalKeluar, '1jam')
+                      );
+                    } else if (durasiPreset === 'belum_pasti' || durasiPreset === '1jam') {
+                      setDurasiPreset('1hari');
+                      setBatasKembaliLocal(
+                        batasKembaliLocalFromKeluar(tanggalKeluar, '1hari')
+                      );
+                    }
                   }}
                   required
                   className={appSelectClass}
@@ -675,26 +640,31 @@ export default function Izin() {
               </div>
 
               <div className={appFormStack}>
-                <label className={appLabelClass}>Estimasi kembali</label>
+                <label className={appLabelClass}>
+                  Estimasi kembali
+                  {alasanJenis === 'Izin keluar saja' ? ' (jam)' : ''}
+                </label>
                 <div className="flex flex-wrap gap-1.5">
-                  {IZIN_DURASI_SHORTCUTS.map((item) => {
-                    const active = durasiPreset === item.id;
-                    return (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => setDurasiPreset(item.id)}
-                        className={cn(
-                          'px-2.5 py-1.5 rounded-sm text-[11px] font-bold border transition-all',
-                          active
-                            ? 'bg-emerald-700 text-white border-emerald-700'
-                            : cn(appChipInactiveClass, 'text-slate-600')
-                        )}
-                      >
-                        {item.label}
-                      </button>
-                    );
-                  })}
+                  {(alasanJenis === 'Izin keluar saja' ? IZIN_DURASI_JAM : IZIN_DURASI_HARI).map(
+                    (item) => {
+                      const active = durasiPreset === item.id;
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => setDurasiPreset(item.id)}
+                          className={cn(
+                            'px-2.5 py-1.5 rounded-sm text-[11px] font-bold border transition-all',
+                            active
+                              ? 'bg-emerald-700 text-white border-emerald-700'
+                              : cn(appChipInactiveClass, 'text-slate-600')
+                          )}
+                        >
+                          {item.label}
+                        </button>
+                      );
+                    }
+                  )}
                 </div>
                 {durasiPreset === 'belum_pasti' ? (
                   <p className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200 rounded-sm px-2.5 py-2 leading-relaxed">
@@ -725,20 +695,6 @@ export default function Izin() {
                     </strong>
                   </p>
                 )}
-              </div>
-
-              <div className="pt-2">
-                <button
-                  type="submit"
-                  disabled={
-                    addIzinMutation.isPending ||
-                    !selectedSantriId ||
-                    santriPickerOptions.length === 0
-                  }
-                  className="w-full py-3 bg-emerald-700 hover:bg-emerald-800 text-white rounded-sm font-bold text-xs shadow-md shadow-emerald-700/20 active:scale-[0.98] transition-all disabled:opacity-50"
-                >
-                  {addIzinMutation.isPending ? 'Menyimpan...' : 'Simpan Surat Izin'}
-                </button>
               </div>
             </form>
       </AppModal>

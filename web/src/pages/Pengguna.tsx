@@ -14,10 +14,11 @@ import {
   X,
 } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
+import { ListRowActions } from '@/components/list-row-actions';
 import { useScreenAddAction } from '@/lib/screen-header-actions';
 import { PageWithPullRefresh } from '@/components/page-with-pull-refresh';
 import { ListSkeleton } from '@/components/ui/list-skeleton';
-import { AppModal } from '@/components/ui/app-modal';
+import { AppModal, AppModalFooter } from '@/components/ui/app-modal';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import {
@@ -303,50 +304,65 @@ export default function PenggunaPage() {
                   </p>
                 )}
               </div>
-              <button
-                type="button"
-                onClick={() => requestResetPin(p)}
-                className="p-2 text-slate-400 hover:text-amber-600"
-                aria-label="Reset PIN"
-                title="Reset PIN"
-              >
-                <KeyRound className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setEditing(p);
-                  setForm({
-                    nama: p.nama,
-                    pin: '',
-                    role: p.role,
-                    asramaIds: [...p.asramaIds],
-                    akses: [...p.akses],
-                    aktif: p.aktif,
-                  });
-                  setFotoDraft(getAvatar(p.id) ?? '');
-                  setShowModal(true);
-                }}
-                className="p-2 text-slate-400 hover:text-emerald-600"
-                aria-label="Edit"
-              >
-                <Edit2 className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => requestDelete(p)}
-                className="p-2 text-slate-400 hover:text-rose-600"
-                aria-label="Hapus"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
+              <ListRowActions
+                title={p.nama}
+                subtitle={penggunaRoleLabel(p.role)}
+                actions={[
+                  {
+                    id: 'reset-pin',
+                    label: 'Reset PIN',
+                    icon: <KeyRound className="w-4 h-4 text-amber-600" />,
+                    onSelect: () => requestResetPin(p),
+                  },
+                  {
+                    id: 'edit',
+                    label: 'Ubah',
+                    icon: <Edit2 className="w-4 h-4 text-blue-600" />,
+                    onSelect: () => {
+                      setEditing(p);
+                      setForm({
+                        nama: p.nama,
+                        pin: '',
+                        role: p.role,
+                        asramaIds: [...p.asramaIds],
+                        akses: [...p.akses],
+                        aktif: p.aktif,
+                      });
+                      setFotoDraft(getAvatar(p.id) ?? '');
+                      setShowModal(true);
+                    },
+                  },
+                  {
+                    id: 'delete',
+                    label: 'Hapus',
+                    icon: <Trash2 className="w-4 h-4" />,
+                    destructive: true,
+                    onSelect: () => requestDelete(p),
+                  },
+                ]}
+              />
             </div>
           ))
         )}
       </div>
 
-      <AppModal open={showModal} onClose={closeModal} title={editing ? 'Edit Akun' : 'Tambah Akun'}>
-        <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
+      <AppModal
+        open={showModal}
+        onClose={closeModal}
+        title={editing ? 'Edit Akun' : 'Tambah Akun'}
+        footer={
+          <AppModalFooter>
+            <Button type="button" variant="outline" className="flex-1" onClick={closeModal}>
+              Batal
+            </Button>
+            <Button type="button" className="flex-1" disabled={saving} onClick={() => void handleSave()}>
+              <Save className="w-4 h-4" />
+              {saving ? 'Menyimpan…' : 'Simpan'}
+            </Button>
+          </AppModalFooter>
+        }
+      >
+        <div className="space-y-3">
           <div className="space-y-1">
             <label className={appLabelClass}>Foto akun</label>
             <div className="flex items-center gap-3">
@@ -532,15 +548,6 @@ export default function PenggunaPage() {
             />
             Akun aktif (bisa login)
           </label>
-          <div className="flex gap-2 pt-1">
-            <Button type="button" variant="outline" className="flex-1" onClick={closeModal}>
-              Batal
-            </Button>
-            <Button type="button" className="flex-1" disabled={saving} onClick={() => void handleSave()}>
-              <Save className="w-4 h-4" />
-              {saving ? 'Menyimpan…' : 'Simpan'}
-            </Button>
-          </div>
         </div>
       </AppModal>
 

@@ -2,10 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router';
 import { Edit2, Trash2, Save, Building2 } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
+import { ListRowActions } from '@/components/list-row-actions';
 import { useScreenAddAction } from '@/lib/screen-header-actions';
 import { PageWithPullRefresh } from '@/components/page-with-pull-refresh';
 import { ListSkeleton } from '@/components/ui/list-skeleton';
-import { AppModal } from '@/components/ui/app-modal';
+import { AppModal, AppModalFooter } from '@/components/ui/app-modal';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import { appFieldClass, appLabelClass, appSelectClass } from '@/lib/form-styles';
@@ -120,32 +121,47 @@ export default function Asrama() {
                   {[a.jenis, a.alamat].filter(Boolean).join(' · ') || '—'}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setEditing(a);
-                  setForm({ nama: a.nama, jenis: a.jenis ?? '', alamat: a.alamat ?? '' });
-                  setShowModal(true);
-                }}
-                className="p-2 text-slate-400 hover:text-emerald-600"
-                aria-label="Edit"
-              >
-                <Edit2 className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => requestDelete(a)}
-                className="p-2 text-slate-400 hover:text-rose-600"
-                aria-label="Hapus"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
+              <ListRowActions
+                title={a.nama}
+                subtitle={[a.jenis, a.alamat].filter(Boolean).join(' · ') || undefined}
+                actions={[
+                  {
+                    id: 'edit',
+                    label: 'Ubah',
+                    icon: <Edit2 className="w-4 h-4 text-blue-600" />,
+                    onSelect: () => {
+                      setEditing(a);
+                      setForm({ nama: a.nama, jenis: a.jenis ?? '', alamat: a.alamat ?? '' });
+                      setShowModal(true);
+                    },
+                  },
+                  {
+                    id: 'delete',
+                    label: 'Hapus',
+                    icon: <Trash2 className="w-4 h-4" />,
+                    destructive: true,
+                    onSelect: () => requestDelete(a),
+                  },
+                ]}
+              />
             </div>
           ))
         )}
       </div>
 
-      <AppModal open={showModal} onClose={closeModal} title={editing ? 'Edit Asrama' : 'Tambah Asrama'}>
+      <AppModal
+        open={showModal}
+        onClose={closeModal}
+        title={editing ? 'Edit Asrama' : 'Tambah Asrama'}
+        footer={
+          <AppModalFooter>
+            <Button type="button" className="w-full" disabled={saving} onClick={() => void handleSave()}>
+              <Save className="w-4 h-4" />
+              {saving ? 'Menyimpan…' : 'Simpan'}
+            </Button>
+          </AppModalFooter>
+        }
+      >
         <div className="space-y-3">
           <div className="space-y-1">
             <label className={appLabelClass}>Nama asrama</label>
@@ -179,10 +195,6 @@ export default function Asrama() {
               onChange={(e) => setForm((f) => ({ ...f, alamat: e.target.value }))}
             />
           </div>
-          <Button type="button" className="w-full" disabled={saving} onClick={() => void handleSave()}>
-            <Save className="w-4 h-4" />
-            {saving ? 'Menyimpan…' : 'Simpan'}
-          </Button>
         </div>
       </AppModal>
 

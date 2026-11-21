@@ -1,4 +1,4 @@
-import { AppModal } from '@/components/ui/app-modal';
+import { AppModal, AppModalFooter } from '@/components/ui/app-modal';
 import { Button } from '@/components/ui/button';
 import { AlertTriangle } from 'lucide-react';
 
@@ -39,6 +39,27 @@ export function ConfirmDialog({
       sheet={false}
       elevated
       className={className}
+      footer={
+        <AppModalFooter>
+          <Button
+            type="button"
+            variant="outline"
+            className="flex-1 rounded-none"
+            disabled={loading}
+            onClick={onClose}
+          >
+            {cancelLabel}
+          </Button>
+          <Button
+            type="button"
+            className={`flex-1 rounded-none ${destructive ? 'bg-red-600 hover:bg-red-700 text-white' : ''}`}
+            disabled={loading}
+            onClick={handleConfirm}
+          >
+            {loading ? 'Memproses...' : confirmLabel}
+          </Button>
+        </AppModalFooter>
+      }
     >
       <div className="flex flex-col items-center text-center -mt-1">
         <AlertTriangle
@@ -47,19 +68,6 @@ export function ConfirmDialog({
           }`}
         />
         <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed px-1">{message}</p>
-      </div>
-      <div className="flex gap-2 mt-5">
-        <Button type="button" variant="outline" className="flex-1" disabled={loading} onClick={onClose}>
-          {cancelLabel}
-        </Button>
-        <Button
-          type="button"
-          className={`flex-1 ${destructive ? 'bg-red-600 hover:bg-red-700 text-white' : ''}`}
-          disabled={loading}
-          onClick={handleConfirm}
-        >
-          {loading ? 'Memproses...' : confirmLabel}
-        </Button>
       </div>
     </AppModal>
   );

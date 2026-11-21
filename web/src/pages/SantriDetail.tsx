@@ -27,7 +27,7 @@ import { useReloadKeyReady } from '@/hooks/use-reload-key';
 import { PageWithPullRefresh } from '@/components/page-with-pull-refresh';
 import { useAppReload } from '@/hooks/use-app-reload';
 import { EmptyState } from '@/components/ui/empty-state';
-import { AppModal } from '@/components/ui/app-modal';
+import { AppModal, AppModalFooter } from '@/components/ui/app-modal';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { BottomPicker } from '@/components/ui/bottom-picker';
 import { Button } from '@/components/ui/button';
@@ -68,10 +68,10 @@ import type { KegiatanSchedule } from '@/lib/kegiatan-schedule';
 type SantriReportId = 'persantri' | Extract<LaporanReportId, 'absensi' | 'izin' | 'pembinaan'>;
 
 const SANTRI_REPORTS: { id: SantriReportId; title: string; desc: string; icon: typeof FileText; tone: string }[] = [
-  { id: 'persantri', title: 'Laporan Santri', desc: 'Laporan lengkap santri ini (absensi, izin, pembinaan).', icon: UserRound, tone: 'text-blue-600' },
+  { id: 'persantri', title: 'Laporan Santri', desc: 'Laporan lengkap santri ini (absensi, izin, pembinaan).', icon: UserRound, tone: 'text-emerald-600' },
   { id: 'absensi', title: 'Rekap Absensi', desc: 'Riwayat kehadiran santri ini.', icon: CalendarCheck, tone: 'text-emerald-600' },
-  { id: 'izin', title: 'Rekap Perizinan', desc: 'Riwayat izin keluar santri ini.', icon: ClockAlert, tone: 'text-amber-600' },
-  { id: 'pembinaan', title: 'Rekap Pembinaan', desc: 'Catatan pembinaan/pelanggaran santri ini.', icon: ShieldAlert, tone: 'text-violet-600' },
+  { id: 'izin', title: 'Rekap Perizinan', desc: 'Riwayat izin keluar santri ini.', icon: ClockAlert, tone: 'text-emerald-600' },
+  { id: 'pembinaan', title: 'Rekap Pembinaan', desc: 'Catatan pembinaan/pelanggaran santri ini.', icon: ShieldAlert, tone: 'text-emerald-600' },
 ];
 
 const emptyForm = {
@@ -653,6 +653,31 @@ export default function SantriDetail() {
         }}
         title="Ubah Santri"
         description="Perbarui data santri"
+        footer={
+          <AppModalFooter>
+            <Button
+              type="button"
+              variant="outline"
+              className="flex-1"
+              onClick={() => {
+                setShowEditModal(false);
+                setFormData(emptyForm);
+                setWilayahForm(emptyWilayahForm());
+              }}
+            >
+              Batal
+            </Button>
+            <Button
+              type="button"
+              className="flex-1"
+              disabled={saveMutation.isPending}
+              onClick={handleSave}
+            >
+              <Save className="w-4 h-4" />
+              Simpan
+            </Button>
+          </AppModalFooter>
+        }
       >
         <SantriFormFields
           jenisAsrama={jenisAsrama}
@@ -668,29 +693,6 @@ export default function SantriDetail() {
           wilayah={wilayahForm}
           onWilayahChange={setWilayahForm}
         />
-        <div className="flex gap-2 mt-5 pb-1">
-          <Button
-            type="button"
-            variant="outline"
-            className="flex-1"
-            onClick={() => {
-              setShowEditModal(false);
-              setFormData(emptyForm);
-              setWilayahForm(emptyWilayahForm());
-            }}
-          >
-            Batal
-          </Button>
-          <Button
-            type="button"
-            className="flex-1"
-            disabled={saveMutation.isPending}
-            onClick={handleSave}
-          >
-            <Save className="w-4 h-4" />
-            Simpan
-          </Button>
-        </div>
       </AppModal>
 
       {showEditModal && (

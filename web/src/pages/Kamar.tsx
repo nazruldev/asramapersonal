@@ -7,10 +7,11 @@ import { useReloadKeyReady } from '@/hooks/use-reload-key';
 import { ListSkeleton } from '@/components/ui/list-skeleton';
 import { PageWithPullRefresh } from '@/components/page-with-pull-refresh';
 import { BedDouble, Edit2, Filter, Info, Save, Trash2 } from 'lucide-react';
+import { ListRowActions } from '@/components/list-row-actions';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useScreenAddAction } from '@/lib/screen-header-actions';
 import { ScrollNavButtons } from '@/components/scroll-nav-buttons';
-import { AppModal } from '@/components/ui/app-modal';
+import { AppModal, AppModalFooter } from '@/components/ui/app-modal';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import { useConfirmDialog } from '@/lib/use-confirm-dialog';
@@ -264,44 +265,32 @@ export default function Kamar() {
                     <KamarSlotStrip terisi={terisi} kapasitas={kapasitas} />
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    goDetail();
-                  }}
-                  className={`p-1.5 rounded-sm shrink-0 ${
-                    theme === 'dark'
-                      ? 'text-slate-300 hover:bg-slate-700'
-                      : 'text-slate-600 hover:bg-slate-100'
-                  }`}
-                  aria-label={`Info kamar ${kamar.nama}`}
-                  title="Info kamar"
-                >
-                  <Info className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleEdit(kamar);
-                  }}
-                  className={`p-1.5 rounded-sm shrink-0 ${theme === 'dark' ? 'text-blue-400 hover:bg-slate-700' : 'text-blue-600 hover:bg-blue-50'}`}
-                  title="Ubah nama"
-                >
-                  <Edit2 className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    requestDeleteKamar(kamar.id, kamar.nama);
-                  }}
-                  className={`p-1.5 rounded-sm shrink-0 ${theme === 'dark' ? 'text-red-400 hover:bg-slate-700' : 'text-red-600 hover:bg-red-50'}`}
-                  title="Hapus"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
+                <ListRowActions
+                  title={kamar.nama}
+                  subtitle={`${kamar.lantai || '-'} · ${terisi}/${kapasitas} jiwa`}
+                  ariaLabel={`Aksi kamar ${kamar.nama}`}
+                  actions={[
+                    {
+                      id: 'info',
+                      label: 'Info kamar',
+                      icon: <Info className="w-4 h-4 text-slate-600" />,
+                      onSelect: () => goDetail(),
+                    },
+                    {
+                      id: 'edit',
+                      label: 'Ubah',
+                      icon: <Edit2 className="w-4 h-4 text-blue-600" />,
+                      onSelect: () => handleEdit(kamar),
+                    },
+                    {
+                      id: 'delete',
+                      label: 'Hapus',
+                      icon: <Trash2 className="w-4 h-4" />,
+                      destructive: true,
+                      onSelect: () => requestDeleteKamar(kamar.id, kamar.nama),
+                    },
+                  ]}
+                />
               </div>
             );
           })
@@ -314,6 +303,17 @@ export default function Kamar() {
         onClose={handleCloseModal}
         title={editingKamar ? 'Ubah Kamar' : 'Tambah Kamar'}
         className={theme === 'dark' ? 'bg-slate-800 text-white' : ''}
+        footer={
+          <AppModalFooter>
+            <Button type="button" variant="outline" className="flex-1" onClick={handleCloseModal}>
+              Batal
+            </Button>
+            <Button type="button" className="flex-1" disabled={saveMutation.isPending} onClick={handleSave}>
+              <Save className="w-4 h-4" />
+              Simpan
+            </Button>
+          </AppModalFooter>
+        }
       >
         <div className="space-y-3 -mx-1">
           <div>
@@ -353,16 +353,6 @@ export default function Kamar() {
               </select>
             </div>
           </div>
-        </div>
-
-        <div className="flex gap-2 mt-5 pb-1">
-          <Button type="button" variant="outline" className="flex-1" onClick={handleCloseModal}>
-            Batal
-          </Button>
-          <Button type="button" className="flex-1" disabled={saveMutation.isPending} onClick={handleSave}>
-            <Save className="w-4 h-4" />
-            Simpan
-          </Button>
         </div>
       </AppModal>
 

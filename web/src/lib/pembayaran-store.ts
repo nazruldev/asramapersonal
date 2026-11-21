@@ -307,8 +307,9 @@ export async function getTagihan(id: string): Promise<TagihanRow | null> {
 }
 
 /**
- * Generate tagihan massal. Baris yang sudah ada (santri+jenis+periode) dilewati
- * — aman dijalankan ulang. nominalPerSantri menimpa nominal default per santri.
+ * Generate tagihan massal.
+ * Unik per (santri + jenis + periode): baris yang sudah ada DILewati (INSERT OR IGNORE),
+ * TIDAK di-update / replace — jadi terbayar & riwayat cicilan tetap aman jika dijalankan ulang.
  */
 export async function generateTagihan(
   input: GenerateTagihanInput
@@ -626,8 +627,9 @@ export async function clearAllPembayaran(): Promise<void> {
 
 // ——— Turso sync (incremental, tabel terpisah) ———
 
-const TURSO_PAYMENT_DDL = `
-  CREATE TABLE IF NOT EXISTS tagihan_jenis (
+/** Satu statement per item — Turso/libSQL tidak selalu menjalankan multi-statement. */
+const TURSO_PAYMENT_DDL: string[] = [
+  `CREATE TABLE IF NOT EXISTS tagihan_jenis (
     id TEXT PRIMARY KEY,
     nama TEXT NOT NULL,
     nominal_default INTEGER NOT NULL DEFAULT 0,
@@ -635,8 +637,8 @@ const TURSO_PAYMENT_DDL = `
     aktif INTEGER NOT NULL DEFAULT 1,
     created_at TEXT,
     updated_at TEXT
-  );
-  CREATE TABLE IF NOT EXISTS tagihan (
+  )`,
+  `CREATE TABLE IF NOT EXISTS tagihan (
     id TEXT PRIMARY KEY,
     santri_id TEXT NOT NULL,
     jenis_id TEXT,
@@ -650,8 +652,8 @@ const TURSO_PAYMENT_DDL = `
     created_at TEXT,
     updated_at TEXT,
     UNIQUE (santri_id, jenis_id, periode)
-  );
-  CREATE TABLE IF NOT EXISTS pembayaran (
+  )`,
+  `CREATE TABLE IF NOT EXISTS pembayaran (
     id TEXT PRIMARY KEY,
     tagihan_id TEXT NOT NULL,
     santri_id TEXT NOT NULL,
@@ -659,8 +661,17 @@ const TURSO_PAYMENT_DDL = `
     tanggal TEXT NOT NULL,
     catatan TEXT,
     created_at TEXT
-  );
-`;
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_tagihan_santri ON tagihan (santri_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_tagihan_periode ON tagihan (periode)`,
+  `CREATE INDEX IF NOT EXISTS idx_pembayaran_tagihan ON pembayaran (tagihan_id)`,
+];
+
+async function ensureTursoPaymentSchema(client: Client): Promise<void> {
+  for (const sql of TURSO_PAYMENT_DDL) {
+    await client.execute(sql);
+  }
+}
 
 function tursoClient(): Client | null {
   const url = (import.meta.env.VITE_TURSO_DATABASE_URL as string | undefined)?.trim();
@@ -702,7 +713,7 @@ async function execChunks(client: Client, stmts: InStatement[]): Promise<void> {
 export async function pushPembayaranToTurso(): Promise<void> {
   const client = tursoClient();
   if (!client) return;
-  await client.execute(TURSO_PAYMENT_DDL);
+  await ensureTursoPaymentSchema(client);
   const local = await readAllLocal();
   const stmts: InStatement[] = [];
   const now = nowIso();
@@ -760,7 +771,7 @@ export async function pushPembayaranToTurso(): Promise<void> {
 export async function pullPembayaranFromTurso(): Promise<boolean> {
   const client = tursoClient();
   if (!client) return false;
-  await client.execute(TURSO_PAYMENT_DDL);
+  await ensureTursoPaymentSchema(client);
   const [jenisRes, tagihanRes, transaksiRes] = await Promise.all([
     client.execute(`SELECT * FROM tagihan_jenis`),
     client.execute(`SELECT * FROM tagihan`),

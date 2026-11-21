@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState, type ReactNode } from 'react';
+import { RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useOtaUpdateCheck } from '@/lib/ota-update-check';
 
@@ -10,6 +11,7 @@ type Props = {
 };
 
 const THRESHOLD_PX = 72;
+const INDICATOR_SIZE = 36;
 
 /** Cek apakah area scroll (biasanya `<main>`) masih di atas — untuk PTR tanpa nested scroll. */
 function scrollParentOffsetTop(el: HTMLElement): number {
@@ -79,23 +81,45 @@ export function PullToRefresh({ onRefresh, children, className, disabled }: Prop
   };
 
   const progress = Math.min(1, pull / THRESHOLD_PX);
+  const visible = pull > 4 || refreshing;
+  // Posisi indikator: muncul dari atas mengikuti tarikan, menetap saat refresh.
+  const indicatorY = refreshing ? 12 : -INDICATOR_SIZE + Math.min(pull, THRESHOLD_PX) * 0.7;
+  const contentShift = refreshing ? INDICATOR_SIZE + 20 : pull * 0.5;
 
   return (
     <div
-      className="relative w-full min-h-0"
+      className="relative w-full min-h-0 overflow-hidden"
       onTouchStart={onTouchStart}
       onTouchMove={onTouchMove}
       onTouchEnd={onTouchEnd}
       onTouchCancel={onTouchEnd}
     >
+      {/* Indikator spinner melayang di atas konten (pola umum PTR). */}
       <div
-        className="flex shrink-0 items-center justify-center overflow-hidden text-xs font-medium text-slate-500 dark:text-slate-400 transition-[height] duration-150"
-        style={{ height: refreshing ? 40 : pull > 4 ? pull * 0.45 : 0 }}
+        className={cn(
+          'pointer-events-none absolute left-1/2 top-0 z-20 flex items-center justify-center rounded-full border border-slate-200 bg-white shadow-md dark:border-slate-700 dark:bg-slate-800',
+          visible ? 'opacity-100' : 'opacity-0',
+          pulling.current ? 'transition-none' : 'transition-all duration-200',
+        )}
+        style={{
+          width: INDICATOR_SIZE,
+          height: INDICATOR_SIZE,
+          transform: `translate(-50%, ${indicatorY}px) scale(${refreshing ? 1 : 0.5 + progress * 0.5})`,
+        }}
         aria-live="polite"
+        aria-hidden={!visible}
       >
-        {refreshing ? 'Memuat ulang…' : progress >= 1 ? 'Lepas untuk memuat ulang' : progress > 0.2 ? 'Tarik untuk memuat ulang' : ''}
+        <RefreshCw
+          className={cn('size-4 text-slate-600 dark:text-slate-300', refreshing && 'animate-spin')}
+          style={refreshing ? undefined : { transform: `rotate(${progress * 360}deg)` }}
+        />
       </div>
-      <div className={cn('w-full', className)}>{children}</div>
+      <div
+        className={cn('w-full', pulling.current ? 'transition-none' : 'transition-transform duration-200', className)}
+        style={{ transform: `translateY(${contentShift}px)` }}
+      >
+        {children}
+      </div>
     </div>
   );
 }

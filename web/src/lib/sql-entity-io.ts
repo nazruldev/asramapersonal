@@ -147,6 +147,7 @@ export async function sqlApplyRemoteRows(
   rows: Record<string, unknown>[]
 ): Promise<number> {
   if (!rows.length) return 0;
+  if (!shouldPersistToSqlite()) return 0;
   return withWrite(async (db) => {
     await ensureConflictTable(db);
     const cols = await tableColumns(db, table);
@@ -220,6 +221,7 @@ export async function sqlDeleteRemoteTombstone(
   rowId: string,
   deletedAt: string
 ): Promise<void> {
+  if (!shouldPersistToSqlite()) return;
   await withWrite(async (db) => {
     await db
       .run(

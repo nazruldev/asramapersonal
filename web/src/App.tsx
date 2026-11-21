@@ -98,6 +98,21 @@ function AppShell() {
     }
   }, [hydrateError]);
 
+  // Setelah hydrate: sync Turso lalu refresh store (Electron punya localStorage sendiri).
+  useEffect(() => {
+    if (!hydrated || !isTursoConfigured()) return;
+    let cancelled = false;
+    void import('@/lib/sync/turso-sync')
+      .then((m) => m.runTursoSync())
+      .then(async () => {
+        if (!cancelled) await reloadAll();
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [hydrated, reloadAll]);
+
   // Offline-first: jangan blokir UI — cukup toast sekali + badge di header.
   useEffect(() => {
     if (!isTursoConfigured()) return;

@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { useLocation } from 'react-router';
 import { Edit2, Trash2, Save, GraduationCap } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
+import { ListRowActions } from '@/components/list-row-actions';
 import { useScreenAddAction } from '@/lib/screen-header-actions';
 import { useMutation } from '@tanstack/react-query';
 import { useAppStore } from '@/store/app-store';
@@ -9,7 +10,7 @@ import { useReloadKeyReady } from '@/hooks/use-reload-key';
 import { PageWithPullRefresh } from '@/components/page-with-pull-refresh';
 import { ListSkeleton } from '@/components/ui/list-skeleton';
 import { useAppReload } from '@/hooks/use-app-reload';
-import { AppModal } from '@/components/ui/app-modal';
+import { AppModal, AppModalFooter } from '@/components/ui/app-modal';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import { appFieldClass, appLabelClass } from '@/lib/form-styles';
@@ -126,26 +127,29 @@ export default function Kelas() {
               className={cn(appCardClass, 'p-4 hover:border-emerald-300 dark:hover:border-emerald-600/50 transition-all')}
             >
               <div className="flex items-start justify-between gap-3">
-                <div className="flex-1">
+                <div className="flex-1 min-w-0">
                   <h3 className="text-sm font-bold text-slate-900 mb-1">{kelas.nama}</h3>
                   <p className="text-xs text-slate-500">Tingkat: {kelas.tingkat}</p>
                 </div>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => handleEdit(kelas)}
-                    className="p-2 rounded-sm bg-blue-50 hover:bg-blue-100 text-blue-600 transition-colors"
-                  >
-                    <Edit2 className="w-4 h-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => requestDeleteKelas(kelas)}
-                    className="p-2 rounded-sm bg-red-50 hover:bg-red-100 text-red-600 transition-colors"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
+                <ListRowActions
+                  title={kelas.nama}
+                  subtitle={`Tingkat: ${kelas.tingkat}`}
+                  actions={[
+                    {
+                      id: 'edit',
+                      label: 'Ubah',
+                      icon: <Edit2 className="w-4 h-4 text-blue-600" />,
+                      onSelect: () => handleEdit(kelas),
+                    },
+                    {
+                      id: 'delete',
+                      label: 'Hapus',
+                      icon: <Trash2 className="w-4 h-4" />,
+                      destructive: true,
+                      onSelect: () => requestDeleteKelas(kelas),
+                    },
+                  ]}
+                />
               </div>
             </div>
           ))
@@ -156,6 +160,17 @@ export default function Kelas() {
         open={showModal}
         onClose={handleCloseModal}
         title={editingKelas ? 'Ubah Kelas' : 'Tambah Kelas'}
+        footer={
+          <AppModalFooter>
+            <Button type="button" variant="outline" className="flex-1" onClick={handleCloseModal}>
+              Batal
+            </Button>
+            <Button type="button" className="flex-1" disabled={saveMutation.isPending} onClick={handleSave}>
+              <Save className="w-4 h-4" />
+              Simpan
+            </Button>
+          </AppModalFooter>
+        }
       >
         <div className="space-y-3 -mx-1">
           <div>
@@ -178,15 +193,6 @@ export default function Kelas() {
               className={appFieldClass}
             />
           </div>
-        </div>
-        <div className="flex gap-2 mt-5 pb-1">
-          <Button type="button" variant="outline" className="flex-1" onClick={handleCloseModal}>
-            Batal
-          </Button>
-          <Button type="button" className="flex-1" disabled={saveMutation.isPending} onClick={handleSave}>
-            <Save className="w-4 h-4" />
-            Simpan
-          </Button>
         </div>
       </AppModal>
 
