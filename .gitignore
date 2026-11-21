@@ -18,3 +18,4 @@ backups/
 dump-turso.mjs
 tmp-*.ts
 NUL
+*.apk

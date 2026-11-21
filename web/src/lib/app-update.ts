@@ -1,5 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import { CapacitorUpdater } from '@capgo/capacitor-updater';
+import { Directory, Filesystem } from '@capacitor/filesystem';
+import { FileOpener } from '@capacitor-community/file-opener';
 
 /**
  * Update OTA untuk Android (Capacitor) dari GitHub Releases — tanpa server.
@@ -72,6 +74,8 @@ export interface OtaUpdateInfo {
   url: string;
   /** SHA256 hex dari dist.zip — wajib untuk Capgo download. */
   checksum: string;
+  /** URL asset .apk di release — dipakai fallback bila OTA gagal (mis. checksum tidak didukung bundle lama). */
+  apkUrl: string | null;
 }
 
 /** URL stabil GitHub Releases (plugin Capgo mengikuti redirect HTTPS-nya). */
@@ -107,7 +111,13 @@ export async function checkOtaUpdateAvailable(): Promise<OtaUpdateInfo | null> {
   // Jangan resolve ke URL signed (release-assets.githubusercontent.com):
   // token-nya kedaluwarsa ~1 jam — user yang klik "Perbarui" belakangan gagal unduh.
   // Pakai URL /releases/download/... yang stabil; Capgo native mengikuti redirect.
-  return { version, url: releaseAssetUrl(release.tag_name), checksum };
+  const apkAsset = release.assets.find((a) => a.name.endsWith('.apk'));
+  return {
+    version,
+    url: releaseAssetUrl(release.tag_name),
+    checksum,
+    apkUrl: apkAsset?.browser_download_url ?? null,
+  };
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -132,6 +142,30 @@ export async function applyOtaUpdate(info: OtaUpdateInfo): Promise<void> {
     }
   }
   throw lastErr;
+}
+
+const APK_FILE_NAME = 'asrama-update.apk';
+
+/**
+ * Fallback bila OTA gagal (mis. bundle lama tanpa dukungan checksum):
+ * unduh APK utuh dari asset release lalu buka installer Android.
+ * Android akan minta izin "install aplikasi dari sumber ini" sekali.
+ */
+export async function downloadApkAndInstall(info: OtaUpdateInfo): Promise<void> {
+  if (!info.apkUrl) throw new Error('Release tidak menyertakan file APK');
+  await Filesystem.downloadFile({
+    url: info.apkUrl,
+    path: APK_FILE_NAME,
+    directory: Directory.Cache,
+  });
+  const { uri } = await Filesystem.getUri({
+    path: APK_FILE_NAME,
+    directory: Directory.Cache,
+  });
+  await FileOpener.open({
+    filePath: uri,
+    contentType: 'application/vnd.android.package-archive',
+  });
 }
 
 /** Pesan error yang bisa dibaca user untuk kegagalan OTA. */

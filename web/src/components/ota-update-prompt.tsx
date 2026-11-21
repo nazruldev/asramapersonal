@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { DownloadCloud } from 'lucide-react';
 import { AppModal, AppModalFooter } from '@/components/ui/app-modal';
 import { Button } from '@/components/ui/button';
-import { applyOtaUpdate, otaErrorMessage } from '@/lib/app-update';
+import { applyOtaUpdate, downloadApkAndInstall, otaErrorMessage } from '@/lib/app-update';
 import { useOtaUpdateCheck } from '@/lib/ota-update-check';
 import { toast } from '@/lib/toast';
 
@@ -16,6 +16,7 @@ export function OtaUpdatePrompt() {
   const check = useOtaUpdateCheck((s) => s.check);
   const dismiss = useOtaUpdateCheck((s) => s.dismiss);
   const [busy, setBusy] = useState(false);
+  const [apkFallback, setApkFallback] = useState(false);
 
   useEffect(() => {
     void check();
@@ -29,7 +30,19 @@ export function OtaUpdatePrompt() {
       // reload() membuka bundle baru — kode di bawah jarang tercapai.
     } catch (err) {
       console.warn('OTA update gagal:', err);
-      toast.error(otaErrorMessage(err));
+      // Fallback: unduh APK utuh lalu buka installer Android (seperti Flixpedia).
+      if (info.apkUrl) {
+        setApkFallback(true);
+        try {
+          await downloadApkAndInstall(info);
+          // Installer Android terbuka — user lanjutkan manual di sana.
+        } catch (apkErr) {
+          console.warn('APK fallback gagal:', apkErr);
+          toast.error(otaErrorMessage(apkErr));
+        }
+      } else {
+        toast.error(otaErrorMessage(err));
+      }
       setBusy(false);
     }
   };
@@ -61,7 +74,9 @@ export function OtaUpdatePrompt() {
         <DownloadCloud className="w-8 h-8 text-emerald-600 shrink-0" />
         <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
           {busy
-            ? 'Mengunduh update, mohon tunggu…'
+            ? apkFallback
+              ? 'OTA gagal — mengunduh APK utuh, lalu buka installer…'
+              : 'Mengunduh update, mohon tunggu…'
             : 'Perbarui aplikasi sekarang? Update berlaku langsung setelah diunduh.'}
         </p>
       </div>
