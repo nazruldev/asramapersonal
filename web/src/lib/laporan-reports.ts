@@ -1144,10 +1144,9 @@ export function buildReport(
 
 export const LAPORAN_BUNDLE_IDS: LaporanReportId[] = [
   'harian',
-  // Sementara disembunyikan: absensi, izin, kamar, wilayah
+  'izin',
+  // Sementara disembunyikan: absensi, kamar, kelas, pelanggaran, wilayah
   'pembinaan',
-  'kelas',
-  'pelanggaran',
 ];
 
 export const LAPORAN_SECTION_TITLES: Record<LaporanReportId, string> = {

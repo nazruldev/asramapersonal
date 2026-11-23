@@ -569,13 +569,7 @@ export async function shareAllLaporan(ctx: LaporanContext, now = new Date()): Pr
     }
   }
 
-  const maxWa = 3500;
-  const payload =
-    text.length > maxWa
-      ? `${text.slice(0, maxWa)}\n\n_(Terpotong — gunakan Unduh PDF untuk laporan lengkap.)_`
-      : text;
-
-  const url = `https://wa.me/?text=${encodeURIComponent(payload)}`;
+  const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
   const opened = window.open(url, '_blank', 'noopener,noreferrer');
   if (!opened) {
     toast.error('Tidak bisa membuka WhatsApp. Gunakan tombol unduh laporan.');
