@@ -133,6 +133,29 @@ export function isIzinTerlambat(item: IzinRow, now = new Date()): boolean {
   return now.getTime() > new Date(item.batas_kembali).getTime();
 }
 
+/** Sudah kembali tapi melewati batas — waktu kembali aktual > batas_kembali. */
+export function isIzinKembaliTerlambat(item: IzinRow): boolean {
+  if (item.status_kembali === 'Belum') return false;
+  if (!item.waktu_kembali_aktual || isIzinBatasBelumPasti(item.batas_kembali)) return false;
+  return new Date(item.waktu_kembali_aktual).getTime() > new Date(item.batas_kembali).getTime();
+}
+
+/** Label keterlambatan: 'Terlambat' bila lewat batas (pulang telat / masih di luar), selain itu 'Tepat waktu'. */
+export function izinKeterlambatanLabel(item: IzinRow, now = new Date()): string {
+  return isIzinTerlambat(item, now) || isIzinKembaliTerlambat(item) ? 'Terlambat' : 'Tepat waktu';
+}
+
+/**
+ * Label status laporan — status utama tetap 'Sudah kembali'/'Belum kembali',
+ * ditambah tanda '— Terlambat' bila melewati batas (4 kemungkinan).
+ */
+export function izinStatusLabel(item: IzinRow, now = new Date()): string {
+  if (item.status_kembali === 'Belum') {
+    return isIzinTerlambat(item, now) ? 'Belum kembali — Terlambat' : 'Belum kembali';
+  }
+  return isIzinKembaliTerlambat(item) ? 'Sudah kembali — Terlambat' : 'Sudah kembali';
+}
+
 function dateKeyFromIso(iso: string): string {
   return iso.slice(0, 10);
 }

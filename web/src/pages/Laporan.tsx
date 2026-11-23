@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
-import { useLocation, useNavigate } from 'react-router';
+import { useNavigate } from 'react-router';
 import {
   format,
   startOfMonth,
@@ -7,14 +7,12 @@ import {
   startOfYear,
   subDays,
 } from 'date-fns';
-import { id as localeId } from 'date-fns/locale';
 import {
   FileDown,
   Users,
   AlertTriangle,
   Share2,
   ChevronRight,
-  SlidersHorizontal,
   UserRound,
   ClipboardList,
   CalendarCheck,
@@ -25,13 +23,10 @@ import {
   GraduationCap,
   MapPin,
   Wallet,
-  Loader2,
   Eye,
 } from 'lucide-react';
 import { AppModal, AppModalFooter } from '@/components/ui/app-modal';
 import { Button } from '@/components/ui/button';
-import { HeaderNeutralButton } from '@/components/header-action-button';
-import { useScreenHeaderActions } from '@/lib/screen-header-actions';
 import { appFieldCompactClass } from '@/lib/form-styles';
 import { useAppStore, type EntityRow } from '@/store/app-store';
 import { useReloadKeyReady } from '@/hooks/use-reload-key';
@@ -47,7 +42,6 @@ import { getSessionUser, hasModuleAccess, subscribeSessionUser } from '@/lib/app
 import { toast } from '@/lib/toast';
 import {
   computeLaporanSummary,
-  periodLabel,
   type LaporanCustomRange,
   type LaporanPeriod,
   type LaporanReportId,
@@ -63,14 +57,6 @@ import {
 import { appCardClass } from '@/lib/surface-styles';
 import { cn } from '@/lib/utils';
 import { loadWilayahIndex } from '@/lib/wilayah-index';
-
-const PRESET_PERIODS: Exclude<LaporanPeriod, 'custom'>[] = [
-  'all',
-  'today',
-  '7d',
-  '30d',
-  'month',
-];
 
 const reportCardClass = cn(
   appCardClass,
@@ -112,8 +98,6 @@ const SINGLE_REPORTS: {
 ];
 
 export default function Laporan() {
-  const location = useLocation();
-  const isLaporanScreen = location.pathname === '/laporan';
   const navigate = useNavigate();
   const dashboardReady = useReloadKeyReady('dashboard');
   const santriReady = useReloadKeyReady('santri');
@@ -123,13 +107,10 @@ export default function Laporan() {
   const santri = useAppStore((s) => s.santri);
   const kamar = useAppStore((s) => s.kamar);
   const kegiatanMaster = useAppStore((s) => s.kegiatan) as KegiatanSchedule[];
-  const [period, setPeriod] = useState<LaporanPeriod>('all');
-  const [customRange, setCustomRange] = useState<LaporanCustomRange | undefined>();
-  const [filterOpen, setFilterOpen] = useState(false);
-  const [draftPeriod, setDraftPeriod] = useState<LaporanPeriod>('all');
+  // Cakupan tanggal dipilih per-laporan lewat modal — halaman ini selalu 'all'.
+  const period: LaporanPeriod = 'all';
+  const customRange: LaporanCustomRange | undefined = undefined;
   const [periodLoading, setPeriodLoading] = useState(false);
-  const [draftCustomDari, setDraftCustomDari] = useState(todayKey);
-  const [draftCustomSampai, setDraftCustomSampai] = useState(todayKey);
   const [sessionUser, setSessionUser] = useState(() => getSessionUser());
   const [periodAbsensi, setPeriodAbsensi] = useState<EntityRow[]>([]);
   const [periodIzin, setPeriodIzin] = useState<EntityRow[]>([]);
@@ -230,71 +211,6 @@ export default function Laporan() {
     void refetchPeriodData().catch(() => toast.error('Gagal memuat data laporan'));
   }, [period, customRange, loading, refetchPeriodData]);
 
-  const rekapLabel = useMemo(() => periodLabel(period, customRange), [period, customRange]);
-
-  const hasActiveRekapFilter = period !== 'all';
-
-  const openRekapFilter = useCallback(() => {
-    setDraftPeriod(period);
-    if (period === 'custom' && customRange) {
-      setDraftCustomDari(customRange.dari);
-      setDraftCustomSampai(customRange.sampai);
-    } else {
-      setDraftCustomDari(todayKey);
-      setDraftCustomSampai(todayKey);
-    }
-    setFilterOpen(true);
-  }, [period, customRange, todayKey]);
-
-  const applyRekapFilter = () => {
-    if (draftPeriod === 'custom') {
-      const dari = draftCustomDari.slice(0, 10);
-      const sampai = draftCustomSampai.slice(0, 10);
-      if (!dari || !sampai || dari > sampai) {
-        toast.error('Rentang tanggal tidak valid');
-        return;
-      }
-      setPeriod('custom');
-      setCustomRange({ dari, sampai });
-    } else {
-      setPeriod(draftPeriod);
-      setCustomRange(undefined);
-    }
-    setFilterOpen(false);
-  };
-
-  const resetRekapFilter = () => {
-    setPeriod('all');
-    setCustomRange(undefined);
-    setDraftPeriod('all');
-    setDraftCustomDari(todayKey);
-    setDraftCustomSampai(todayKey);
-    setFilterOpen(false);
-  };
-
-  const headerFilterAction = useMemo(
-    () => (
-      <HeaderNeutralButton
-        onClick={openRekapFilter}
-        label="Filter periode rekap"
-        className="relative text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:text-emerald-300 dark:hover:bg-emerald-950/40"
-      >
-        <SlidersHorizontal className="w-5 h-5" />
-        {hasActiveRekapFilter ? (
-          <span className="absolute top-0.5 right-0.5 min-w-4 h-4 px-0.5 rounded-full bg-emerald-600 text-white text-[9px] font-extrabold leading-4 text-center ring-2 ring-white dark:ring-slate-900">
-            1
-          </span>
-        ) : null}
-      </HeaderNeutralButton>
-    ),
-    [hasActiveRekapFilter, openRekapFilter]
-  );
-
-  useScreenHeaderActions(isLaporanScreen ? headerFilterAction : null, [
-    isLaporanScreen,
-    headerFilterAction,
-  ]);
-
   const ctx = useMemo(
     () => ({
       namaAsrama: settings.namaAsrama,
@@ -327,8 +243,6 @@ export default function Laporan() {
   );
 
   const summary = useMemo(() => computeLaporanSummary(ctx), [ctx]);
-
-  const todayLabel = format(new Date(), 'EEEE, d MMMM yyyy', { locale: localeId });
 
   const handleShareAll = useCallback(async () => {
     setSharingAll(true);
@@ -394,35 +308,6 @@ export default function Laporan() {
       extraRefresh={extraLaporanRefresh}
       className="space-y-5 pb-2"
     >
-      {/* Info rekap aktif */}
-      <button
-        type="button"
-        onClick={openRekapFilter}
-        className={cn(
-          appCardClass,
-          'w-full px-3.5 py-2.5 flex items-center gap-2.5 text-left hover:border-emerald-400 dark:hover:border-emerald-600 transition-colors'
-        )}
-      >
-        <SlidersHorizontal className="w-4 h-4 text-emerald-600 shrink-0" />
-        <div className="min-w-0 flex-1">
-          <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
-            Periode laporan
-          </p>
-          <p className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate flex items-center gap-1.5">
-            {rekapLabel}
-            {periodLoading && (
-              <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600" />
-            )}
-            <span className="font-medium text-slate-400">· {todayLabel}</span>
-          </p>
-        </div>
-        {hasActiveRekapFilter && (
-          <span className="shrink-0 text-[9px] font-extrabold px-1.5 py-0.5 rounded-full bg-emerald-600 text-white">
-            1 filter
-          </span>
-        )}
-      </button>
-
       {/* Pilih tipe laporan — kartu 1 kolom ke bawah */}
       <section className="space-y-2">
         <h3 className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider px-1">
@@ -882,82 +767,6 @@ export default function Laporan() {
           >
             Lanjut ({santriChecked.length} santri)
           </Button>
-        </div>
-      </AppModal>
-
-      <AppModal
-        open={filterOpen}
-        onClose={() => setFilterOpen(false)}
-        title="Periode rekap"
-        footer={
-          <AppModalFooter>
-            <Button type="button" variant="outline" className="flex-1 text-xs" onClick={resetRekapFilter}>
-              Reset filter
-            </Button>
-            <Button type="button" className="flex-1 text-xs" onClick={applyRekapFilter}>
-              Terapkan
-            </Button>
-          </AppModalFooter>
-        }
-      >
-        <div className="space-y-4 text-sm">
-          <div className="space-y-2">
-            <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">Periode cepat</p>
-            <div className="flex flex-wrap gap-1.5">
-              {PRESET_PERIODS.map((p) => {
-                const active = draftPeriod === p;
-                return (
-                  <button
-                    key={p}
-                    type="button"
-                    onClick={() => setDraftPeriod(p)}
-                    className={`px-3 py-1.5 rounded-sm text-xs font-bold transition-all ${
-                      active
-                        ? 'bg-emerald-700 text-white'
-                        : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200/70 dark:border-slate-700'
-                    }`}
-                  >
-                    {periodLabel(p)}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-          <div className="space-y-2">
-            <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">Rentang kustom</p>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <label className="text-[10px] font-semibold text-slate-500">Dari</label>
-                <input
-                  type="date"
-                  value={draftCustomDari}
-                  max={draftCustomSampai || todayKey}
-                  onChange={(e) => {
-                    setDraftPeriod('custom');
-                    setDraftCustomDari(e.target.value);
-                  }}
-                  className={`${appFieldCompactClass} w-full`}
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-[10px] font-semibold text-slate-500">Sampai</label>
-                <input
-                  type="date"
-                  value={draftCustomSampai}
-                  min={draftCustomDari}
-                  max={todayKey}
-                  onChange={(e) => {
-                    setDraftPeriod('custom');
-                    setDraftCustomSampai(e.target.value);
-                  }}
-                  className={`${appFieldCompactClass} w-full`}
-                />
-              </div>
-            </div>
-            <p className="text-[10px] text-slate-400 leading-snug">
-              Rekap pelanggaran mengikuti periode yang dipilih.
-            </p>
-          </div>
         </div>
       </AppModal>
 

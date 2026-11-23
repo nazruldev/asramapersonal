@@ -22,7 +22,13 @@ import {
   filterKegiatanForAbsensiDate,
   type KegiatanSchedule,
 } from '@/lib/kegiatan-schedule';
-import { formatIzinBatasKembali, isIzinBatasBelumPasti } from '@/lib/izin-group';
+import {
+  formatIzinBatasKembali,
+  isIzinBatasBelumPasti,
+  izinKeterlambatanLabel,
+  izinStatusLabel,
+  type IzinRow,
+} from '@/lib/izin-group';
 import {
   formatAbsensiStatusCountsInline,
   formatAbsensiStatusCountsWa,
@@ -578,8 +584,17 @@ export function buildRekapAbsensi(
 export function buildRekapIzin(ctx: LaporanContext, now = new Date(), wa?: LaporanWaBuildOptions) {
   const { label } = laporanRekapInterval(ctx.period, ctx.customRange, now);
   const rows = ctx.izin.filter((i) => inCtxPeriod(rowDate(i, 'tanggal_keluar'), ctx, now));
-  const belum = rows.filter((i) => i.status_kembali === 'Belum');
-  const sudah = rows.filter((i) => i.status_kembali === 'Sudah');
+  let belum = 0;
+  let sudah = 0;
+  let terlambat = 0;
+  const statusOf = (i: (typeof rows)[number]) =>
+    izinStatusLabel(i as unknown as IzinRow, now);
+  for (const i of rows) {
+    const st = statusOf(i);
+    if (st.startsWith('Belum')) belum += 1;
+    else sudah += 1;
+    if (st.endsWith('— Terlambat')) terlambat += 1;
+  }
   const single = ctx.santri.length === 1;
   const namaSatu = single ? String(ctx.santri[0]?.nama ?? 'Santri') : '';
 
@@ -608,12 +623,15 @@ export function buildRekapIzin(ctx: LaporanContext, now = new Date(), wa?: Lapor
     rows.length > 0
       ? rows
           .map((i, idx) => {
-            const st = i.status_kembali === 'Belum' ? '⏳ Belum kembali' : '✅ Sudah kembali';
+            const st =
+              i.status_kembali === 'Belum' ? '⏳ Belum kembali' : '✅ Sudah kembali';
+            const late = izinKeterlambatanLabel(i as unknown as IzinRow, now);
             const title = single
               ? `Izin #${idx + 1}`
               : `*${String(i.santri_nama)}* · Kamar ${String(i.santri_kamar ?? '-')}`;
             return waNumberedBlock(idx + 1, title, [
               `Status: ${st}`,
+              `Keterlambatan: ${late === 'Terlambat' ? '⚠️' : '✔️'} ${late}`,
               `Keluar: ${fmtShortDateTime(rowDate(i, 'tanggal_keluar'))}`,
               `Batas: *${formatIzinBatasKembali(rowDate(i, 'batas_kembali'))}*`,
               `Alasan: ${String(i.alasan ?? '-')}`,
@@ -627,7 +645,8 @@ export function buildRekapIzin(ctx: LaporanContext, now = new Date(), wa?: Lapor
     `📆 Periode: *${label}*`,
     ...(single ? [`👤 Santri: *${namaSatu}*`] : []),
     `📋 Total izin: *${rows.length}*`,
-    `⏳ Belum kembali: *${belum.length}* · ✅ Sudah: *${sudah.length}*`,
+    `✅ Sudah kembali: *${sudah}* · ⏳ Belum kembali: *${belum}*`,
+    `⚠️ Terlambat: *${terlambat}*`,
   ], wa);
 
   return [

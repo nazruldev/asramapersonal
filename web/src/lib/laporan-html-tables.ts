@@ -4,7 +4,12 @@
  */
 import { format, parse } from 'date-fns';
 import { id as localeId } from 'date-fns/locale';
-import { formatIzinBatasKembali } from '@/lib/izin-group';
+import {
+  formatIzinBatasKembali,
+  izinKeterlambatanLabel,
+  izinStatusLabel,
+  type IzinRow,
+} from '@/lib/izin-group';
 import { pembinaanJenisLabel } from '@/lib/pembinaan-group';
 import { formatAsalWilayah, hasAsalWilayah, type SantriAsalWilayahFields } from '@/lib/wilayah-types';
 import {
@@ -351,8 +356,16 @@ function resolveSantriLabel(
 }
 
 /** Akumulasi izin per santri (1 baris = 1 orang). */
-function buildIzinPerSantriSummary(ctx: LaporanContext, rows: EntityRow[]): string {
-  type Acc = { id: string; nama: string; kamar: string; total: number; belum: number; sudah: number };
+function buildIzinPerSantriSummary(ctx: LaporanContext, rows: EntityRow[], now: Date): string {
+  type Acc = {
+    id: string;
+    nama: string;
+    kamar: string;
+    total: number;
+    belum: number;
+    sudah: number;
+    terlambat: number;
+  };
   const map = new Map<string, Acc>();
   for (const i of rows) {
     const id = String(i.santri_id ?? i.santri_nama ?? '');
@@ -366,16 +379,19 @@ function buildIzinPerSantriSummary(ctx: LaporanContext, rows: EntityRow[]): stri
       total: 0,
       belum: 0,
       sudah: 0,
+      terlambat: 0,
     };
     cur.total += 1;
-    if (i.status_kembali === 'Belum') cur.belum += 1;
+    const st = izinStatusLabel(i as unknown as IzinRow, now);
+    if (st.startsWith('Belum')) cur.belum += 1;
     else cur.sudah += 1;
+    if (st.endsWith('— Terlambat')) cur.terlambat += 1;
     map.set(key, cur);
   }
   const ranked = [...map.values()].sort((a, b) => b.total - a.total || a.nama.localeCompare(b.nama, 'id'));
   return htmlTable(
-    ['No', 'Nama', 'Kamar', 'Total izin', 'Belum kembali', 'Sudah kembali'],
-    ranked.map((r, idx) => [idx + 1, r.nama, r.kamar, r.total, r.belum, r.sudah]),
+    ['No', 'Nama', 'Kamar', 'Total izin', 'Belum kembali', 'Sudah kembali', 'Terlambat'],
+    ranked.map((r, idx) => [idx + 1, r.nama, r.kamar, r.total, r.belum, r.sudah, r.terlambat]),
     'Tidak ada catatan izin'
   );
 }
@@ -424,19 +440,28 @@ function buildIzinHtml(ctx: LaporanContext, now: Date): string {
       (a, b) =>
         dateSortKey(rowDate(b, 'tanggal_keluar')) - dateSortKey(rowDate(a, 'tanggal_keluar'))
     );
-  const belum = rows.filter((i) => i.status_kembali === 'Belum').length;
-  const sudah = rows.filter((i) => i.status_kembali === 'Sudah').length;
+  let belum = 0;
+  let sudah = 0;
+  let terlambat = 0;
+  for (const i of rows) {
+    const st = izinStatusLabel(i as unknown as IzinRow, now);
+    if (st.endsWith('— Terlambat')) terlambat += 1;
+    if (st.startsWith('Belum')) belum += 1;
+    else sudah += 1;
+  }
   const single = isSingleSantriCtx(ctx);
   const namaSatu = single ? String(ctx.santri[0]?.nama ?? 'Santri') : '';
 
   // Satu santri → semua baris izinnya. Semua santri → akumulasi dulu, lalu rincian.
   const detailHeaders = single
-    ? ['No', 'Status', 'Keluar', 'Batas', 'Alasan', 'Penjemput']
-    : ['No', 'Nama', 'Kamar', 'Status', 'Keluar', 'Batas', 'Alasan', 'Penjemput'];
+    ? ['No', 'Status', 'Keterlambatan', 'Keluar', 'Batas', 'Alasan', 'Penjemput']
+    : ['No', 'Nama', 'Kamar', 'Status', 'Keterlambatan', 'Keluar', 'Batas', 'Alasan', 'Penjemput'];
   const detailRows = rows.map((i, idx) => {
-    const status = i.status_kembali === 'Belum' ? 'Belum kembali' : 'Sudah kembali';
+    const row = i as unknown as IzinRow;
+    const status = row.status_kembali === 'Belum' ? 'Belum kembali' : 'Sudah kembali';
     const common = [
       status,
+      izinKeterlambatanLabel(row, now),
       fmtShortDateTime(rowDate(i, 'tanggal_keluar')),
       formatIzinBatasKembali(rowDate(i, 'batas_kembali')),
       String(i.alasan ?? '—'),
@@ -455,12 +480,13 @@ function buildIzinHtml(ctx: LaporanContext, now: Date): string {
     kvTable([
       ...(single ? [['Santri', namaSatu] as [string, string | number]] : []),
       ['Total izin', rows.length],
-      ['Belum kembali', belum],
       ['Sudah kembali', sudah],
+      ['Belum kembali', belum],
+      ['Terlambat', terlambat],
     ]),
     single
       ? ''
-      : `${h3('Akumulasi per santri (1 baris = 1 orang)')}${buildIzinPerSantriSummary(ctx, rows)}`,
+      : `${h3('Akumulasi per santri (1 baris = 1 orang)')}${buildIzinPerSantriSummary(ctx, rows, now)}`,
     h3(single ? `Semua izin ${namaSatu} (${rows.length})` : `Rincian setiap izin (${rows.length})`),
     htmlTable(detailHeaders, detailRows, 'Tidak ada catatan izin'),
   ].join('');
@@ -819,11 +845,12 @@ export function buildSingleSantriHtml(
     ),
     h3(`Perizinan (${izin.length}) — ${periode}`),
     htmlTable(
-      ['Keluar', 'Batas', 'Status', 'Alasan', 'Penjemput'],
+      ['Keluar', 'Batas', 'Status', 'Keterlambatan', 'Alasan', 'Penjemput'],
       izin.map((i) => [
         fmtShortDateTime(rowDate(i, 'tanggal_keluar')),
         formatIzinBatasKembali(rowDate(i, 'batas_kembali')),
         i.status_kembali === 'Belum' ? 'Belum kembali' : 'Sudah kembali',
+        izinKeterlambatanLabel(i as unknown as IzinRow, now),
         String(i.alasan ?? '—'),
         String(i.penjemput ?? '—'),
       ]),
