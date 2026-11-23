@@ -31,7 +31,7 @@ import { cn } from '@/lib/utils';
 import type { OnboardingCompleteBody } from '@/lib/onboarding-api';
 
 const STEPS = [
-  { id: 1, title: 'Profil asrama', icon: Building2 },
+  { id: 1, title: 'Profil lembaga', icon: Building2 },
   { id: 2, title: 'Keamanan', icon: KeyRound },
   { id: 3, title: 'Kelas', icon: GraduationCap },
 ] as const;
@@ -83,7 +83,7 @@ export function AppSetupWizard({ onComplete }: Props) {
   const goNext = () => {
     if (step === 1) {
       if (!namaAsrama.trim()) {
-        toast.error('Masukkan nama asrama');
+        toast.error('Masukkan nama sekolah / pondok');
         return;
       }
       setStep(2);
@@ -160,10 +160,10 @@ export function AppSetupWizard({ onComplete }: Props) {
         {step === 1 ? (
           <div className="space-y-3">
             <div className="space-y-1.5">
-              <Label htmlFor="setup-nama" className="text-xs">Nama asrama</Label>
+              <Label htmlFor="setup-nama" className="text-xs">Nama sekolah / pondok</Label>
               <Input
                 id="setup-nama"
-                placeholder="Contoh: Asrama Putra Al-Hikmah"
+                placeholder="Contoh: Pondok Pesantren Al-Khairaat"
                 value={namaAsrama}
                 onChange={(e) => setNamaAsrama(e.target.value)}
                 autoFocus

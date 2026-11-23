@@ -1,5 +1,5 @@
 /**
- * Cek OTA update secara global — dipakai prompt saat start & saat pull-to-refresh.
+ * Cek OTA update secara global — dipakai prompt saat start & saat refresh manual.
  * Throttle agar tidak spam GitHub API tiap refresh.
  */
 import { create } from 'zustand';

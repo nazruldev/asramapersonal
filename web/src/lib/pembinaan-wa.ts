@@ -23,7 +23,6 @@ export function buildPelanggaranWaliWhatsAppMessage(input: {
   akumulasiHitungan: number;
   tierLabel?: string | null;
   totalPelanggaran: number;
-  totalTeguran: number;
   pelanggaranRecords: PembinaanRow[];
 }): string {
   const {
@@ -35,7 +34,6 @@ export function buildPelanggaranWaliWhatsAppMessage(input: {
     akumulasiHitungan,
     tierLabel,
     totalPelanggaran,
-    totalTeguran,
     pelanggaranRecords,
   } = input;
 
@@ -52,9 +50,8 @@ export function buildPelanggaranWaliWhatsAppMessage(input: {
     `• Kamar: ${kamar || '-'}`,
     `• Ketua kamar: ${ketuaKamar || '-'}`,
     ``,
-    `*Ringkasan Catatan BK*`,
-    `• Pelanggaran: *${totalPelanggaran}* catatan`,
-    `• Teguran: ${totalTeguran} catatan`,
+    `*Ringkasan catatan pelanggaran*`,
+    `• Total: *${totalPelanggaran}* catatan`,
     `• Akumulasi hitungan aktif: *${akumulasiHitungan}x*${tierLabel ? ` (${tierLabel})` : ''}`,
     ``,
   ].filter(Boolean);

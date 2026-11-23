@@ -15,11 +15,16 @@ import { cn } from '@/lib/utils';
 import { useConfirmDialog } from '@/lib/use-confirm-dialog';
 import { toast } from '@/lib/toast';
 import { JENIS_ASRAMA_OPTIONS, type Asrama } from '@/lib/app-settings';
+import { notifyAsramaListChanged } from '@/lib/asrama-list-events';
+import { getSessionUser, setActiveAsramaId } from '@/lib/app-auth';
+import { useAppStore } from '@/store/app-store';
 
 export default function Asrama() {
   const location = useLocation();
   const isScreen = location.pathname === '/master/asrama';
   const confirmDialog = useConfirmDialog();
+  const reload = useAppStore((s) => s.reload);
+  const reloadAll = useAppStore((s) => s.reloadAll);
 
   const [items, setItems] = useState<Asrama[] | null>(null);
   const [showModal, setShowModal] = useState(false);
@@ -41,6 +46,23 @@ export default function Asrama() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const afterAsramaMutation = useCallback(
+    async (opts?: { deletedId?: string }) => {
+      notifyAsramaListChanged();
+      await reload('settings');
+      if (opts?.deletedId && getSessionUser()?.activeAsramaId === opts.deletedId) {
+        try {
+          await setActiveAsramaId(null);
+          await reloadAll();
+        } catch {
+          /* session sudah dibersihkan; sync gagal tidak batalkan hapus */
+        }
+      }
+      await load();
+    },
+    [load, reload, reloadAll]
+  );
 
   const closeModal = () => {
     setShowModal(false);
@@ -67,7 +89,7 @@ export default function Asrama() {
       }
       toast.success(editing ? 'Asrama diperbarui' : 'Asrama ditambahkan');
       closeModal();
-      void load();
+      await afterAsramaMutation();
     } finally {
       setSaving(false);
     }
@@ -86,7 +108,7 @@ export default function Asrama() {
             return;
           }
           toast.success('Asrama dihapus');
-          void load();
+          await afterAsramaMutation({ deletedId: item.id });
         } catch {
           toast.error('Gagal menghapus asrama');
         }

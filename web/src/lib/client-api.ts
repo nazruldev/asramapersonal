@@ -307,6 +307,53 @@ function isTursoAuthority(): boolean {
   return Boolean(url && token);
 }
 
+/**
+ * Direct Turso: isi working copy dari cloud sebelum handler jalan.
+ * db RAM bukan sumber kebenaran — hanya salinan kerja request.
+ */
+async function hydrateWorkingCopyFromTurso(pathname: string, method: string): Promise<void> {
+  if (!isTursoAuthority()) return;
+  const { hydrateModeForPath, loadLiveSnapshot } = await import('@/lib/turso/repos/live');
+  const { loadSettingsFromTurso } = await import('@/lib/turso/repos/settings');
+  const mode = hydrateModeForPath(pathname, method);
+
+  if (mode === 'settings') {
+    db.settings = await loadSettingsFromTurso();
+    ensureAccountsSeeded(db.settings, newId);
+    if (db.settings.setupSelesai === true) markOnboardingComplete();
+    bumpDataUpdatedAt();
+    return;
+  }
+
+  const snap = await loadLiveSnapshot();
+  const merged = normalizeDb({
+    santri: snap.santri,
+    kamar: snap.kamar,
+    kelas: snap.kelas,
+    kegiatan: snap.kegiatan,
+    penjadwalan: snap.penjadwalan,
+    penjadwalanPreset: snap.penjadwalanPreset,
+    absensi: snap.absensi,
+    izin: snap.izin,
+    pembinaan: snap.pembinaan,
+    riwayat_kamar: snap.riwayat_kamar,
+    settings: mode === 'all' ? snap.settings : db.settings,
+  } as Record<string, unknown>);
+  db = merged;
+  afterDbHydrated();
+}
+
+/** Persist settings langsung ke Turso (bukan lewat sync snapshot). */
+async function persistSettingsToCloud(): Promise<void> {
+  if (isTursoAuthority()) {
+    const { saveSettingsToTurso } = await import('@/lib/turso/repos/settings');
+    await saveSettingsToTurso(db.settings);
+    bumpDataUpdatedAt();
+    return;
+  }
+  await saveDb(SQL_SCOPE.settings);
+}
+
 const loadDbAsync = async () => {
   try {
     // Full-online Turso: jangan muat localStorage/SQLite sebagai sumber kebenaran.
@@ -460,11 +507,35 @@ export function ensureClientApiDbLoaded(): Promise<void> {
   return dbLoadPromise;
 }
 
-/** Terapkan settings dari Turso Cloud ke RAM + persist lokal. */
+/**
+ * Epoch settings lokal: naik setiap mutasi asrama/pengguna/settings.
+ * Dipakai agar pull Turso tidak menimpa create/update yang belum sempat kebaca cloud.
+ */
+let settingsLocalEpoch = 0;
+
+export function touchLocalSettings(): void {
+  settingsLocalEpoch += 1;
+}
+
+function shouldPreserveLocalSettings(epochAtPullStart: number): boolean {
+  return settingsLocalEpoch !== epochAtPullStart;
+}
+
 /** Terapkan settings dari cloud ke RAM saja (tanpa push ulang ke Turso). */
 export async function applySettingsFromCloud(settings: AppSettings): Promise<void> {
   await ensureClientApiDbLoaded();
+  const epochAtStart = settingsLocalEpoch;
+  const localSettings = db.settings;
+  if (shouldPreserveLocalSettings(epochAtStart)) {
+    // Ada mutasi lokal selama/sesudah pull disiapkan — jangan timpa.
+    bumpDataUpdatedAt();
+    return;
+  }
   db.settings = mergeAppSettings({ ...settings, setupSelesai: true });
+  // Jika mutasi lokal datang tepat setelah assign, kembalikan lokal.
+  if (shouldPreserveLocalSettings(epochAtStart)) {
+    db.settings = localSettings;
+  }
   markOnboardingComplete();
   // Full-online: jangan saveDb di sini — bootstrap baru saja pull; hindari double-push.
   bumpDataUpdatedAt();
@@ -493,15 +564,26 @@ export async function importSyncSnapshot(
   remoteUpdatedAt: string
 ): Promise<void> {
   await ensureClientApiDbLoaded();
+  const epochAtStart = settingsLocalEpoch;
+  const localSettings = db.settings;
   const normalized = normalizeDb(snapshot);
   if (isTursoAuthority()) {
     db = normalized;
+    if (shouldPreserveLocalSettings(epochAtStart)) {
+      db.settings = localSettings;
+    }
     afterDbHydrated();
   } else if (shouldPersistToSqlite()) {
     await replaceOfflineDbSnapshot(normalized);
     applyRelationalSnapshot(normalized);
+    if (shouldPreserveLocalSettings(epochAtStart)) {
+      db.settings = localSettings;
+    }
   } else {
     db = normalized;
+    if (shouldPreserveLocalSettings(epochAtStart)) {
+      db.settings = localSettings;
+    }
     afterDbHydrated();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
   }
@@ -615,14 +697,20 @@ function isFullEntityFlush(tables?: SqlEntity[]): boolean {
   return SQL_ENTITIES_ALL.every((e) => tables.includes(e));
 }
 
-/** Remote: upsert hanya baris/entity di partial. */
+/** Remote: upsert langsung ke tabel Turso (bukan lewat sync SoT). */
 async function pushScopedTursoNow(
   partial: Partial<ReturnType<typeof snapshotFromMemory>>,
   reason: string
 ): Promise<void> {
   if (!isTursoAuthority()) return;
-  const { pushScopedToTurso } = await import('@/lib/sync/turso-sync');
-  await pushScopedToTurso(partial, reason);
+  const { upsertLiveSnapshot } = await import('@/lib/turso/repos/live');
+  await upsertLiveSnapshot(partial);
+  // Signal device lain untuk refetch (bukan apply snapshot ke RAM).
+  void import('@/lib/sync/ably-realtime')
+    .then((m) => m.publishSyncSignal(reason))
+    .catch(() => {
+      /* optional */
+    });
 }
 
 /** Remote: terapkan tombstone lokal ke Turso (hapus baris). */
@@ -695,13 +783,24 @@ const saveDb = (tables?: SqlEntity[], opts?: PersistOpts): Promise<void> => {
   const task = persistChain.then(async () => {
     await persistDbAsync(tables, opts);
     if (!isTursoAuthority()) return;
-    // Impor / wipe / seed: full push. CRUD harian: scoped entity saja.
+    // Settings selalu tembak app_settings langsung.
+    if (!tables || tables.includes('settings')) {
+      const { saveSettingsToTurso } = await import('@/lib/turso/repos/settings');
+      await saveSettingsToTurso(db.settings);
+    }
+    // Impor / wipe / seed: full entity upsert. CRUD harian: scoped.
     if (isFullEntityFlush(tables)) {
-      const { awaitCloudPushAfterSave } = await import('@/lib/sync/turso-sync');
-      await awaitCloudPushAfterSave();
+      const { upsertLiveSnapshot } = await import('@/lib/turso/repos/live');
+      await upsertLiveSnapshot(snapshotFromMemory());
+      void import('@/lib/sync/ably-realtime')
+        .then((m) => m.publishSyncSignal('full'))
+        .catch(() => undefined);
       return;
     }
-    await pushScopedTursoNow(buildPartialFromTables(tables!), tables!.join('+'));
+    const entityTables = (tables ?? []).filter((t) => t !== 'settings');
+    if (entityTables.length) {
+      await pushScopedTursoNow(buildPartialFromTables(entityTables), entityTables.join('+'));
+    }
   });
   persistChain = task.catch((err) => {
     console.error('Failed to save to Turso / DB:', err);
@@ -927,14 +1026,18 @@ type ApiResult = { status: number; body: unknown };
 
 function sqliteErrorToApiResult(err: unknown): ApiResult {
   const message = mapSqliteErrorToUserMessage(err);
-  const status =
-    err instanceof SqlForeignKeyError || /FOREIGN KEY|foreign key/i.test(message)
+  const offline =
+    /tidak ada internet|wajib online|offline|navigator\.onLine/i.test(message) ||
+    (err instanceof Error && /tidak ada internet|wajib online|offline/i.test(err.message));
+  const status = offline
+    ? 503
+    : err instanceof SqlForeignKeyError || /FOREIGN KEY|foreign key/i.test(message)
       ? 409
       : /database is locked|cannot perform/i.test(message)
         ? 503
         : 500;
   if (status === 500) console.error('API / SQLite:', err);
-  return { status, body: { error: message } };
+  return { status, body: { error: offline ? 'Tidak ada internet. Aplikasi wajib online ke Turso.' : message } };
 }
 
 async function dispatchApi(
@@ -958,6 +1061,10 @@ async function dispatchApiCore(
 ): Promise<ApiResult> {
   if (shouldUseClientApiStore()) {
     await ensureClientApiDbLoaded();
+  }
+  // Direct Turso: setiap request baca live dari cloud (internet wajib).
+  if (isTursoAuthority()) {
+    await hydrateWorkingCopyFromTurso(pathname, method);
   }
   const m = method.toUpperCase();
 
@@ -989,7 +1096,7 @@ async function dispatchApiCore(
       String(body.currentPassword ?? ''),
       String(body.newPassword ?? '')
     );
-    if (result.status === 200) await saveDb(SQL_SCOPE.settings);
+    if (result.status === 200) await persistSettingsToCloud();
     return result;
   }
 
@@ -1000,7 +1107,7 @@ async function dispatchApiCore(
   if (pathname === '/api/auth/reset-password' && m === 'POST' && body) {
     const answers = (body.answers as { questionId: SecurityQuestionId; answer: string }[]) ?? [];
     const result = handleAuthResetPassword(db.settings, answers);
-    if (result.status === 200) await saveDb(SQL_SCOPE.settings);
+    if (result.status === 200) await persistSettingsToCloud();
     return result;
   }
 
@@ -1012,7 +1119,7 @@ async function dispatchApiCore(
       String(body.currentPassword ?? ''),
       questions
     );
-    if (result.status === 200) await saveDb(SQL_SCOPE.settings);
+    if (result.status === 200) await persistSettingsToCloud();
     return result;
   }
 
@@ -1035,7 +1142,7 @@ async function dispatchApiCore(
       String(body.currentPin ?? ''),
       String(body.newPin ?? '')
     );
-    if (result.status === 200) await saveDb(SQL_SCOPE.settings);
+    if (result.status === 200) await persistSettingsToCloud();
     return result;
   }
 
@@ -1043,8 +1150,9 @@ async function dispatchApiCore(
     if (m === 'GET') return handleAsramaList(db.settings);
     if (m === 'POST' && body) {
       if (!isSuperAdminSession()) return { status: 403, body: { error: 'Hanya super admin' } };
+      touchLocalSettings();
       const result = handleAsramaCreate(db.settings, body, newId);
-      if (result.status === 200) await saveDb(SQL_SCOPE.settings);
+      if (result.status === 200) await persistSettingsToCloud();
       return result;
     }
   }
@@ -1054,15 +1162,37 @@ async function dispatchApiCore(
     if (!isSuperAdminSession()) return { status: 403, body: { error: 'Hanya super admin' } };
     const id = asramaIdMatch[1];
     if (m === 'PUT' && body) {
+      touchLocalSettings();
       const result = handleAsramaUpdate(db.settings, id, body);
-      if (result.status === 200) await saveDb(SQL_SCOPE.settings);
+      if (result.status === 200) await persistSettingsToCloud();
       return result;
     }
     if (m === 'DELETE') {
+      touchLocalSettings();
+      // Cek pemakaian asrama langsung ke Turso (entities live).
+      await hydrateWorkingCopyFromTurso('/api/santri', 'GET');
+      const kamarIds = new Set(
+        db.kamar.filter((k) => String(k.asrama_id ?? '') === id).map((k) => String(k.id))
+      );
+      const kamarNames = new Set(
+        db.kamar
+          .filter((k) => String(k.asrama_id ?? '') === id)
+          .map((k) => String(k.nama ?? ''))
+          .filter(Boolean)
+      );
       const inUse =
-        db.santri.some((s) => s.asrama_id === id) || db.kamar.some((k) => k.asrama_id === id);
+        db.santri.some((s) => String(s.asrama_id ?? '') === id) ||
+        db.kamar.some((k) => String(k.asrama_id ?? '') === id) ||
+        db.santri.some(
+          (s) =>
+            kamarIds.has(String(s.kamar_id ?? '')) ||
+            kamarNames.has(String(s.kamar ?? ''))
+        ) ||
+        db.settings.pengguna.some(
+          (p) => p.role === 'pengawas' && p.asramaIds.length === 1 && p.asramaIds[0] === id
+        );
       const result = handleAsramaDelete(db.settings, id, inUse);
-      if (result.status === 200) await saveDb(SQL_SCOPE.settings);
+      if (result.status === 200) await persistSettingsToCloud();
       return result;
     }
   }
@@ -1071,8 +1201,9 @@ async function dispatchApiCore(
     if (!isSuperAdminSession()) return { status: 403, body: { error: 'Hanya super admin' } };
     if (m === 'GET') return handlePenggunaList(db.settings);
     if (m === 'POST' && body) {
+      touchLocalSettings();
       const result = handlePenggunaCreate(db.settings, body, newId);
-      if (result.status === 200) await saveDb(SQL_SCOPE.settings);
+      if (result.status === 200) await persistSettingsToCloud();
       return result;
     }
   }
@@ -1080,12 +1211,13 @@ async function dispatchApiCore(
   const penggunaResetMatch = pathname.match(/^\/api\/pengguna\/([^/]+)\/reset-pin$/);
   if (penggunaResetMatch && m === 'POST' && body) {
     if (!isSuperAdminSession()) return { status: 403, body: { error: 'Hanya super admin' } };
+    touchLocalSettings();
     const result = handlePenggunaResetPin(
       db.settings,
       penggunaResetMatch[1],
       String(body.pin ?? '')
     );
-    if (result.status === 200) await saveDb(SQL_SCOPE.settings);
+    if (result.status === 200) await persistSettingsToCloud();
     return result;
   }
 
@@ -1094,13 +1226,15 @@ async function dispatchApiCore(
     if (!isSuperAdminSession()) return { status: 403, body: { error: 'Hanya super admin' } };
     const id = penggunaIdMatch[1];
     if (m === 'PUT' && body) {
+      touchLocalSettings();
       const result = handlePenggunaUpdate(db.settings, id, body);
-      if (result.status === 200) await saveDb(SQL_SCOPE.settings);
+      if (result.status === 200) await persistSettingsToCloud();
       return result;
     }
     if (m === 'DELETE') {
+      touchLocalSettings();
       const result = handlePenggunaDelete(db.settings, id);
-      if (result.status === 200) await saveDb(SQL_SCOPE.settings);
+      if (result.status === 200) await persistSettingsToCloud();
       return result;
     }
   }
@@ -1112,12 +1246,8 @@ async function dispatchApiCore(
       () => crypto.randomUUID()
     );
     if (result.status === 200) {
-      await saveDb([...SQL_SCOPE.settings, ...SQL_SCOPE.kelas]);
-      void import('@/lib/sync/cloud-bootstrap')
-        .then(({ isTursoConfigured, pushSettingsToTurso }) => {
-          if (isTursoConfigured()) return pushSettingsToTurso(db.settings);
-        })
-        .catch((err) => console.warn('Push settings ke Turso gagal:', err));
+      await persistSettingsToCloud();
+      await saveDb(SQL_SCOPE.kelas);
     }
     return result;
   }
@@ -1126,12 +1256,7 @@ async function dispatchApiCore(
     if (m === 'GET') return { status: 200, body: mergeAppSettings(db.settings) };
     if (m === 'PUT') {
       db.settings = mergeAppSettings({ ...db.settings, ...(body ?? {}) });
-      await saveDb(SQL_SCOPE.settings);
-      void import('@/lib/sync/cloud-bootstrap')
-        .then(({ isTursoConfigured, pushSettingsToTurso }) => {
-          if (isTursoConfigured()) return pushSettingsToTurso(db.settings);
-        })
-        .catch((err) => console.warn('Push settings ke Turso gagal:', err));
+      await persistSettingsToCloud();
       return { status: 200, body: db.settings };
     }
   }
@@ -1411,13 +1536,16 @@ async function dispatchApiCore(
 
   const santriIdMatch = pathname.match(/^\/api\/santri\/([^/]+)$/);
   if (santriIdMatch) {
-    const id = santriIdMatch[1];
+    const id = normalizeSantriId(santriIdMatch[1]);
+    if ((m === 'PUT' || m === 'DELETE') && !scopedSantriIds().has(id)) {
+      return { status: 403, body: { error: 'Santri di luar lingkup tugas akun' } };
+    }
     if (m === 'PUT' && body) {
-      let index = db.santri.findIndex((s) => s.id === id);
+      let index = db.santri.findIndex((s) => String(s.id) === id);
       if (index === -1) {
         const loaded = await ensureSantriInMemory(id);
         if (!loaded) return { status: 404, body: { error: 'Santri tidak ditemukan' } };
-        index = db.santri.findIndex((s) => s.id === id);
+        index = db.santri.findIndex((s) => String(s.id) === id);
       }
       const riBefore = db.riwayat_kamar.length;
       const payload = omitPoin(body);
@@ -1498,27 +1626,26 @@ async function dispatchApiCore(
       return { status: 200, body: responseBody };
     }
     if (m === 'DELETE') {
-      const normalizedId = normalizeSantriId(id);
-      let index = db.santri.findIndex((s) => String(s.id) === normalizedId);
+      let index = db.santri.findIndex((s) => String(s.id) === id);
       let rowForPurge: { id: string; nama?: string; kamar?: string } | null =
         index >= 0 ? (db.santri[index] as { id: string; nama?: string; kamar?: string }) : null;
 
       if (index === -1 && shouldPersistToSqlite()) {
-        const exists = await sqlGetSantriById(normalizedId);
+        const exists = await sqlGetSantriById(id);
         if (!exists) return { status: 404, body: { error: 'Santri tidak ditemukan' } };
         rowForPurge = exists as { id: string; nama?: string; kamar?: string };
       } else if (index === -1) {
         return { status: 404, body: { error: 'Santri tidak ditemukan' } };
       }
 
-      purgeSantriRelatedData(db, normalizedId, rowForPurge);
-      await purgePembayaranForSantri(normalizedId);
+      purgeSantriRelatedData(db, id, rowForPurge);
+      await purgePembayaranForSantri(id);
       if (shouldPersistToSqlite()) {
-        await sqlDeleteSantriCascade(normalizedId);
+        await sqlDeleteSantriCascade(id);
         db.penjadwalan = (await sqlListPenjadwalanRaw()) as Record<string, unknown>[];
         await saveDb(['kamar']);
       } else {
-        await recordSyncTombstone('santri', normalizedId);
+        await recordSyncTombstone('santri', id);
         await flushTombstonesTursoNow('santri');
       }
       return { status: 200, body: { success: true } };
@@ -1558,11 +1685,14 @@ async function dispatchApiCore(
   }
 
   if (pathname === '/api/kamar' && m === 'POST' && body) {
+    const nama = String(body.nama ?? '').trim();
+    if (!nama) return { status: 400, body: { error: 'Nama kamar wajib diisi' } };
     const nowIso = new Date().toISOString();
     const newKamar = {
       id: newId(),
       asrama_id: activeAsramaId() ?? defaultAsramaId(db.settings),
       ...body,
+      nama,
       kapasitas: Number(body.kapasitas) || 4,
       fasilitas: Array.isArray(body.fasilitas) ? body.fasilitas : [],
       updated_at: nowIso,
@@ -1704,16 +1834,20 @@ async function dispatchApiCore(
       let index = db.kamar.findIndex((k) => k.id === id);
       if (index === -1) return { status: 404, body: { error: 'Kamar tidak ditemukan' } };
       const oldNama = db.kamar[index].nama;
+      const nextNama =
+        body.nama !== undefined ? String(body.nama).trim() : String(oldNama ?? '');
+      if (!nextNama) return { status: 400, body: { error: 'Nama kamar wajib diisi' } };
       const nowIso = new Date().toISOString();
       db.kamar[index] = {
         ...db.kamar[index],
         ...body,
+        nama: nextNama,
         kapasitas: Number(body.kapasitas ?? db.kamar[index].kapasitas) || 4,
         updated_at: nowIso,
       };
-      if (body.nama && body.nama !== oldNama) {
+      if (nextNama !== oldNama) {
         db.santri.forEach((s) => {
-          if (s.kamar === oldNama) s.kamar = body.nama;
+          if (s.kamar === oldNama) s.kamar = nextNama;
         });
       }
       if (index > 0) {
@@ -1724,9 +1858,9 @@ async function dispatchApiCore(
       const updated = db.kamar[index];
       if (shouldPersistToSqlite()) {
         await sqlUpsertKamarRow(updated as Record<string, unknown>);
-        if (body.nama && body.nama !== oldNama) {
+        if (nextNama !== oldNama) {
           for (const s of db.santri) {
-            if (s.kamar === body.nama) {
+            if (s.kamar === nextNama) {
               await sqlUpsertSantriRow(s as Record<string, unknown>, db.kamar);
             }
           }
@@ -1771,10 +1905,12 @@ async function dispatchApiCore(
       return { status: 200, body: db.kelas };
     }
     if (m === 'POST' && body) {
+      const nama = String(body.nama ?? '').trim();
+      if (!nama) return { status: 400, body: { error: 'Nama kelas wajib diisi' } };
       const item: KelasRecord = {
         id: newId(),
-        nama: String(body.nama ?? '').trim(),
-        tingkat: String(body.tingkat ?? ''),
+        nama,
+        tingkat: String(body.tingkat ?? '').trim(),
       };
       db.kelas.push(item);
       await saveDb(SQL_SCOPE.kelas);
@@ -1788,11 +1924,35 @@ async function dispatchApiCore(
     if (m === 'PUT' && body) {
       const index = db.kelas.findIndex((k) => k.id === id);
       if (index === -1) return { status: 404, body: { error: 'Kelas tidak ditemukan' } };
-      db.kelas[index] = { ...db.kelas[index], ...body };
+      const nama =
+        body.nama !== undefined ? String(body.nama).trim() : String(db.kelas[index].nama ?? '');
+      if (!nama) return { status: 400, body: { error: 'Nama kelas wajib diisi' } };
+      db.kelas[index] = {
+        ...db.kelas[index],
+        ...body,
+        nama,
+        tingkat:
+          body.tingkat !== undefined
+            ? String(body.tingkat).trim()
+            : String(db.kelas[index].tingkat ?? ''),
+      };
       await saveDb(SQL_SCOPE.kelas);
       return { status: 200, body: db.kelas[index] };
     }
     if (m === 'DELETE') {
+      const kelas = db.kelas.find((k) => k.id === id);
+      if (!kelas) return { status: 404, body: { error: 'Kelas tidak ditemukan' } };
+      const used = db.santri.some(
+        (s) =>
+          String(s.kelas_id ?? '') === id ||
+          String(s.kelas ?? '') === String(kelas.nama ?? '')
+      );
+      if (used) {
+        return {
+          status: 400,
+          body: { error: 'Kelas masih dipakai santri. Pindahkan atau naikkan kelas dulu.' },
+        };
+      }
       db.kelas = db.kelas.filter((k) => k.id !== id);
       await recordSyncTombstone('kelas', id);
       if (isTursoAuthority()) await flushTombstonesTursoNow('kelas');
@@ -1806,7 +1966,11 @@ async function dispatchApiCore(
       return { status: 200, body: db.kegiatan };
     }
     if (m === 'POST' && body) {
-      const item = { id: newId(), ...body };
+      const nama = String(body.nama ?? '').trim();
+      const jenis = String(body.jenis ?? '').trim();
+      if (!nama) return { status: 400, body: { error: 'Nama kegiatan wajib diisi' } };
+      if (!jenis) return { status: 400, body: { error: 'Jenis kegiatan wajib diisi' } };
+      const item = { id: newId(), ...body, nama, jenis };
       db.kegiatan.push(item);
       await saveDb(SQL_SCOPE.kegiatan);
       return { status: 200, body: item };
@@ -2016,11 +2180,37 @@ async function dispatchApiCore(
     if (m === 'PUT' && body) {
       const index = db.kegiatan.findIndex((k) => k.id === id);
       if (index === -1) return { status: 404, body: { error: 'Kegiatan tidak ditemukan' } };
-      db.kegiatan[index] = { ...db.kegiatan[index], ...body };
+      const nama =
+        body.nama !== undefined
+          ? String(body.nama).trim()
+          : String((db.kegiatan[index] as { nama?: string }).nama ?? '');
+      const jenis =
+        body.jenis !== undefined
+          ? String(body.jenis).trim()
+          : String((db.kegiatan[index] as { jenis?: string }).jenis ?? '');
+      if (!nama) return { status: 400, body: { error: 'Nama kegiatan wajib diisi' } };
+      if (!jenis) return { status: 400, body: { error: 'Jenis kegiatan wajib diisi' } };
+      db.kegiatan[index] = { ...db.kegiatan[index], ...body, nama, jenis };
       await saveDb(SQL_SCOPE.kegiatan);
       return { status: 200, body: db.kegiatan[index] };
     }
     if (m === 'DELETE') {
+      const kegiatan = db.kegiatan.find((k) => k.id === id) as
+        | { id: string; nama?: string }
+        | undefined;
+      if (!kegiatan) return { status: 404, body: { error: 'Kegiatan tidak ditemukan' } };
+      const nama = String(kegiatan.nama ?? '');
+      const used = db.absensi.some(
+        (a) => String(a.kegiatan ?? '') === nama || String(a.kegiatan_nama ?? '') === nama
+      );
+      if (used) {
+        return {
+          status: 400,
+          body: {
+            error: 'Kegiatan masih punya catatan absensi. Hapus/ubah absensi terkait dulu.',
+          },
+        };
+      }
       db.kegiatan = db.kegiatan.filter((k) => k.id !== id);
       await recordSyncTombstone('kegiatan', id);
       if (isTursoAuthority()) await flushTombstonesTursoNow('kegiatan');
@@ -2204,6 +2394,8 @@ async function dispatchApiCore(
       izin = list.find((i) => i.id === izinKembaliMatch[1]);
     }
     if (!izin) return { status: 404, body: { error: 'Izin tidak ditemukan' } };
+    const izinGuard = await ensureSantriForChildWrite(izin.santri_id);
+    if (izinGuard) return izinGuard;
     izin.status_kembali = 'Sudah';
     izin.waktu_kembali_aktual = new Date().toISOString();
     if (shouldPersistToSqlite()) {
@@ -2216,6 +2408,14 @@ async function dispatchApiCore(
 
   const izinIdMatch = pathname.match(/^\/api\/izin\/([^/]+)$/);
   if (izinIdMatch && m === 'DELETE') {
+    let izin = db.izin.find((i) => i.id === izinIdMatch[1]) as Record<string, unknown> | undefined;
+    if (!izin && shouldPersistToSqlite()) {
+      const list = await sqlListIzinEnriched();
+      izin = list.find((i) => i.id === izinIdMatch[1]);
+    }
+    if (!izin) return { status: 404, body: { error: 'Izin tidak ditemukan' } };
+    const izinGuard = await ensureSantriForChildWrite(izin.santri_id);
+    if (izinGuard) return izinGuard;
     db.izin = db.izin.filter((i) => i.id !== izinIdMatch[1]);
     if (shouldPersistToSqlite()) {
       await sqlDeleteIzinById(izinIdMatch[1]);
@@ -2251,11 +2451,12 @@ async function dispatchApiCore(
   if (pathname === '/api/pembinaan' && m === 'POST' && body) {
     const santriGuard = await ensureSantriForChildWrite(body.santri_id);
     if (santriGuard) return santriGuard;
-    const jenis = body.jenis === 'Teguran' ? 'Teguran' : 'Pelanggaran';
+    // Teguran dihapus dari produk — semua catatan baru = Pelanggaran.
+    const jenis = 'Pelanggaran';
     const newPembinaan = { id: newId(), ...body, jenis };
     db.pembinaan.push(newPembinaan);
     const santri = await ensureSantriInMemory(String(body.santri_id ?? ''));
-    if (santri && jenis === 'Pelanggaran') {
+    if (santri) {
       santri.jumlah_pelanggaran = (Number(santri.jumlah_pelanggaran) || 0) + 1;
       if (shouldPersistToSqlite()) {
         await sqlBumpSantriPelanggaran(String(santri.id), 1);
@@ -2272,10 +2473,19 @@ async function dispatchApiCore(
 
   const pembinaanIdMatch = pathname.match(/^\/api\/pembinaan\/([^/]+)$/);
   if (pembinaanIdMatch && m === 'DELETE') {
-    const removed = db.pembinaan.find((p) => p.id === pembinaanIdMatch[1]) as
+    let removed = db.pembinaan.find((p) => p.id === pembinaanIdMatch[1]) as
       | { santri_id?: string }
       | undefined;
-    const santriId = removed?.santri_id ? String(removed.santri_id) : '';
+    if (!removed && shouldPersistToSqlite()) {
+      const list = await sqlListPembinaanEnriched();
+      removed = list.find((p) => p.id === pembinaanIdMatch[1]) as
+        | { santri_id?: string }
+        | undefined;
+    }
+    if (!removed) return { status: 404, body: { error: 'Catatan pembinaan tidak ditemukan' } };
+    const pbGuard = await ensureSantriForChildWrite(removed.santri_id);
+    if (pbGuard) return pbGuard;
+    const santriId = removed.santri_id ? String(removed.santri_id) : '';
     db.pembinaan = db.pembinaan.filter((p) => p.id !== pembinaanIdMatch[1]);
     if (shouldPersistToSqlite()) {
       await sqlDeletePembinaanById(pembinaanIdMatch[1]);
@@ -2389,9 +2599,11 @@ async function dispatchApiCore(
       const row =
         existingIdx >= 0
           ? { ...db.absensi[existingIdx], status, tanggal }
-          : { ...existingRow, status, tanggal };
+          : { ...existingRow!, status, tanggal };
       if (existingIdx >= 0) {
         db.absensi[existingIdx] = row;
+      } else {
+        db.absensi.push(row);
       }
       if (shouldPersistToSqlite()) {
         await sqlUpsertAbsensiRow(row, db.kegiatan);
@@ -2418,6 +2630,8 @@ async function dispatchApiCore(
       row = all.find((a) => a.id === absensiIdMatch[1]);
     }
     if (!row) return { status: 404, body: { error: 'Absensi tidak ditemukan' } };
+    const absGuard = await ensureSantriForChildWrite(row.santri_id);
+    if (absGuard) return absGuard;
     const dateKey = String(row.tanggal ?? '').slice(0, 10);
     const santriId = String(row.santri_id ?? '');
     const izinRows = db.izin as IzinRow[];

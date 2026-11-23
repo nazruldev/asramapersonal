@@ -27,7 +27,6 @@ import {
   appFormStack,
   appLabelClass,
   appPickerBtnClass,
-  appSelectClass,
   appTextareaClass,
 } from '@/lib/form-styles';
 import {
@@ -76,16 +75,28 @@ export default function Pembinaan() {
   const addPembinaanMutation = useMutation({
     mutationFn: async (payload: { santri_ids: string[] } & Record<string, unknown>) => {
       const { santri_ids, ...rest } = payload;
+      const createdIds: string[] = [];
       let last: unknown = null;
-      for (const santriId of santri_ids) {
-        const res = await fetch('/api/pembinaan', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...rest, santri_id: santriId })
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error((data as { error?: string }).error || 'Gagal menyimpan catatan');
-        last = data;
+      try {
+        for (const santriId of santri_ids) {
+          const res = await fetch('/api/pembinaan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...rest, santri_id: santriId }),
+          });
+          const data = (await res.json()) as { id?: string; error?: string };
+          if (!res.ok) throw new Error(data.error || 'Gagal menyimpan catatan');
+          if (data.id) createdIds.push(String(data.id));
+          last = data;
+        }
+      } catch (err) {
+        // Rollback sebagian agar tidak menyisakan catatan setengah jalan.
+        await Promise.all(
+          createdIds.map((id) =>
+            fetch(`/api/pembinaan/${id}`, { method: 'DELETE' }).catch(() => null)
+          )
+        );
+        throw err;
       }
       return last;
     },
@@ -93,8 +104,8 @@ export default function Pembinaan() {
       const total = payload.santri_ids.length;
       toast.success(
         total > 1
-          ? `Catatan pembinaan tersimpan untuk ${total} santri`
-          : 'Catatan pembinaan berhasil disimpan'
+          ? `Catatan pelanggaran tersimpan untuk ${total} santri`
+          : 'Catatan pelanggaran berhasil disimpan'
       );
       void reload(['pembinaan', 'santri']);
       setIsAddModalOpen(false);
@@ -139,7 +150,7 @@ export default function Pembinaan() {
     const formData = new FormData(e.currentTarget);
     addPembinaanMutation.mutate({
       santri_ids: selectedSantriIds,
-      jenis: formData.get('jenis'),
+      jenis: 'Pelanggaran',
       keterangan: formData.get('keterangan'),
       tanggal: formData.get('tanggal'),
       tindak_lanjut: formData.get('tindak_lanjut')
@@ -248,7 +259,7 @@ export default function Pembinaan() {
   }, []);
 
   const headerAddAction = useMemo(
-    () => ({ onClick: openAddModal, label: 'Tambah pembinaan' }),
+    () => ({ onClick: openAddModal, label: 'Tambah pelanggaran' }),
     [openAddModal]
   );
 
@@ -259,7 +270,7 @@ export default function Pembinaan() {
       keys={['pembinaan', 'santri', 'kamar', 'kelas', 'settings']}
       className="space-y-4"
     >
-      {/* Top Segmented Switch for Izin & BK */}
+      {/* Top Segmented Switch for Izin & Pelanggaran */}
       <div className="flex items-center p-1 bg-slate-200/80 rounded-sm">
         <button
           type="button"
@@ -274,7 +285,7 @@ export default function Pembinaan() {
           className="flex-1 py-2 text-xs font-bold rounded-sm bg-card text-card-foreground border border-border shadow-xs flex items-center justify-center gap-1.5 transition-all"
         >
           <ShieldAlert className="w-3.5 h-3.5 text-rose-600" />
-          <span>Pelanggaran & Teguran</span>
+          <span>Pelanggaran</span>
         </button>
       </div>
 
@@ -359,7 +370,7 @@ export default function Pembinaan() {
             title={allGrouped.length === 0 ? 'Belum ada catatan' : 'Tidak ada hasil filter'}
             description={
               allGrouped.length === 0
-                ? 'Ketuk tombol + di header untuk mencatat pelanggaran atau teguran.'
+                ? 'Ketuk tombol + di header untuk mencatat pelanggaran.'
                 : 'Ubah pencarian atau filter kelas/kamar.'
             }
           />
@@ -404,18 +415,11 @@ export default function Pembinaan() {
                     <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full border bg-slate-100 text-slate-700 border-slate-200">
                       {totalCatatan} catatan
                     </span>
-                    {group.countPelanggaran > 0 && (
+                    {totalCatatan > 0 && (
                       <span
                         className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${getPembinaanBadgeStyle('Pelanggaran')}`}
                       >
-                        {group.countPelanggaran} pelanggaran
-                      </span>
-                    )}
-                    {group.countTeguran > 0 && (
-                      <span
-                        className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${getPembinaanBadgeStyle('Teguran')}`}
-                      >
-                        {group.countTeguran} teguran
+                        {totalCatatan} pelanggaran
                       </span>
                     )}
                     {tier && poinAkumulasi > 0 && (
@@ -476,8 +480,8 @@ export default function Pembinaan() {
       <AppModal
         open={isAddModalOpen}
         onClose={closeAddModal}
-        title="Catat Pelanggaran dan Teguran"
-        description="Catat kejadian disiplin santri untuk arsip BK"
+        title="Catat Pelanggaran"
+        description="Catat kejadian disiplin santri untuk arsip pelanggaran"
         footer={
           <AppModalFooter>
             <button
@@ -510,30 +514,17 @@ export default function Pembinaan() {
                 </button>
               </div>
 
-              <div className={appFormGrid2}>
-                <div className={`${appFormStack} min-w-0`}>
-                  <label className={appLabelClass}>Jenis Catatan *</label>
-                  <select
-                    name="jenis"
-                    defaultValue="Pelanggaran"
-                    required
-                    className={appSelectClass}
-                  >
-                    <option value="Pelanggaran">Pelanggaran</option>
-                    <option value="Teguran">Teguran</option>
-                  </select>
-                </div>
+              <input type="hidden" name="jenis" value="Pelanggaran" />
 
-                <div className={`${appFormStack} min-w-0`}>
-                  <label className={appLabelClass}>Tanggal Kejadian *</label>
-                  <input
-                    name="tanggal"
-                    type="date"
-                    defaultValue={new Date().toISOString().slice(0, 10)}
-                    required
-                    className={appFieldClass}
-                  />
-                </div>
+              <div className={appFormStack}>
+                <label className={appLabelClass}>Tanggal Kejadian *</label>
+                <input
+                  name="tanggal"
+                  type="date"
+                  defaultValue={new Date().toISOString().slice(0, 10)}
+                  required
+                  className={appFieldClass}
+                />
               </div>
 
               <div className={appFormStack}>
@@ -542,7 +533,7 @@ export default function Pembinaan() {
                   name="keterangan"
                   rows={3}
                   required
-                  placeholder="Ceritakan kejadian pelanggaran atau teguran secara rinci..."
+                  placeholder="Ceritakan kejadian pelanggaran secara rinci..."
                   className={appTextareaClass}
                 />
               </div>

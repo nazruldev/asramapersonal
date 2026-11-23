@@ -51,11 +51,11 @@ type MenuLink = {
 };
 
 const MENU_LAINNYA: MenuLink[] = [
-  { label: 'Peringkat Santri', desc: 'Poin pelanggaran & prestasi terbanyak.', path: '/laporan/peringkat', icon: Trophy, modul: 'laporan' },
+  { label: 'Peringkat Santri', desc: 'Peringkat izin dan pelanggaran akumulasi.', path: '/laporan/peringkat', icon: Trophy, modul: 'laporan' },
   { label: 'Sebaran Wilayah', desc: 'Peta asal wilayah santri.', path: '/laporan/wilayah', icon: MapPin, modul: 'laporan' },
   { label: 'Menu Laporan', desc: 'Unduh & bagikan rekap per periode.', path: '/laporan', icon: FileText, modul: 'laporan' },
   { label: 'Penjadwalan', desc: 'Jadwal kegiatan & piket asrama.', path: '/penjadwalan', icon: CalendarRange, modul: 'penjadwalan' },
-  { label: 'Pengaturan Asrama', desc: 'Nama asrama, pertanyaan keamanan, dll.', path: '/pengaturan', icon: Settings, modul: 'pengaturan' },
+  { label: 'Pengaturan', desc: 'Nama sekolah/pondok, zona waktu, dan tampilan.', path: '/pengaturan', icon: Settings, modul: 'pengaturan' },
   { label: 'Cadangan Data', desc: 'Ekspor / impor database & sinkronisasi.', path: '/database', icon: HardDrive, modul: 'database' },
 ];
 

@@ -19,6 +19,7 @@ import {
   ShieldAlert,
   ClockAlert,
   BedDouble,
+  Banknote,
   User,
   Users,
 } from 'lucide-react';
@@ -26,6 +27,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { pembinaanDetailPath } from '@/lib/pembinaan-group';
 import { izinDetailPath } from '@/lib/izin-group';
 import { santriKamarRiwayatPath } from '@/lib/santri-kamar-riwayat';
+import { santriTagihanPath } from '@/lib/santri-tunggakan';
 import { withBackTo } from '@/lib/app-navigation';
 import { santriDetailPath } from '@/lib/santri-detail';
 import { AppModal, AppModalFooter } from '@/components/ui/app-modal';
@@ -45,6 +47,11 @@ import { useScreenAddAction } from '@/lib/screen-header-actions';
 import { ScrollNavButtons } from '@/components/scroll-nav-buttons';
 import { toast } from '@/lib/toast';
 import { fetchSantriPage } from '@/lib/santri-api';
+import { getSessionUser, subscribeSessionUser } from '@/lib/app-auth';
+import {
+  autoJenisKelaminFromAsrama,
+  resolveJenisAsramaAktif,
+} from '@/lib/app-settings';
 
 type SantriRow = {
   id: string;
@@ -83,11 +90,12 @@ export default function Santri() {
   const isLoading = useInitialAppLoading();
   const kamarList = useAppStore((s) => s.kamar) as { id: string; nama: string }[];
   const kelasList = useAppStore((s) => s.kelas) as { id: string; nama: string; tingkat?: string }[];
-  const jenisAsrama = String(
-    (useAppStore((s) => s.settings) as { jenisAsrama?: string } | undefined)?.jenisAsrama ?? ''
-  ).toUpperCase();
-  // PUTRA → otomatis Laki-laki, PUTRI → otomatis Perempuan, CAMPUR → pilih manual
-  const autoGender = jenisAsrama === 'PUTRA' ? 'Laki-laki' : jenisAsrama === 'PUTRI' ? 'Perempuan' : '';
+  const settings = useAppStore((s) => s.settings);
+  const [sessionUser, setSessionUser] = useState(() => getSessionUser());
+  useEffect(() => subscribeSessionUser(() => setSessionUser(getSessionUser())), []);
+  // Ikuti jenis asrama aktif (Aspura/Aspuri), bukan settings global.
+  const jenisAsrama = resolveJenisAsramaAktif(settings, sessionUser?.activeAsramaId);
+  const autoGender = autoJenisKelaminFromAsrama(jenisAsrama);
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [optionPicker, setOptionPicker] = useState<'kelas' | 'kamar' | null>(null);
@@ -143,11 +151,16 @@ export default function Santri() {
 
   const saveMutation = useMutation({
     mutationFn: async (payload: { id?: string; body: Record<string, unknown> }) => {
+      const { maybeCompressImageDataUrl } = await import('@/lib/image-compress');
+      const foto = await maybeCompressImageDataUrl(
+        typeof payload.body.foto === 'string' ? payload.body.foto : ''
+      );
+      const body = { ...payload.body, foto };
       if (payload.id) {
         const res = await fetch(`/api/santri/${payload.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload.body),
+          body: JSON.stringify(body),
         });
         const data = await res.json();
         if (!res.ok) throw new Error((data as { error?: string }).error || 'Gagal menyimpan');
@@ -156,7 +169,7 @@ export default function Santri() {
       const res = await fetch('/api/santri', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload.body),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) throw new Error((data as { error?: string }).error || 'Gagal menyimpan');
@@ -209,13 +222,15 @@ export default function Santri() {
         '@capacitor/camera'
       );
       const photo = await CapacitorCamera.getPhoto({
-        quality: 90,
+        quality: 80,
         allowEditing: false,
         resultType: CameraResultType.DataUrl,
+        width: 1024,
         source: source === 'camera' ? CameraSource.Camera : CameraSource.Photos,
       });
-
-      setFormData({ ...formData, foto: photo.dataUrl || '' });
+      const { maybeCompressImageDataUrl } = await import('@/lib/image-compress');
+      const foto = await maybeCompressImageDataUrl(photo.dataUrl || '');
+      setFormData({ ...formData, foto });
     } catch (error) {
       console.error('Error taking photo:', error);
       // Ignore user cancellation
@@ -260,7 +275,7 @@ export default function Santri() {
 
   const requestDeleteSantri = (santri: SantriRow) => {
     confirmDialog.ask({
-      message: `Hapus "${santri.nama}" secara permanen? Riwayat izin, absensi, catatan BK, penjadwalan, dan riwayat kamar santri ini ikut dihapus. Data kamar tetap ada; jika dia ketua, jabatan ketua dikosongkan.`,
+      message: `Hapus "${santri.nama}" secara permanen? Riwayat izin, absensi, catatan pelanggaran, penjadwalan, dan riwayat kamar santri ini ikut dihapus. Data kamar tetap ada; jika dia ketua, jabatan ketua dikosongkan.`,
       confirmLabel: 'Ya, Hapus',
       onConfirm: () =>
         new Promise<void>((resolve, reject) => {
@@ -331,6 +346,11 @@ export default function Santri() {
   const handleLihatRiwayatKamar = (santri: SantriRow) => {
     closeActionMenu();
     navigate(santriKamarRiwayatPath(santri.id), withBackTo('/master/santri'));
+  };
+
+  const handleLihatTagihan = (santri: SantriRow) => {
+    closeActionMenu();
+    navigate(santriTagihanPath(santri.id), withBackTo('/master/santri'));
   };
 
   const handleActionHubungi = (santri: SantriRow) => {
@@ -500,7 +520,7 @@ export default function Santri() {
                       <Crown className="w-3 h-3 shrink-0 text-amber-600" aria-label="Ketua kamar" />
                     ) : null}
                     {pelanggaran > 0 ? (
-                      <span className="text-[9px] font-semibold text-amber-700 shrink-0">{pelanggaran} BK</span>
+                      <span className="text-[9px] font-semibold text-amber-700 shrink-0">{pelanggaran} pelanggaran</span>
                     ) : null}
                   </div>
                   <p className={`text-[10px] truncate ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>
@@ -734,7 +754,18 @@ export default function Santri() {
                   }`}
                 >
                   <ShieldAlert className="w-4 h-4 shrink-0 text-amber-600" />
-                  Lihat riwayat BK
+                  Lihat riwayat pelanggaran
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => handleLihatTagihan(actionMenuSantri)}
+                  className={`w-full flex items-center gap-3 px-4 py-3 text-left text-sm font-medium active:opacity-80 ${
+                    theme === 'dark' ? 'text-slate-100 hover:bg-slate-700' : 'text-slate-800 hover:bg-slate-50'
+                  }`}
+                >
+                  <Banknote className="w-4 h-4 shrink-0 text-rose-600" />
+                  Lihat tagihan
                 </button>
                 <button
                   type="button"

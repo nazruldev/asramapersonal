@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react';
 import { avatarInitials } from '@/lib/app-avatar';
+import { maybeCompressImageDataUrl } from '@/lib/image-compress';
 import { cn } from '@/lib/utils';
 
 type SantriAvatarSize = 'xs' | 'sm' | 'md' | 'lg';
@@ -18,28 +20,21 @@ type SantriAvatarProps = {
   alt?: string;
 };
 
-/** Avatar santri — sama gaya daftar Santri (foto atau inisial emerald). */
-export function SantriAvatar({
+function Initials({
   nama,
-  foto,
-  size = 'sm',
+  size,
   className,
   alt,
-}: SantriAvatarProps) {
-  const box = SIZE_CLASS[size];
-  if (foto) {
-    return (
-      <img
-        src={foto}
-        alt={alt ?? nama}
-        className={cn(box, 'rounded-sm object-cover shrink-0', className)}
-      />
-    );
-  }
+}: {
+  nama: string;
+  size: SantriAvatarSize;
+  className?: string;
+  alt?: string;
+}) {
   return (
     <div
       className={cn(
-        box,
+        SIZE_CLASS[size],
         'rounded-sm bg-emerald-700 text-white font-bold flex items-center justify-center shrink-0',
         className
       )}
@@ -48,5 +43,47 @@ export function SantriAvatar({
     >
       {avatarInitials(nama || 'S')}
     </div>
+  );
+}
+
+/** Avatar santri — foto dikompres bila terlalu besar; gagal load → inisial. */
+export function SantriAvatar({
+  nama,
+  foto,
+  size = 'sm',
+  className,
+  alt,
+}: SantriAvatarProps) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [broken, setBroken] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setBroken(false);
+    const raw = foto?.trim() || '';
+    if (!raw) {
+      setSrc(null);
+      return;
+    }
+    setSrc(raw);
+    void maybeCompressImageDataUrl(raw).then((next) => {
+      if (!cancelled) setSrc(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [foto]);
+
+  if (!src || broken) {
+    return <Initials nama={nama} size={size} className={className} alt={alt} />;
+  }
+
+  return (
+    <img
+      src={src}
+      alt={alt ?? nama}
+      className={cn(SIZE_CLASS[size], 'rounded-sm object-cover shrink-0', className)}
+      onError={() => setBroken(true)}
+    />
   );
 }

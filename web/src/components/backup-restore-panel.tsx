@@ -142,7 +142,7 @@ export function BackupRestorePanel({ compact }: BackupRestorePanelProps) {
   }[] = [
     {
       scope: 'pelanggaran',
-      title: 'Kosongkan pelanggaran / BK',
+      title: 'Kosongkan catatan pelanggaran',
       detail: 'Hapus catatan pembinaan & hitungan pelanggaran (santri tetap)',
       tone: 'bg-rose-500',
     },

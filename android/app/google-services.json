@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "889065960174",
+    "project_id": "alkhairaattil",
+    "storage_bucket": "alkhairaattil.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:889065960174:android:72bd671cd2e918f61539ff",
+        "android_client_info": {
+          "package_name": "com.asramapersonal.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAALXAaE9hzsSdnbwpK0wRjRj7fDzcIjgI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -20,6 +20,35 @@ export function normalizeJenisAsrama(value: string): JenisAsrama | '' {
   return '';
 }
 
+/**
+ * Jenis asrama untuk aturan form (mis. jenis kelamin santri).
+ * Prioritas: asrama aktif → satu-satunya asrama di daftar → settings.jenisAsrama (legacy).
+ */
+export function resolveJenisAsramaAktif(
+  settings: Pick<AppSettings, 'asrama' | 'jenisAsrama'> | null | undefined,
+  activeAsramaId?: string | null
+): JenisAsrama | '' {
+  const list = Array.isArray(settings?.asrama) ? settings.asrama : [];
+  if (activeAsramaId) {
+    const hit = list.find((a) => a.id === activeAsramaId);
+    const fromActive = normalizeJenisAsrama(String(hit?.jenis ?? ''));
+    if (fromActive) return fromActive;
+  }
+  if (list.length === 1) {
+    const fromOnly = normalizeJenisAsrama(String(list[0]?.jenis ?? ''));
+    if (fromOnly) return fromOnly;
+  }
+  return normalizeJenisAsrama(String(settings?.jenisAsrama ?? ''));
+}
+
+/** Gender otomatis dari jenis asrama Putra/Putri; kosong jika Campur / belum diisi. */
+export function autoJenisKelaminFromAsrama(jenisAsrama: string): 'Laki-laki' | 'Perempuan' | '' {
+  const j = normalizeJenisAsrama(jenisAsrama);
+  if (j === 'PUTRA') return 'Laki-laki';
+  if (j === 'PUTRI') return 'Perempuan';
+  return '';
+}
+
 /** Role akun pengguna aplikasi. */
 export type PenggunaRole = 'super_admin' | 'bendahara' | 'pengawas';
 
@@ -45,7 +74,6 @@ export type ModulAkses =
   | 'pembayaran'
   | 'penjadwalan'
   | 'laporan'
-  | 'kesehatan'
   | 'pengaturan'
   | 'database';
 
@@ -56,11 +84,10 @@ export const MODUL_AKSES_OPTIONS: { id: ModulAkses; label: string }[] = [
   { id: 'kegiatan', label: 'Data Kegiatan' },
   { id: 'absensi', label: 'Absensi' },
   { id: 'izin', label: 'Izin Keluar' },
-  { id: 'pembinaan', label: 'Pelanggaran & Pembinaan' },
+  { id: 'pembinaan', label: 'Pelanggaran' },
   { id: 'pembayaran', label: 'Pembayaran' },
   { id: 'penjadwalan', label: 'Penjadwalan' },
   { id: 'laporan', label: 'Laporan' },
-  { id: 'kesehatan', label: 'Kesehatan' },
   { id: 'pengaturan', label: 'Pengaturan' },
   { id: 'database', label: 'Cadangan Data' },
 ];
@@ -95,7 +122,7 @@ export type AppSettings = {
   /** Batas akumulasi pelanggaran per tingkat (mis. 3, 5, 7) */
   batasPelanggaran: [number, number, number];
   namaTingkat: [string, string, string];
-  /** Jika false, modul BK fokus pelanggaran & teguran saja */
+  /** Jika false, modul pelanggaran tanpa fitur prestasi */
   tampilkanPrestasi: boolean;
   /** Kunci layar aplikasi (hash lokal) */
   passwordHash: string;
@@ -112,7 +139,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   jenisAsrama: '',
   zonaWaktu: DEFAULT_INDONESIA_TIMEZONE,
   batasPelanggaran: [3, 5, 7],
-  namaTingkat: ['Peringatan', 'Teguran Resmi', 'Skors / Pembinaan Khusus'],
+  namaTingkat: ['Peringatan', 'Peringatan Keras', 'Skors / Pembinaan Khusus'],
   tampilkanPrestasi: false,
   passwordHash: DEFAULT_PASSWORD_HASH,
   securityQuestions: [null, null, null],
@@ -158,10 +185,13 @@ export function isSetupSelesai(partial?: Partial<AppSettings> | null): boolean {
 export function mergeAppSettings(partial?: Partial<AppSettings> | Record<string, unknown>): AppSettings {
   const merged = { ...DEFAULT_APP_SETTINGS, ...partial } as AppSettings;
   merged.asrama = Array.isArray(merged.asrama) ? merged.asrama : [];
+  const validAkses = new Set(MODUL_AKSES_OPTIONS.map((o) => o.id));
   merged.pengguna = (Array.isArray(merged.pengguna) ? merged.pengguna : []).map((p) => ({
     ...p,
     asramaIds: Array.isArray(p.asramaIds) ? p.asramaIds : [],
-    akses: Array.isArray(p.akses) ? p.akses : [],
+    akses: (Array.isArray(p.akses) ? p.akses : []).filter((id): id is ModulAkses =>
+      validAkses.has(id as ModulAkses)
+    ),
     aktif: p.aktif !== false,
   }));
   const setupSelesai =

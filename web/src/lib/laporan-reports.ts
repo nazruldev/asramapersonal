@@ -3,7 +3,6 @@ import {
   endOfDay,
   endOfMonth,
   format,
-  isWithinInterval,
   startOfDay,
   parse,
   startOfMonth,
@@ -62,7 +61,7 @@ export type AbsensiHarianBaris = {
   totalCatatan: number;
 };
 
-export type LaporanPeriod = 'today' | '7d' | '30d' | 'month' | 'custom';
+export type LaporanPeriod = 'all' | 'today' | '7d' | '30d' | 'month' | 'custom';
 
 export type LaporanCustomRange = {
   dari: string;
@@ -77,7 +76,8 @@ export type LaporanReportId =
   | 'kamar'
   | 'kelas'
   | 'pelanggaran'
-  | 'wilayah';
+  | 'wilayah'
+  | 'pembayaran';
 
 export type LaporanWilayahGeo = {
   code: string;
@@ -103,10 +103,54 @@ export type LaporanContext = {
   absensi: EntityRow[];
   izin: EntityRow[];
   pembinaan: EntityRow[];
+  /** Tagihan (periode bulan overlap rekap) — dari /api/pembayaran/tagihan */
+  tagihan?: EntityRow[];
   /** Master kegiatan (untuk rekap absensi per agenda) */
   kegiatan?: KegiatanSchedule[];
   /** Koordinat provinsi untuk rekap sebaran (opsional) */
   wilayahProvinsiGeo?: LaporanWilayahGeo[];
+};
+
+export type LaporanTagihanStatus = 'belum' | 'sebagian' | 'lunas';
+
+export type LaporanPembayaranSantriSisa = {
+  santriId: string;
+  nama: string;
+  kelas: string;
+  kamar: string;
+  totalSisa: number;
+  jumlahTagihan: number;
+};
+
+export type LaporanPembayaranRekap = {
+  totalTagihan: number;
+  totalNominal: number;
+  totalTerbayar: number;
+  totalSisa: number;
+  /** Sisa dari tagihan belum lunas yang masih dalam tempo (belum jatuh tempo). */
+  totalSisaDalamTempo: number;
+  /** Sisa dari tagihan sudah lewat jatuh tempo. */
+  totalSisaTunggakan: number;
+  byStatus: Record<LaporanTagihanStatus, number>;
+  byJenis: Array<{
+    nama: string;
+    jumlah: number;
+    nominal: number;
+    terbayar: number;
+    sisa: number;
+  }>;
+  /** Belum lunas, masih dalam tempo (bukan tunggakan). */
+  belumLunas: LaporanPembayaranSantriSisa[];
+  /** Belum lunas + sudah lewat jatuh tempo. */
+  tunggakan: LaporanPembayaranSantriSisa[];
+};
+
+export type LaporanPelanggaranRank = {
+  santriId: string;
+  nama: string;
+  kelas: string;
+  kamar: string;
+  count: number;
 };
 
 export function periodLabel(period: LaporanPeriod, customRange?: LaporanCustomRange): string {
@@ -114,6 +158,8 @@ export function periodLabel(period: LaporanPeriod, customRange?: LaporanCustomRa
     return laporanRekapInterval('custom', customRange).label;
   }
   switch (period) {
+    case 'all':
+      return 'Semua data';
     case 'today':
       return 'Hari ini';
     case '7d':
@@ -130,6 +176,8 @@ export function periodLabel(period: LaporanPeriod, customRange?: LaporanCustomRa
 export function periodInterval(period: Exclude<LaporanPeriod, 'custom'>, now = new Date()) {
   const end = endOfDay(now);
   switch (period) {
+    case 'all':
+      return { start: new Date(0), end, label: periodLabel(period) };
     case 'today':
       return { start: startOfDay(now), end, label: periodLabel(period) };
     case '7d':
@@ -175,21 +223,9 @@ function rowDate(row: EntityRow, field: string): string {
   return typeof v === 'string' ? v : '';
 }
 
-function inPeriod(
-  iso: string,
-  period: LaporanPeriod,
-  customRange?: LaporanCustomRange,
-  now = new Date()
-) {
-  if (!iso) return false;
-  const { start, end } = laporanRekapInterval(period, customRange, now);
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return false;
-  return isWithinInterval(d, { start, end });
-}
-
-function inCtxPeriod(iso: string, ctx: LaporanContext, now = new Date()) {
-  return inPeriod(iso, ctx.period, ctx.customRange, now);
+// Laporan selalu mencakup seluruh riwayat — tidak ada filter tanggal.
+function inCtxPeriod(_iso: string, _ctx: LaporanContext, _now = new Date()) {
+  return true;
 }
 
 function fmtLongDate(d = new Date()) {
@@ -544,34 +580,64 @@ export function buildRekapIzin(ctx: LaporanContext, now = new Date(), wa?: Lapor
   const rows = ctx.izin.filter((i) => inCtxPeriod(rowDate(i, 'tanggal_keluar'), ctx, now));
   const belum = rows.filter((i) => i.status_kembali === 'Belum');
   const sudah = rows.filter((i) => i.status_kembali === 'Sudah');
+  const single = ctx.santri.length === 1;
+  const namaSatu = single ? String(ctx.santri[0]?.nama ?? 'Santri') : '';
+
+  // Semua santri: ringkas akumulasi per orang dulu.
+  let perSantriBlock = '';
+  if (!single && rows.length > 0) {
+    const map = new Map<string, { nama: string; total: number; belum: number }>();
+    for (const i of rows) {
+      const key = String(i.santri_id ?? i.santri_nama ?? '');
+      const nama = String(i.santri_nama ?? '—');
+      const cur = map.get(key) ?? { nama, total: 0, belum: 0 };
+      cur.total += 1;
+      if (i.status_kembali === 'Belum') cur.belum += 1;
+      map.set(key, cur);
+    }
+    const lines = [...map.values()]
+      .sort((a, b) => b.total - a.total)
+      .map((r, idx) =>
+        waBulletLine(`${idx + 1}. *${r.nama}* — ${r.total} izin (${r.belum} belum kembali)`)
+      )
+      .join('\n');
+    perSantriBlock = [waSectionTitle('Akumulasi per santri'), lines, waBlank()].join('\n');
+  }
 
   const detail =
     rows.length > 0
       ? rows
           .map((i, idx) => {
             const st = i.status_kembali === 'Belum' ? '⏳ Belum kembali' : '✅ Sudah kembali';
-            return waNumberedBlock(
-              idx + 1,
-              `*${String(i.santri_nama)}* · Kamar ${String(i.santri_kamar ?? '-')}`,
-              [
-                `Status: ${st}`,
-                `Keluar: ${fmtShortDateTime(rowDate(i, 'tanggal_keluar'))}`,
-                `Batas: *${formatIzinBatasKembali(rowDate(i, 'batas_kembali'))}*`,
-                `Alasan: ${String(i.alasan ?? '-')}`,
-                `Penjemput: ${String(i.penjemput ?? '-')}`,
-              ]
-            );
+            const title = single
+              ? `Izin #${idx + 1}`
+              : `*${String(i.santri_nama)}* · Kamar ${String(i.santri_kamar ?? '-')}`;
+            return waNumberedBlock(idx + 1, title, [
+              `Status: ${st}`,
+              `Keluar: ${fmtShortDateTime(rowDate(i, 'tanggal_keluar'))}`,
+              `Batas: *${formatIzinBatasKembali(rowDate(i, 'batas_kembali'))}*`,
+              `Alasan: ${String(i.alasan ?? '-')}`,
+              `Penjemput: ${String(i.penjemput ?? '-')}`,
+            ]);
           })
           .join('\n\n')
       : waEmptyState('(Tidak ada izin pada periode ini)');
 
   const header = laporanWaHeader(ctx, '🚪', 'REKAP PERIZINAN', [
     `📆 Periode: *${label}*`,
+    ...(single ? [`👤 Santri: *${namaSatu}*`] : []),
     `📋 Total izin: *${rows.length}*`,
     `⏳ Belum kembali: *${belum.length}* · ✅ Sudah: *${sudah.length}*`,
   ], wa);
 
-  return [header, waBlank(), waSectionTitle('Rincian'), detail, waFooterNote()].join('\n');
+  return [
+    header,
+    waBlank(),
+    perSantriBlock,
+    waSectionTitle(single ? `Semua izin ${namaSatu}` : 'Rincian setiap izin'),
+    detail,
+    waFooterNote(),
+  ].join('\n');
 }
 
 export function buildRekapPembinaan(
@@ -581,34 +647,56 @@ export function buildRekapPembinaan(
 ) {
   const { label } = laporanRekapInterval(ctx.period, ctx.customRange, now);
   const rows = ctx.pembinaan.filter((p) => inCtxPeriod(rowDate(p, 'tanggal'), ctx, now));
-  const summary = computeLaporanSummary(ctx, now);
+  const single = ctx.santri.length === 1;
+  const namaSatu = single ? String(ctx.santri[0]?.nama ?? 'Santri') : '';
+  const poinSatu = single ? Number(ctx.santri[0]?.jumlah_pelanggaran ?? 0) : 0;
 
-  const jenisLines = Object.entries(summary.bkByJenis)
-    .map(([j, n]) => waBulletLine(`${j}: *${n}*`))
-    .join('\n');
+  const jenisLines =
+    rows.length > 0 ? waBulletLine(`Pelanggaran: *${rows.length}*`) : '';
+
+  let perSantriBlock = '';
+  if (!single && rows.length > 0) {
+    const map = new Map<string, { nama: string; total: number }>();
+    for (const p of rows) {
+      const key = String(p.santri_id ?? p.santri_nama ?? '');
+      const nama = String(p.santri_nama ?? '—');
+      const cur = map.get(key) ?? { nama, total: 0 };
+      cur.total += 1;
+      map.set(key, cur);
+    }
+    const lines = [...map.values()]
+      .sort((a, b) => b.total - a.total)
+      .map((r, idx) =>
+        waBulletLine(`${idx + 1}. *${r.nama}* — ${r.total} catatan pelanggaran`)
+      )
+      .join('\n');
+    perSantriBlock = [waSectionTitle('Akumulasi per santri'), lines, waBlank()].join('\n');
+  }
 
   const detail =
     rows.length > 0
       ? rows
           .map((p, idx) => {
             const lines = [
-              `Jenis: *${String(p.jenis)}* · ${fmtShortDate(rowDate(p, 'tanggal'))}`,
+              `Jenis: *Pelanggaran* · ${fmtShortDate(rowDate(p, 'tanggal'))}`,
               `Keterangan: ${String(p.keterangan ?? '-')}`,
             ];
             if (p.tindak_lanjut) {
               lines.push(`Tindak lanjut: ${String(p.tindak_lanjut)}`);
             }
-            return waNumberedBlock(
-              idx + 1,
-              `*${String(p.santri_nama)}* · Kamar ${String(p.santri_kamar ?? '-')}`,
-              lines
-            );
+            const title = single
+              ? `Pelanggaran #${idx + 1}`
+              : `*${String(p.santri_nama)}* · Kamar ${String(p.santri_kamar ?? '-')}`;
+            return waNumberedBlock(idx + 1, title, lines);
           })
           .join('\n\n')
-      : waEmptyState('(Belum ada catatan pelanggaran/pembinaan pada periode ini)');
+      : waEmptyState('(Belum ada catatan pelanggaran pada periode ini)');
 
-  const header = laporanWaHeader(ctx, '🛡️', 'REKAP PELANGGARAN/PEMBINAAN', [
+  const header = laporanWaHeader(ctx, '🛡️', 'REKAP PELANGGARAN', [
     `📆 Periode: *${label}*`,
+    ...(single
+      ? [`👤 Santri: *${namaSatu}*`, `📌 Akumulasi poin: *${poinSatu}*`]
+      : []),
     `📝 Total catatan: *${rows.length}*`,
   ], wa);
 
@@ -617,7 +705,9 @@ export function buildRekapPembinaan(
     waBlank(),
     waSectionTitle('Ringkasan jenis'),
     jenisLines || waEmptyState('(Belum ada)'),
-    waSubsection('Rincian'),
+    waBlank(),
+    perSantriBlock,
+    waSubsection(single ? `Semua catatan pelanggaran ${namaSatu}` : 'Rincian setiap catatan'),
     detail,
     waFooterNote(),
   ].join('\n');
@@ -740,20 +830,90 @@ export function buildRekapWilayah(ctx: LaporanContext, _now = new Date(), wa?: L
   ].join('\n');
 }
 
+function tagihanSisa(row: EntityRow): number {
+  const explicit = Number(row.sisa);
+  if (Number.isFinite(explicit) && explicit >= 0) return explicit;
+  return Math.max(0, Number(row.nominal ?? 0) - Number(row.terbayar ?? 0));
+}
+
+function tagihanStatusOf(row: EntityRow): LaporanTagihanStatus {
+  const st = String(row.status ?? '');
+  if (st === 'belum' || st === 'sebagian' || st === 'lunas') return st;
+  const nominal = Number(row.nominal ?? 0);
+  const terbayar = Number(row.terbayar ?? 0);
+  if (nominal > 0 && terbayar >= nominal) return 'lunas';
+  if (terbayar > 0) return 'sebagian';
+  return 'belum';
+}
+
+function todayYmdLocal(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/** Tunggakan laporan = sisa > 0 dan sudah lewat jatuh tempo (atau akhir bulan periode). */
+function isLaporanTagihanTunggakan(row: EntityRow, today = todayYmdLocal()): boolean {
+  if (tagihanSisa(row) <= 0) return false;
+  const jt = String(row.jatuh_tempo ?? '').trim().slice(0, 10);
+  let due: string | null = /^\d{4}-\d{2}-\d{2}$/.test(jt) ? jt : null;
+  if (!due) {
+    const m = String(row.periode ?? '').match(/^(\d{4})-(\d{2})$/);
+    if (m) {
+      const last = new Date(Number(m[1]), Number(m[2]), 0);
+      due = `${last.getFullYear()}-${String(last.getMonth() + 1).padStart(2, '0')}-${String(last.getDate()).padStart(2, '0')}`;
+    }
+  }
+  if (!due) return false;
+  return due < today;
+}
+
+function formatRp(n: number): string {
+  return `Rp ${new Intl.NumberFormat('id-ID', { maximumFractionDigits: 0 }).format(n || 0)}`;
+}
+
+/** Peringkat pelanggaran dari catatan BK jenis Pelanggaran pada periode. */
+export function computePelanggaranPeriodRanks(
+  ctx: LaporanContext,
+  now = new Date()
+): LaporanPelanggaranRank[] {
+  const rows = ctx.pembinaan.filter(
+    (p) =>
+      String(p.jenis) === 'Pelanggaran' && inCtxPeriod(rowDate(p, 'tanggal'), ctx, now)
+  );
+  const map = new Map<string, LaporanPelanggaranRank>();
+  for (const p of rows) {
+    const santriId = String(p.santri_id ?? '');
+    const nama = String(p.santri_nama ?? 'Santri');
+    const key = santriId || nama;
+    const existing = map.get(key);
+    if (existing) {
+      existing.count += 1;
+      continue;
+    }
+    const meta =
+      (santriId ? ctx.santri.find((s) => String(s.id) === santriId) : undefined) ??
+      ctx.santri.find((s) => String(s.nama) === nama);
+    map.set(key, {
+      santriId,
+      nama: meta ? String(meta.nama ?? nama) : nama,
+      kelas: String(meta?.kelas ?? p.santri_kelas ?? '—'),
+      kamar: String(meta?.kamar ?? p.santri_kamar ?? '—'),
+      count: 1,
+    });
+  }
+  return [...map.values()].sort((a, b) => b.count - a.count || a.nama.localeCompare(b.nama, 'id'));
+}
+
 export function buildRekapPelanggaran(
   ctx: LaporanContext,
-  _now = new Date(),
+  now = new Date(),
   wa?: LaporanWaBuildOptions
 ) {
-  const ranked = [...ctx.santri]
-    .map((s) => ({
-      nama: String(s.nama ?? 'Santri'),
-      kamar: String(s.kamar ?? '-'),
-      kelas: String(s.kelas ?? '-'),
-      poin: Number(s.jumlah_pelanggaran ?? 0),
-    }))
-    .filter((s) => s.poin > 0)
-    .sort((a, b) => b.poin - a.poin);
+  const { label } = laporanRekapInterval(ctx.period, ctx.customRange, now);
+  const ranked = computePelanggaranPeriodRanks(ctx, now);
 
   const lines =
     ranked.length > 0
@@ -761,17 +921,182 @@ export function buildRekapPelanggaran(
           .map((s, idx) =>
             waNumberedBlock(idx + 1, `*${s.nama}*`, [
               `Kelas: ${s.kelas} · Kamar: ${s.kamar}`,
-              `Akumulasi: *${s.poin}x* pelanggaran`,
+              `Pelanggaran (periode): *${s.count}x*`,
             ])
           )
           .join('\n\n')
-      : waEmptyState('(Belum ada santri dengan hitungan pelanggaran)');
+      : waEmptyState('(Belum ada catatan pelanggaran pada periode ini)');
 
-  const header = laporanWaHeader(ctx, '⚠️', 'REKAP JUMLAH PELANGGARAN', [
+  const header = laporanWaHeader(ctx, '⚠️', 'PERINGKAT PELANGGARAN', [
+    `📆 Periode: *${label}*`,
     `Santri bermasalah: *${ranked.length}*`,
   ], wa);
 
   return [header, waBlank(), lines, waFooterNote()].join('\n');
+}
+
+function bumpSantriSisa(
+  map: Map<string, LaporanPembayaranSantriSisa>,
+  t: EntityRow,
+  sisa: number
+): void {
+  const santriId = String(t.santri_id ?? '');
+  const nama = String(t.santri_nama ?? 'Santri');
+  const key = santriId || nama;
+  const cur = map.get(key) ?? {
+    santriId,
+    nama,
+    kelas: String(t.santri_kelas ?? '—'),
+    kamar: String(t.santri_kamar ?? '—'),
+    totalSisa: 0,
+    jumlahTagihan: 0,
+  };
+  cur.totalSisa += sisa;
+  cur.jumlahTagihan += 1;
+  map.set(key, cur);
+}
+
+function sortSantriSisa(rows: LaporanPembayaranSantriSisa[]): LaporanPembayaranSantriSisa[] {
+  return [...rows].sort(
+    (a, b) => b.totalSisa - a.totalSisa || a.nama.localeCompare(b.nama, 'id')
+  );
+}
+
+export function computePembayaranRekap(ctx: LaporanContext): LaporanPembayaranRekap {
+  const tagihan = ctx.tagihan ?? [];
+  const byStatus: Record<LaporanTagihanStatus, number> = {
+    belum: 0,
+    sebagian: 0,
+    lunas: 0,
+  };
+  let totalNominal = 0;
+  let totalTerbayar = 0;
+  let totalSisa = 0;
+  let totalSisaDalamTempo = 0;
+  let totalSisaTunggakan = 0;
+  const jenisMap = new Map<
+    string,
+    { nama: string; jumlah: number; nominal: number; terbayar: number; sisa: number }
+  >();
+  const belumLunasMap = new Map<string, LaporanPembayaranSantriSisa>();
+  const tunggakanMap = new Map<string, LaporanPembayaranSantriSisa>();
+
+  for (const t of tagihan) {
+    const nominal = Number(t.nominal ?? 0);
+    const terbayar = Number(t.terbayar ?? 0);
+    const sisa = tagihanSisa(t);
+    const status = tagihanStatusOf(t);
+    byStatus[status] += 1;
+    totalNominal += nominal;
+    totalTerbayar += terbayar;
+    totalSisa += sisa;
+
+    const namaJenis = String(t.nama_jenis ?? 'Lainnya');
+    const j = jenisMap.get(namaJenis) ?? {
+      nama: namaJenis,
+      jumlah: 0,
+      nominal: 0,
+      terbayar: 0,
+      sisa: 0,
+    };
+    j.jumlah += 1;
+    j.nominal += nominal;
+    j.terbayar += terbayar;
+    j.sisa += sisa;
+    jenisMap.set(namaJenis, j);
+
+    if (sisa <= 0) continue;
+    if (isLaporanTagihanTunggakan(t)) {
+      totalSisaTunggakan += sisa;
+      bumpSantriSisa(tunggakanMap, t, sisa);
+    } else {
+      totalSisaDalamTempo += sisa;
+      bumpSantriSisa(belumLunasMap, t, sisa);
+    }
+  }
+
+  return {
+    totalTagihan: tagihan.length,
+    totalNominal,
+    totalTerbayar,
+    totalSisa,
+    totalSisaDalamTempo,
+    totalSisaTunggakan,
+    byStatus,
+    byJenis: [...jenisMap.values()].sort((a, b) => b.sisa - a.sisa || b.nominal - a.nominal),
+    belumLunas: sortSantriSisa([...belumLunasMap.values()]),
+    tunggakan: sortSantriSisa([...tunggakanMap.values()]),
+  };
+}
+
+export function buildRekapPembayaran(
+  ctx: LaporanContext,
+  now = new Date(),
+  wa?: LaporanWaBuildOptions
+) {
+  const { label } = laporanRekapInterval(ctx.period, ctx.customRange, now);
+  const rekap = computePembayaranRekap(ctx);
+
+  const jenisLines =
+    rekap.byJenis.length > 0
+      ? rekap.byJenis
+          .map((j, idx) =>
+            waNumberedBlock(idx + 1, `*${j.nama}*`, [
+              `${j.jumlah} tagihan`,
+              `Nominal: *${formatRp(j.nominal)}*`,
+              `Terbayar: ${formatRp(j.terbayar)} · Sisa: *${formatRp(j.sisa)}*`,
+            ])
+          )
+          .join('\n\n')
+      : waEmptyState('(Belum ada tagihan pada periode ini)');
+
+  const belumLunasLines =
+    rekap.belumLunas.length > 0
+      ? rekap.belumLunas
+          .map((t, idx) =>
+            waNumberedBlock(idx + 1, `*${t.nama}*`, [
+              `Kelas: ${t.kelas} · Kamar: ${t.kamar}`,
+              `Sisa: *${formatRp(t.totalSisa)}* (${t.jumlahTagihan} tagihan) · masih dalam tempo`,
+            ])
+          )
+          .join('\n\n')
+      : waEmptyState('(Tidak ada tagihan belum lunas dalam tempo)');
+
+  const tunggakanLines =
+    rekap.tunggakan.length > 0
+      ? rekap.tunggakan
+          .map((t, idx) =>
+            waNumberedBlock(idx + 1, `*${t.nama}*`, [
+              `Kelas: ${t.kelas} · Kamar: ${t.kamar}`,
+              `Sisa: *${formatRp(t.totalSisa)}* (${t.jumlahTagihan} tagihan) · sudah jatuh tempo`,
+            ])
+          )
+          .join('\n\n')
+      : waEmptyState('(Tidak ada tunggakan / lewat jatuh tempo)');
+
+  const header = laporanWaHeader(ctx, '💰', 'REKAP PEMBAYARAN', [
+    `📆 Periode tagihan: *${label}*`,
+    `🧾 Tagihan: *${rekap.totalTagihan}*`,
+    `Nominal: *${formatRp(rekap.totalNominal)}* · Terbayar: *${formatRp(rekap.totalTerbayar)}* · Sisa: *${formatRp(rekap.totalSisa)}*`,
+    `Dalam tempo: *${formatRp(rekap.totalSisaDalamTempo)}* · Tunggakan: *${formatRp(rekap.totalSisaTunggakan)}*`,
+    `Status: belum ${rekap.byStatus.belum} · sebagian ${rekap.byStatus.sebagian} · lunas ${rekap.byStatus.lunas}`,
+  ], wa);
+
+  return [
+    header,
+    waBlank(),
+    waSectionTitle('Per jenis tagihan'),
+    jenisLines,
+    waSubsection(
+      `Belum lunas — masih dalam tempo (${rekap.belumLunas.length} santri)`
+    ),
+    belumLunasLines,
+    waSubsection(
+      `Tunggakan — sudah jatuh tempo (${rekap.tunggakan.length} santri)`
+    ),
+    tunggakanLines,
+    waFooterNote(),
+  ].join('\n');
 }
 
 const BUILDERS: Record<
@@ -786,6 +1111,7 @@ const BUILDERS: Record<
   kelas: buildRekapKelas,
   pelanggaran: buildRekapPelanggaran,
   wilayah: buildRekapWilayah,
+  pembayaran: buildRekapPembayaran,
 };
 
 export function buildReport(
@@ -809,11 +1135,12 @@ export const LAPORAN_SECTION_TITLES: Record<LaporanReportId, string> = {
   harian: 'Laporan Harian Lengkap',
   absensi: 'Rekap Absensi',
   izin: 'Rekap Perizinan',
-  pembinaan: 'Rekap Pelanggaran/Pembinaan',
+  pembinaan: 'Rekap Pelanggaran',
   kamar: 'Rekap Hunian Kamar',
   kelas: 'Rekap Santri per Kelas',
   pelanggaran: 'Peringkat Pelanggaran',
   wilayah: 'Sebaran Asal Wilayah',
+  pembayaran: 'Rekap Pembayaran',
 };
 
 /** Gabungan semua teks laporan (format WhatsApp). */

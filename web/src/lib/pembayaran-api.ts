@@ -224,6 +224,7 @@ export async function handlePembayaranApi(
         catatan: body.catatan ? String(body.catatan) : undefined,
       });
       if (!row) return err(404, 'Tagihan tidak ditemukan.');
+      if ('error' in row) return err(400, row.error);
       const tagihan = (await listTagihan()).find((t) => t.id === bayarMatch[1]);
       const map = santriMap();
       return {

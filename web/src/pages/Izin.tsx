@@ -126,7 +126,7 @@ export default function Izin() {
   const izinList = useAppStore((s) => s.izin);
   const santriList = useAppStore((s) => s.santri);
 
-  const resetIzinFormDates = useCallback((alasan = DEFAULT_IZIN_ALASAN) => {
+  const resetIzinFormDates = useCallback((alasan: string = DEFAULT_IZIN_ALASAN) => {
     const keluar = defaultKeluarLocal();
     setTanggalKeluar(keluar);
     if (alasan === 'Sakit / Berobat') {
@@ -344,7 +344,7 @@ export default function Izin() {
   return (
     <>
     <PageWithPullRefresh keys={['izin', 'santri', 'kelas', 'kamar']} className="space-y-4">
-      {/* Top Segmented Switch for Izin & BK */}
+      {/* Top Segmented Switch for Izin & Pelanggaran */}
       <div className="flex items-center p-1 bg-slate-200/80 rounded-sm">
         <button
           type="button"
@@ -359,7 +359,7 @@ export default function Izin() {
           className="flex-1 py-2 text-xs font-semibold rounded-sm text-slate-600 hover:text-slate-900 flex items-center justify-center gap-1.5 transition-all"
         >
           <ShieldAlert className="w-3.5 h-3.5 text-slate-400" />
-          <span>Pelanggaran & Teguran</span>
+          <span>Pelanggaran</span>
         </button>
       </div>
 

@@ -37,7 +37,10 @@ import {
   PIN_MAX_LENGTH,
   PIN_MIN_LENGTH,
   clampPinInput,
+  getSessionUser,
   pinLengthError,
+  sessionUserFromPengguna,
+  setSessionUser,
 } from '@/lib/app-auth';
 import {
   MODUL_AKSES_OPTIONS,
@@ -193,13 +196,43 @@ export default function PenggunaPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = (await res.json().catch(() => ({}))) as { error?: string; id?: string };
+      const data = (await res.json().catch(() => ({}))) as PenggunaPublic & {
+        error?: string;
+        id?: string;
+      };
       if (!res.ok) {
         toast.error(data.error || 'Gagal menyimpan akun');
         return;
       }
       const savedId = editing?.id ?? data.id;
       if (savedId) setAvatar(savedId, fotoDraft.trim() ? fotoDraft : null);
+      const session = getSessionUser();
+      if (editing && session && editing.id === session.id && data.id) {
+        const nextAsramaIds = Array.isArray(data.asramaIds) ? data.asramaIds : [];
+        let activeAsramaId = session.activeAsramaId;
+        if (
+          activeAsramaId &&
+          nextAsramaIds.length > 0 &&
+          data.role !== 'super_admin' &&
+          !nextAsramaIds.includes(activeAsramaId)
+        ) {
+          activeAsramaId = nextAsramaIds[0] ?? null;
+        }
+        setSessionUser(
+          sessionUserFromPengguna(
+            {
+              id: data.id,
+              nama: data.nama,
+              role: data.role,
+              pinHash: '',
+              asramaIds: nextAsramaIds,
+              akses: data.akses ?? [],
+              aktif: data.aktif !== false,
+            },
+            activeAsramaId
+          )
+        );
+      }
       toast.success(editing ? 'Akun diperbarui' : 'Akun ditambahkan');
       closeModal();
       void load();

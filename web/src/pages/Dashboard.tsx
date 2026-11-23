@@ -48,6 +48,13 @@ import {
 } from '@/lib/dashboard-summary';
 import { fetchAbsensiForDay, type AbsensiApiRow } from '@/lib/absensi-api';
 import type { IzinRow } from '@/lib/izin-group';
+import {
+  getSessionUser,
+  hasModuleAccess,
+  requiredModuleForPath,
+  subscribeSessionUser,
+} from '@/lib/app-auth';
+import type { ModulAkses } from '@/lib/app-settings';
 
 /** Tombol panah geser daftar horizontal — tampil di header section, hanya ≥sm. */
 const scrollNavBtnClass =
@@ -66,7 +73,10 @@ export default function Dashboard() {
   const pembinaanList = useAppStore((s) => s.pembinaan);
   const [todayAbsensi, setTodayAbsensi] = useState<AbsensiApiRow[]>([]);
   const [showAllMenu, setShowAllMenu] = useState(false);
+  const [sessionUser, setSessionUser] = useState(() => getSessionUser());
   const kamarScrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => subscribeSessionUser(() => setSessionUser(getSessionUser())), []);
   const scrollRow = useCallback(
     (ref: React.RefObject<HTMLDivElement | null>, dir: 1 | -1) => {
       ref.current?.scrollBy({ left: dir * 260, behavior: 'smooth' });
@@ -165,53 +175,75 @@ export default function Dashboard() {
 
   const menuIconStyle = { tone: 'text-emerald-700', tile: 'bg-emerald-100 dark:bg-emerald-500/15' };
 
-  const quickActions = [
-    { label: 'Absensi', path: '/laporan/absensi', icon: CalendarCheck, ...menuIconStyle },
-    { label: 'Izin', path: '/laporan/izin', icon: ClockAlert, ...menuIconStyle },
-    { label: 'Catatan BK', path: '/laporan/pembinaan', icon: ShieldAlert, ...menuIconStyle },
-    { label: 'Santri', path: '/master/santri', icon: Users, ...menuIconStyle },
-    { label: 'Kamar', path: '/master/kamar', icon: BedDouble, ...menuIconStyle },
-    { label: 'Pembayaran', path: '/master/pembayaran', icon: Wallet, ...menuIconStyle },
-    { label: 'Laporan', path: '/laporan', icon: FileText, ...menuIconStyle },
-  ];
+  const canOpenMenu = useCallback(
+    (path: string, modul?: ModulAkses | null) => {
+      const required = modul ?? requiredModuleForPath(path);
+      if (!required) return true;
+      return hasModuleAccess(sessionUser, required);
+    },
+    [sessionUser]
+  );
 
-  const allMenuGroups = [
-    {
-      title: 'Operasional Harian',
-      items: [
+  const quickActions = useMemo(
+    () =>
+      [
         { label: 'Absensi', path: '/laporan/absensi', icon: CalendarCheck, ...menuIconStyle },
         { label: 'Izin', path: '/laporan/izin', icon: ClockAlert, ...menuIconStyle },
-        { label: 'Catatan BK', path: '/laporan/pembinaan', icon: ShieldAlert, ...menuIconStyle },
-        { label: 'Penjadwalan', path: '/penjadwalan', icon: CalendarRange, ...menuIconStyle },
-        { label: 'Pembayaran', path: '/master/pembayaran', icon: Wallet, ...menuIconStyle },
-      ],
-    },
-    {
-      title: 'Data Master',
-      items: [
+        { label: 'Pelanggaran', path: '/laporan/pembinaan', icon: ShieldAlert, ...menuIconStyle },
         { label: 'Santri', path: '/master/santri', icon: Users, ...menuIconStyle },
         { label: 'Kamar', path: '/master/kamar', icon: BedDouble, ...menuIconStyle },
-        { label: 'Kelas', path: '/master/kelas', icon: GraduationCap, ...menuIconStyle },
-        { label: 'Kegiatan', path: '/master/kegiatan', icon: CalendarDays, ...menuIconStyle },
-        { label: 'Kelola Data', path: '/master', icon: Database, ...menuIconStyle },
-      ],
-    },
-    {
-      title: 'Laporan & Analisis',
-      items: [
+        { label: 'Pembayaran', path: '/master/pembayaran', icon: Wallet, ...menuIconStyle },
         { label: 'Laporan', path: '/laporan', icon: FileText, ...menuIconStyle },
-        { label: 'Peringkat', path: '/laporan/peringkat', icon: Trophy, ...menuIconStyle },
-        { label: 'Sebaran Wilayah', path: '/laporan/wilayah', icon: MapPin, ...menuIconStyle },
-      ],
-    },
-    {
-      title: 'Sistem',
-      items: [
-        { label: 'Pengaturan', path: '/pengaturan', icon: Settings, ...menuIconStyle },
-        { label: 'Cadangan Data', path: '/database', icon: Database, ...menuIconStyle },
-      ],
-    },
-  ];
+      ].filter((action) => canOpenMenu(action.path)),
+    [canOpenMenu]
+  );
+
+  const allMenuGroups = useMemo(
+    () =>
+      [
+        {
+          title: 'Operasional Harian',
+          items: [
+            { label: 'Absensi', path: '/laporan/absensi', icon: CalendarCheck, ...menuIconStyle },
+            { label: 'Izin', path: '/laporan/izin', icon: ClockAlert, ...menuIconStyle },
+            { label: 'Pelanggaran', path: '/laporan/pembinaan', icon: ShieldAlert, ...menuIconStyle },
+            { label: 'Penjadwalan', path: '/penjadwalan', icon: CalendarRange, ...menuIconStyle },
+            { label: 'Pembayaran', path: '/master/pembayaran', icon: Wallet, ...menuIconStyle },
+          ],
+        },
+        {
+          title: 'Data Master',
+          items: [
+            { label: 'Santri', path: '/master/santri', icon: Users, ...menuIconStyle },
+            { label: 'Kamar', path: '/master/kamar', icon: BedDouble, ...menuIconStyle },
+            { label: 'Kelas', path: '/master/kelas', icon: GraduationCap, ...menuIconStyle },
+            { label: 'Kegiatan', path: '/master/kegiatan', icon: CalendarDays, ...menuIconStyle },
+            { label: 'Kelola Data', path: '/master', icon: Database, ...menuIconStyle },
+          ],
+        },
+        {
+          title: 'Laporan & Analisis',
+          items: [
+            { label: 'Laporan', path: '/laporan', icon: FileText, ...menuIconStyle },
+            { label: 'Peringkat', path: '/laporan/peringkat', icon: Trophy, ...menuIconStyle },
+            { label: 'Sebaran Wilayah', path: '/laporan/wilayah', icon: MapPin, ...menuIconStyle },
+          ],
+        },
+        {
+          title: 'Sistem',
+          items: [
+            { label: 'Pengaturan', path: '/pengaturan', icon: Settings, ...menuIconStyle },
+            { label: 'Cadangan Data', path: '/database', icon: Database, ...menuIconStyle },
+          ],
+        },
+      ]
+        .map((group) => ({
+          ...group,
+          items: group.items.filter((item) => canOpenMenu(item.path)),
+        }))
+        .filter((group) => group.items.length > 0),
+    [canOpenMenu]
+  );
 
   const refreshDashboard = useCallback(async () => {
     await fetchAbsensiForDay({ tanggal: todayKey })

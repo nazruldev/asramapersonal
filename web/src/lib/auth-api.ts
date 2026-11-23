@@ -7,7 +7,14 @@ import {
   verifySecurityAnswers,
   type SecurityQuestionId,
 } from '@/lib/app-auth';
-import type { AppSettings, Asrama, ModulAkses, Pengguna } from '@/lib/app-settings';
+import {
+  MODUL_AKSES_OPTIONS,
+  normalizeJenisAsrama,
+  type AppSettings,
+  type Asrama,
+  type ModulAkses,
+  type Pengguna,
+} from '@/lib/app-settings';
 
 type ApiResult = { status: number; body: unknown };
 
@@ -98,11 +105,21 @@ export function handleAsramaCreate(
 ): ApiResult {
   const nama = String(body.nama ?? '').trim();
   if (!nama) return { status: 400, body: { error: 'Nama asrama wajib diisi' } };
+  const dup = settings.asrama.some(
+    (a) => a.nama.trim().toLowerCase() === nama.toLowerCase()
+  );
+  if (dup) return { status: 400, body: { error: 'Nama asrama sudah dipakai' } };
+  const jenisRaw = String(body.jenis ?? '').trim();
+  const jenis = jenisRaw ? normalizeJenisAsrama(jenisRaw) : '';
+  if (jenisRaw && !jenis) {
+    return { status: 400, body: { error: 'Jenis asrama tidak valid' } };
+  }
+  const alamat = body.alamat ? String(body.alamat).trim() : '';
   const item: Asrama = {
     id: newId(),
     nama,
-    jenis: String(body.jenis ?? '').trim(),
-    alamat: body.alamat ? String(body.alamat).trim() : undefined,
+    jenis: jenis || undefined,
+    alamat: alamat || undefined,
   };
   settings.asrama.push(item);
   return { status: 200, body: item };
@@ -117,9 +134,23 @@ export function handleAsramaUpdate(
   if (!item) return { status: 404, body: { error: 'Asrama tidak ditemukan' } };
   const nama = String(body.nama ?? item.nama).trim();
   if (!nama) return { status: 400, body: { error: 'Nama asrama wajib diisi' } };
+  const dup = settings.asrama.some(
+    (a) => a.id !== id && a.nama.trim().toLowerCase() === nama.toLowerCase()
+  );
+  if (dup) return { status: 400, body: { error: 'Nama asrama sudah dipakai' } };
   item.nama = nama;
-  if (body.jenis !== undefined) item.jenis = String(body.jenis).trim();
-  if (body.alamat !== undefined) item.alamat = String(body.alamat).trim();
+  if (body.jenis !== undefined) {
+    const jenisRaw = String(body.jenis).trim();
+    const jenis = jenisRaw ? normalizeJenisAsrama(jenisRaw) : '';
+    if (jenisRaw && !jenis) {
+      return { status: 400, body: { error: 'Jenis asrama tidak valid' } };
+    }
+    item.jenis = jenis || undefined;
+  }
+  if (body.alamat !== undefined) {
+    const alamat = String(body.alamat).trim();
+    item.alamat = alamat || undefined;
+  }
   return { status: 200, body: item };
 }
 
@@ -128,13 +159,18 @@ export function handleAsramaDelete(
   id: string,
   inUse: boolean
 ): ApiResult {
+  const exists = settings.asrama.some((a) => a.id === id);
+  if (!exists) return { status: 404, body: { error: 'Asrama tidak ditemukan' } };
   if (settings.asrama.length <= 1) {
     return { status: 400, body: { error: 'Minimal harus ada satu asrama' } };
   }
   if (inUse) {
     return {
       status: 400,
-      body: { error: 'Asrama masih dipakai santri/kamar. Pindahkan dulu datanya.' },
+      body: {
+        error:
+          'Asrama masih dipakai (santri, kamar, atau satu-satunya tugas pengawas). Pindahkan dulu datanya.',
+      },
     };
   }
   settings.asrama = settings.asrama.filter((a) => a.id !== id);
@@ -158,7 +194,9 @@ type PenggunaBody = {
 };
 
 function normalizeAkses(value: unknown): ModulAkses[] {
-  return Array.isArray(value) ? (value as ModulAkses[]) : [];
+  if (!Array.isArray(value)) return [];
+  const valid = new Set(MODUL_AKSES_OPTIONS.map((o) => o.id));
+  return value.filter((id): id is ModulAkses => typeof id === 'string' && valid.has(id as ModulAkses));
 }
 
 function normalizeAsramaIds(settings: AppSettings, value: unknown): string[] {

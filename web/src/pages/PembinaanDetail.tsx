@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { useLocation, useNavigate } from 'react-router';
-import { CircleAlert, Crown, MessageCircle, Phone, ShieldAlert, Trash2 } from 'lucide-react';
+import {
+  CircleAlert,
+  Crown,
+  FileDown,
+  Phone,
+  Share2,
+  ShieldAlert,
+  Trash2,
+} from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useAppStore } from '@/store/app-store';
 import { AppLoadingIndicator } from '@/components/app-loading-indicator';
@@ -14,18 +22,16 @@ import { getPelanggaranTier } from '@/lib/app-settings';
 import {
   getPembinaanBadgeStyle,
   parsePembinaanSantriIdFromPath,
+  pembinaanJenisLabel,
   type PembinaanRow,
 } from '@/lib/pembinaan-group';
-import {
-  buildPelanggaranWaliWhatsAppMessage,
-  formatWhatsAppPhone,
-  openWhatsAppWithText,
-} from '@/lib/pembinaan-wa';
+import { downloadBkWaliPdf, shareBkWaliPdf } from '@/lib/laporan-print';
+import { formatSantriDate } from '@/lib/santri-detail';
 import { Button } from '@/components/ui/button';
 import { appCardClass } from '@/lib/surface-styles';
 import { cn } from '@/lib/utils';
 import { PageWithPullRefresh } from '@/components/page-with-pull-refresh';
-import { AppLogo } from '@/components/app-logo';
+import { SantriAvatar } from '@/components/santri-avatar';
 
 type SantriDetailRow = {
   id: string;
@@ -35,16 +41,11 @@ type SantriDetailRow = {
   nomor_wali?: string;
   include_wa?: boolean;
   jumlah_pelanggaran?: number;
+  foto?: string;
 };
 
-function countJenis(rows: PembinaanRow[]) {
-  let pelanggaran = 0;
-  let teguran = 0;
-  for (const r of rows) {
-    if (r.jenis === 'Pelanggaran') pelanggaran += 1;
-    else if (r.jenis === 'Teguran') teguran += 1;
-  }
-  return { pelanggaran, teguran, total: rows.length };
+function countPelanggaran(rows: PembinaanRow[]) {
+  return { pelanggaran: rows.length, total: rows.length };
 }
 
 export default function PembinaanDetail() {
@@ -81,11 +82,13 @@ export default function PembinaanDetail() {
       if (!res.ok) throw new Error('delete failed');
     },
     onSuccess: () => {
-      toast.success('Catatan pembinaan berhasil dihapus');
+      toast.success('Catatan pelanggaran berhasil dihapus');
       void reload(['pembinaan', 'santri', 'dashboard']);
     },
     onError: () => toast.error('Gagal menghapus catatan'),
   });
+
+  const [pdfBusy, setPdfBusy] = useState<'unduh' | 'bagikan' | null>(null);
 
   const { santri: resolvedSantri, displayName: resolvedName } = useResolvedSantri(santriId);
   const santri =
@@ -95,19 +98,24 @@ export default function PembinaanDetail() {
   const allRecords = useMemo(() => {
     if (!santriId) return [];
     const rows = Array.isArray(pembinaanList) ? (pembinaanList as PembinaanRow[]) : [];
+    const sortKey = (iso: string) => {
+      const raw = String(iso ?? '').trim();
+      const datePart = raw.slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+        const [y, m, d] = datePart.split('-').map(Number);
+        return new Date(y, m - 1, d).getTime();
+      }
+      const t = new Date(raw).getTime();
+      return Number.isNaN(t) ? 0 : t;
+    };
     return rows
       .filter((p) => String(p.santri_id) === santriId)
-      .sort((a, b) => new Date(b.tanggal).getTime() - new Date(a.tanggal).getTime());
+      .sort((a, b) => sortKey(b.tanggal) - sortKey(a.tanggal));
   }, [pembinaanList, santriId]);
 
   const records = allRecords;
 
-  const totalCounts = useMemo(() => countJenis(allRecords), [allRecords]);
-
-  const pelanggaranRecords = useMemo(
-    () => allRecords.filter((r) => r.jenis === 'Pelanggaran'),
-    [allRecords]
-  );
+  const totalCounts = useMemo(() => countPelanggaran(allRecords), [allRecords]);
 
   const poinAkumulasi = Number(santri?.jumlah_pelanggaran) || 0;
   const tier = getPelanggaranTier(poinAkumulasi, settings);
@@ -134,47 +142,55 @@ export default function PembinaanDetail() {
     window.location.href = `tel:${clean}`;
   }, [nomorWali]);
 
-  const handleWhatsAppPelanggaran = useCallback(() => {
-    if (!nomorWali) {
-      toast.error('Nomor wali belum diisi');
-      return;
-    }
-    if (santri?.include_wa === false) {
-      toast.error('Santri ini tidak menggunakan WhatsApp untuk wali');
-      return;
-    }
-    const text = buildPelanggaranWaliWhatsAppMessage({
-      namaAsrama: settings.namaAsrama,
-      santriNama: displayName,
-      kelas: displayKelas,
-      kamar: displayKamar,
-      ketuaKamar,
-      akumulasiHitungan: poinAkumulasi,
-      tierLabel: tier?.level ? tier.label : null,
-      totalPelanggaran: totalCounts.pelanggaran,
-      totalTeguran: totalCounts.teguran,
-      pelanggaranRecords,
-    });
-    if (!openWhatsAppWithText(nomorWali, text)) {
-      toast.error('Nomor wali tidak valid');
-    }
-  }, [
-    displayKamar,
-    displayKelas,
-    displayName,
-    ketuaKamar,
-    nomorWali,
-    pelanggaranRecords,
-    poinAkumulasi,
-    santri?.include_wa,
-    settings.namaAsrama,
-    tier?.label,
-    tier?.level,
-    totalCounts.pelanggaran,
-    totalCounts.teguran,
-  ]);
+  const bkPdfOpts = useMemo(
+    () => ({
+      namaAsrama: settings.namaAsrama || 'Asrama',
+      santri: {
+        nama: displayName,
+        kelas: displayKelas,
+        kamar: displayKamar,
+        nomorWali,
+        poinAkumulasi,
+        tierLabel: tier?.level ? tier.label : null,
+      },
+      records: allRecords.map((r) => ({
+        tanggal: r.tanggal,
+        jenis: r.jenis,
+        keterangan: r.keterangan,
+        tindak_lanjut: r.tindak_lanjut,
+      })),
+    }),
+    [
+      allRecords,
+      displayKelas,
+      displayKamar,
+      displayName,
+      nomorWali,
+      poinAkumulasi,
+      settings.namaAsrama,
+      tier?.label,
+      tier?.level,
+    ]
+  );
 
-  const waDisplay = formatWhatsAppPhone(nomorWali);
+  const runBkPdf = useCallback(
+    async (action: 'unduh' | 'bagikan') => {
+      if (!allRecords.length) {
+        toast.error('Belum ada catatan pelanggaran untuk dikirim');
+        return;
+      }
+      setPdfBusy(action);
+      try {
+        if (action === 'unduh') await downloadBkWaliPdf(bkPdfOpts);
+        else await shareBkWaliPdf(bkPdfOpts);
+      } catch {
+        toast.error(action === 'unduh' ? 'Gagal mengunduh PDF' : 'Gagal membagikan PDF');
+      } finally {
+        setPdfBusy(null);
+      }
+    },
+    [allRecords.length, bkPdfOpts]
+  );
 
   if (!santriId) {
     return <EmptyState icon={CircleAlert} title="Santri tidak valid" variant="inline" />;
@@ -194,7 +210,11 @@ export default function PembinaanDetail() {
     <PageWithPullRefresh keys={['pembinaan', 'santri', 'kamar', 'settings']} className="space-y-4">
       <div className={cn(appCardClass, 'p-4 space-y-3')}>
         <div className="flex items-start gap-3">
-          <AppLogo size="md" />
+          <SantriAvatar
+            nama={displayName}
+            foto={(santri as SantriDetailRow | null)?.foto || null}
+            size="lg"
+          />
           <div className="min-w-0 flex-1">
             <h2 className="text-base font-bold text-slate-900 leading-snug">{displayName}</h2>
             <p className="text-[11px] text-slate-500 mt-0.5">Kelas {displayKelas}</p>
@@ -225,12 +245,7 @@ export default function PembinaanDetail() {
           <span
             className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${getPembinaanBadgeStyle('Pelanggaran')}`}
           >
-            {totalCounts.pelanggaran} pelanggaran
-          </span>
-          <span
-            className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${getPembinaanBadgeStyle('Teguran')}`}
-          >
-            {totalCounts.teguran} teguran
+            {totalCounts.total} pelanggaran
           </span>
           <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full border bg-slate-100 text-slate-700 border-slate-200">
             Akumulasi {poinAkumulasi}x{tier?.level ? ` · ${tier.label}` : ''}
@@ -251,15 +266,29 @@ export default function PembinaanDetail() {
           </Button>
           <Button
             type="button"
+            variant="outline"
             size="sm"
-            className="text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
-            disabled={!waDisplay || santri?.include_wa === false}
-            onClick={handleWhatsAppPelanggaran}
+            className="text-xs gap-1.5"
+            disabled={pdfBusy !== null || allRecords.length === 0}
+            onClick={() => void runBkPdf('unduh')}
           >
-            <MessageCircle className="w-3.5 h-3.5" />
-            WA laporan BK
+            <FileDown className="w-3.5 h-3.5" />
+            {pdfBusy === 'unduh' ? 'Menyiapkan…' : 'Unduh PDF'}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            className="text-xs gap-1.5 col-span-2 bg-teal-600 hover:bg-teal-700 text-white"
+            disabled={pdfBusy !== null || allRecords.length === 0}
+            onClick={() => void runBkPdf('bagikan')}
+          >
+            <Share2 className="w-3.5 h-3.5" />
+            {pdfBusy === 'bagikan' ? 'Menyiapkan…' : 'Bagikan PDF ke ortu'}
           </Button>
         </div>
+        <p className="text-[10px] text-slate-500 leading-relaxed">
+          PDF berisi seluruh catatan pelanggaran santri ini.
+        </p>
       </div>
 
       <div className="rounded-sm border border-rose-100 bg-rose-50/60 p-4 text-xs text-rose-900 space-y-1">
@@ -267,9 +296,7 @@ export default function PembinaanDetail() {
           Ringkasan
         </p>
         <p>
-          Total <span className="font-bold">{totalCounts.total}</span> catatan BK ·{' '}
-          <span className="font-bold">{totalCounts.pelanggaran}</span> pelanggaran ·{' '}
-          {totalCounts.teguran} teguran
+          Total <span className="font-bold">{totalCounts.total}</span> catatan pelanggaran
         </p>
         <p className="text-rose-800/80">
           Hapus catatan dengan ikon tempat sampah; hitungan pelanggaran menyesuaikan otomatis.
@@ -277,7 +304,7 @@ export default function PembinaanDetail() {
       </div>
 
       {records.length === 0 ? (
-        <EmptyState icon={ShieldAlert} title="Belum ada catatan BK">
+        <EmptyState icon={ShieldAlert} title="Belum ada catatan pelanggaran">
           <button
             type="button"
             onClick={() => navigate('/laporan/pembinaan')}
@@ -298,14 +325,10 @@ export default function PembinaanDetail() {
                   <span
                     className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${getPembinaanBadgeStyle(item.jenis)}`}
                   >
-                    {item.jenis}
+                    {pembinaanJenisLabel(item.jenis)}
                   </span>
                   <p className="text-[11px] text-slate-500 mt-1">
-                    {new Date(item.tanggal).toLocaleDateString('id-ID', {
-                      day: 'numeric',
-                      month: 'long',
-                      year: 'numeric',
-                    })}
+                    {formatSantriDate(item.tanggal)}
                   </p>
                 </div>
                 <button
@@ -313,7 +336,7 @@ export default function PembinaanDetail() {
                   onClick={() =>
                     confirmDialog.ask({
                       title: 'Hapus catatan?',
-                      message: `Yakin menghapus catatan ${item.jenis} ini?`,
+                      message: 'Yakin menghapus catatan pelanggaran ini?',
                       confirmLabel: 'Ya, Hapus',
                       destructive: true,
                       onConfirm: () => deletePembinaanMutation.mutateAsync(item.id),

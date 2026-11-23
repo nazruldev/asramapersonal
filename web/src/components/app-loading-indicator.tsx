@@ -1,3 +1,5 @@
+import { createPortal } from 'react-dom';
+
 const APP_ICON_URL = `${import.meta.env.BASE_URL}apple-touch-icon.png`;
 /** typeof aman jika Vite belum inject define (server belum restart). */
 const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev';
@@ -6,11 +8,14 @@ type Props = {
   message?: string;
   /** full screen overlay */
   fullscreen?: boolean;
+  /** Overlay gelap semi-transparan (untuk aksi singkat seperti ganti asrama). */
+  dim?: boolean;
 };
 
 export function AppLoadingIndicator({
   message = 'Memuat data…',
   fullscreen = false,
+  dim = false,
 }: Props) {
   const ring = (size: 'sm' | 'lg' = 'sm') => {
     const box = size === 'lg' ? 'w-32 h-32' : 'w-20 h-20';
@@ -61,10 +66,28 @@ export function AppLoadingIndicator({
     );
   };
 
-  if (fullscreen) {
-    return (
+  if (fullscreen && dim) {
+    // Portal ke body agar menutup tab bawah (footer z-50) & header.
+    return createPortal(
       <div
-        className="fixed inset-0 z-[200] flex flex-col items-center justify-center bg-slate-100 dark:bg-slate-950 gap-5 px-6"
+        className="fixed inset-0 z-[400] flex flex-col items-center justify-center gap-4 bg-black/55 backdrop-blur-[2px] px-6"
+        role="status"
+        aria-live="polite"
+        aria-busy="true"
+      >
+        <div className="rounded-2xl bg-white/95 dark:bg-slate-900/95 p-5 shadow-lg ring-1 ring-black/10 dark:ring-white/10">
+          {ring('lg')}
+        </div>
+        <p className="text-sm text-white font-medium text-center drop-shadow-sm">{message}</p>
+      </div>,
+      document.body
+    );
+  }
+
+  if (fullscreen) {
+    return createPortal(
+      <div
+        className="fixed inset-0 z-[400] flex flex-col items-center justify-center bg-slate-100 dark:bg-slate-950 gap-5 px-6"
         role="status"
         aria-live="polite"
         aria-busy="true"
@@ -79,7 +102,8 @@ export function AppLoadingIndicator({
             Versi {APP_VERSION}
           </p>
         </div>
-      </div>
+      </div>,
+      document.body
     );
   }
 

@@ -1,8 +1,8 @@
 /**
  * Store pembayaran santri (tagihan dinamis + cicilan).
  *
- * Full-online Turso: cloud = sumber kebenaran.
- * localStorage/SQLite hanya cache kerja di RAM path; setiap mutasi await push ke Turso.
+ * Direct Turso: setiap baca pull dari cloud; setiap mutasi flush ke cloud.
+ * localStorage hanya cache kerja sementara, bukan sumber kebenaran.
  */
 import { createClient, type Client, type InStatement } from '@libsql/client/web';
 import {
@@ -93,6 +93,40 @@ export function sisaTagihan(t: Pick<TagihanRow, 'nominal' | 'terbayar'>): number
   return Math.max(0, num(t.nominal) - num(t.terbayar));
 }
 
+function todayYmdLocal(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/** Jatuh tempo efektif: field tagihan, atau akhir bulan periode. */
+export function effectiveJatuhTempo(
+  t: Pick<TagihanRow, 'jatuh_tempo' | 'periode'>
+): string | null {
+  const jt = (t.jatuh_tempo || '').trim().slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(jt)) return jt;
+  const m = (t.periode || '').match(/^(\d{4})-(\d{2})$/);
+  if (!m) return null;
+  const last = new Date(Number(m[1]), Number(m[2]), 0);
+  const y = last.getFullYear();
+  const mo = String(last.getMonth() + 1).padStart(2, '0');
+  const day = String(last.getDate()).padStart(2, '0');
+  return `${y}-${mo}-${day}`;
+}
+
+/** Tunggakan = masih ada sisa DAN sudah lewat jatuh tempo. */
+export function isTagihanTunggakan(
+  t: Pick<TagihanRow, 'nominal' | 'terbayar' | 'jatuh_tempo' | 'periode'>,
+  today = todayYmdLocal()
+): boolean {
+  if (sisaTagihan(t) <= 0) return false;
+  const due = effectiveJatuhTempo(t);
+  if (!due) return false;
+  return due < today;
+}
+
 // ——— localStorage (web / electron tanpa sqlite) ———
 
 type LsState = {
@@ -174,9 +208,27 @@ function mapTransaksi(r: Record<string, unknown>): PembayaranTransaksi {
   };
 }
 
+/** Selama push, jangan pull-live (akan menimpa mutasi lokal yang belum terkirim). */
+let suppressLivePull = false;
+
+/** Direct Turso: wajib pull live sebelum baca/mutasi lokal. */
+async function ensurePembayaranLiveFromTurso(): Promise<void> {
+  if (suppressLivePull) return;
+  if (!isPembayaranSyncConfigured()) {
+    throw new Error('Turso wajib untuk pembayaran');
+  }
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    throw new Error('Tidak ada internet. Aplikasi wajib online ke Turso.');
+  }
+  await pullPembayaranFromTurso();
+}
+
 // ——— CRUD: jenis ———
 
 export async function listTagihanJenis(): Promise<TagihanJenis[]> {
+  if (isPembayaranSyncConfigured()) {
+    await ensurePembayaranLiveFromTurso();
+  }
   if (shouldPersistToSqlite()) {
     await initOfflineSqlite();
     return runSqlExclusive(async (db) => {
@@ -190,6 +242,7 @@ export async function listTagihanJenis(): Promise<TagihanJenis[]> {
 export async function upsertTagihanJenis(
   input: Omit<TagihanJenis, 'id' | 'created_at' | 'updated_at'> & { id?: string }
 ): Promise<TagihanJenis> {
+  if (isPembayaranSyncConfigured()) await ensurePembayaranLiveFromTurso();
   const row: TagihanJenis = {
     id: input.id || newId(),
     nama: input.nama.trim(),
@@ -227,7 +280,9 @@ export async function upsertTagihanJenis(
     for (const t of st.tagihan) if (t.jenis_id === row.id) t.nama_jenis = row.nama;
     lsWrite(st);
   }
+  console.debug('[pembayaran] upsertTagihanJenis selesai lokal, push ke Turso…', row.id);
   await flushPembayaranToTurso();
+  console.debug('[pembayaran] push jenis OK', row.id);
   return row;
 }
 
@@ -235,6 +290,7 @@ export async function deleteTagihanJenis(id: string): Promise<void> {
   if (shouldPersistToSqlite()) {
     await initOfflineSqlite();
     await runSqlExclusive(async (db) => {
+      await db.run(`UPDATE tagihan SET jenis_id = NULL WHERE jenis_id = ?`, [id]);
       await db.run(`DELETE FROM tagihan_jenis WHERE id = ?`, [id]);
     });
   } else {
@@ -280,6 +336,9 @@ function matchTagihanFilter(t: TagihanRow, filter?: TagihanFilter): boolean {
 }
 
 export async function listTagihan(filter?: TagihanFilter): Promise<TagihanRow[]> {
+  if (isPembayaranSyncConfigured()) {
+    await ensurePembayaranLiveFromTurso();
+  }
   if (shouldPersistToSqlite()) {
     await initOfflineSqlite();
     return runSqlExclusive(async (db) => {
@@ -311,6 +370,7 @@ export async function getTagihan(id: string): Promise<TagihanRow | null> {
 export async function generateTagihan(
   input: GenerateTagihanInput
 ): Promise<GenerateTagihanResult> {
+  if (isPembayaranSyncConfigured()) await ensurePembayaranLiveFromTurso();
   const jenis = input.jenis;
   const periode = input.periode.trim();
   const baseNominal =
@@ -467,6 +527,7 @@ async function recountTagihanTerbayar(tagihanId: string): Promise<void> {
 }
 
 export async function listTransaksi(tagihanId: string): Promise<PembayaranTransaksi[]> {
+  if (isPembayaranSyncConfigured()) await ensurePembayaranLiveFromTurso();
   if (shouldPersistToSqlite()) {
     await initOfflineSqlite();
     return runSqlExclusive(async (db) => {
@@ -485,9 +546,10 @@ export async function listTransaksi(tagihanId: string): Promise<PembayaranTransa
 export async function addTransaksi(
   tagihanId: string,
   input: { jumlah: number; tanggal?: string; catatan?: string }
-): Promise<PembayaranTransaksi | null> {
+): Promise<PembayaranTransaksi | null | { error: string }> {
+  if (isPembayaranSyncConfigured()) await ensurePembayaranLiveFromTurso();
   const jumlah = Math.floor(num(input.jumlah));
-  if (jumlah <= 0) return null;
+  if (jumlah <= 0) return { error: 'Jumlah pembayaran harus lebih dari 0.' };
   const row: PembayaranTransaksi = {
     id: newId(),
     tagihan_id: tagihanId,
@@ -500,19 +562,34 @@ export async function addTransaksi(
 
   if (shouldPersistToSqlite()) {
     await initOfflineSqlite();
-    const ok = await runSqlExclusive(async (db) => {
-      const cur = await db.query(`SELECT santri_id FROM tagihan WHERE id = ?`, [tagihanId]);
-      const sid = (cur.values?.[0] as { santri_id?: string })?.santri_id;
-      if (!sid) return false;
-      row.santri_id = String(sid);
+    const result = await runSqlExclusive(async (db) => {
+      const cur = await db.query(
+        `SELECT santri_id, nominal, terbayar FROM tagihan WHERE id = ?`,
+        [tagihanId]
+      );
+      const t = cur.values?.[0] as
+        | { santri_id?: string; nominal?: number; terbayar?: number }
+        | undefined;
+      if (!t?.santri_id) return { ok: false as const, error: 'not_found' as const };
+      const sisa = sisaTagihan({
+        nominal: num(t.nominal),
+        terbayar: num(t.terbayar),
+      });
+      if (jumlah > sisa) return { ok: false as const, error: 'overpay' as const };
+      row.santri_id = String(t.santri_id);
       await db.run(
         `INSERT INTO pembayaran (id, tagihan_id, santri_id, jumlah, tanggal, catatan, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [row.id, row.tagihan_id, row.santri_id, row.jumlah, row.tanggal, row.catatan ?? null, row.created_at]
       );
-      return true;
+      return { ok: true as const };
     });
-    if (!ok) return null;
+    if (!result.ok) {
+      if (result.error === 'overpay') {
+        return { error: 'Jumlah melebihi sisa tagihan.' };
+      }
+      return null;
+    }
     await recountTagihanTerbayar(tagihanId);
     await flushPembayaranToTurso();
     return row;
@@ -521,6 +598,8 @@ export async function addTransaksi(
   const st = lsRead();
   const tagihan = st.tagihan.find((t) => t.id === tagihanId);
   if (!tagihan) return null;
+  const sisa = sisaTagihan(tagihan);
+  if (jumlah > sisa) return { error: 'Jumlah melebihi sisa tagihan.' };
   row.santri_id = tagihan.santri_id;
   st.pembayaran.push(row);
   tagihan.terbayar = st.pembayaran
@@ -563,12 +642,16 @@ export async function deleteTransaksi(id: string): Promise<void> {
   await flushPembayaranToTurso();
 }
 
-/** Rekap tunggakan per santri (opsional per periode). */
+/**
+ * Rekap tunggakan per santri (opsional per periode).
+ * Hanya tagihan yang masih ada sisa DAN sudah lewat jatuh tempo.
+ */
 export async function listTunggakan(
   periode?: string
 ): Promise<{ santri_id: string; total_sisa: number; jumlah_tagihan: number; rows: TagihanRow[] }[]> {
-  const rows = (await listTagihan(periode ? { periode } : undefined)).filter(
-    (t) => sisaTagihan(t) > 0
+  const today = todayYmdLocal();
+  const rows = (await listTagihan(periode ? { periode } : undefined)).filter((t) =>
+    isTagihanTunggakan(t, today)
   );
   const bySantri = new Map<string, TagihanRow[]>();
   for (const t of rows) {
@@ -711,7 +794,14 @@ export async function pushPembayaranToTurso(): Promise<void> {
   const client = tursoClient();
   if (!client) return;
   await ensureTursoPaymentSchema(client);
-  const local = await readAllLocal();
+  // Baca state lokal apa adanya — jangan pull-live dulu agar mutasi baru tidak tertimpa.
+  suppressLivePull = true;
+  let local: Awaited<ReturnType<typeof readAllLocal>>;
+  try {
+    local = await readAllLocal();
+  } finally {
+    suppressLivePull = false;
+  }
   const stmts: InStatement[] = [];
   const now = nowIso();
 
@@ -762,6 +852,11 @@ export async function pushPembayaranToTurso(): Promise<void> {
   await prune('pembayaran', local.transaksi.map((p) => p.id));
   await prune('tagihan', local.tagihan.map((t) => t.id));
   await prune('tagihan_jenis', local.jenis.map((j) => j.id));
+  console.debug('[pembayaran] pushPembayaranToTurso done:', {
+    jenis: local.jenis.length,
+    tagihan: local.tagihan.length,
+    transaksi: local.transaksi.length,
+  });
 }
 
 /** Pull tabel pembayaran dari Turso → ganti isi lokal (cloud = sumber kebenaran). */
@@ -816,40 +911,41 @@ export async function pullPembayaranFromTurso(): Promise<boolean> {
   return true;
 }
 
-let pulled = false;
-
-/** Full-online: await push ke Turso setelah mutasi. */
+/** Direct Turso: await push ke cloud setelah mutasi. */
 async function flushPembayaranToTurso(): Promise<void> {
   if (!isPembayaranSyncConfigured()) {
     throw new Error('Turso wajib untuk menyimpan pembayaran');
   }
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
-    throw new Error('Offline — tidak bisa menyimpan pembayaran ke Turso');
+    throw new Error('Tidak ada internet. Aplikasi wajib online ke Turso.');
   }
   await pushPembayaranToTurso();
+  void import('@/lib/sync/ably-realtime')
+    .then((m) => m.publishSyncSignal('pembayaran'))
+    .catch(() => undefined);
+  void import('@/lib/local-reminders')
+    .then(({ rescheduleLocalReminders }) => rescheduleLocalReminders())
+    .catch(() => undefined);
+  void import('@/store/app-store')
+    .then(({ useAppStore }) => {
+      const st = useAppStore.getState();
+      return import('@/lib/in-app-notifications').then(({ syncOperationalInAppNotifications }) =>
+        syncOperationalInAppNotifications({
+          kegiatan: st.kegiatan as never,
+          izin: st.izin as never,
+        })
+      );
+    })
+    .catch(() => undefined);
 }
 
-/** Pull sekali per sesi (dipanggil saat halaman pembayaran dibuka). */
+/** Direct: selalu pull live dari Turso. */
 export async function syncPembayaranOnce(): Promise<void> {
-  if (pulled) return;
-  if (!isPembayaranSyncConfigured()) {
-    throw new Error('Turso wajib untuk pembayaran');
-  }
-  if (typeof navigator !== 'undefined' && !navigator.onLine) {
-    throw new Error('Offline — tidak bisa memuat pembayaran dari Turso');
-  }
-  pulled = true;
-  try {
-    await pullPembayaranFromTurso();
-  } catch (err) {
-    pulled = false;
-    throw err;
-  }
+  await ensurePembayaranLiveFromTurso();
 }
 
 /** Paksa pull ulang (tombol refresh). */
 export async function refreshPembayaranFromCloud(): Promise<boolean> {
-  pulled = false;
-  await syncPembayaranOnce();
-  return pulled;
+  await ensurePembayaranLiveFromTurso();
+  return true;
 }

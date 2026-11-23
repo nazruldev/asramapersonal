@@ -96,7 +96,7 @@ export async function ensureTursoSchemaPatches(client: Client): Promise<void> {
     santri: ['jenis_kelamin', 'asrama_id', 'created_by', 'updated_by'],
     kamar: ['asrama_id', 'created_by', 'updated_by'],
     kelas: ['created_by', 'updated_by'],
-    kegiatan: ['created_by', 'updated_by'],
+    kegiatan: ['created_by', 'updated_by', 'acuan_tanggal'],
     penjadwalan_preset: ['created_by', 'updated_by'],
     penjadwalan: ['created_by', 'updated_by'],
     absensi: ['created_by', 'updated_by'],
@@ -112,6 +112,15 @@ export async function ensureTursoSchemaPatches(client: Client): Promise<void> {
         if (have.has(col)) continue;
         try {
           await client.execute(`ALTER TABLE ${table} ADD COLUMN ${col} TEXT`);
+        } catch {
+          /* kolom sudah ada */
+        }
+      }
+      if (table === 'kegiatan' && !have.has('interval_minggu')) {
+        try {
+          await client.execute(
+            `ALTER TABLE kegiatan ADD COLUMN interval_minggu INTEGER NOT NULL DEFAULT 1`
+          );
         } catch {
           /* kolom sudah ada */
         }
@@ -239,11 +248,16 @@ export async function writeSnapshotToTursoTables(
 
   if (includeKegiatan) {
     for (const row of kegiatan) {
+      const intervalRaw = Number(row.interval_minggu);
+      const intervalMinggu =
+        Number.isFinite(intervalRaw) && intervalRaw >= 1 ? Math.floor(intervalRaw) : 1;
+      const acuan = intervalMinggu > 1 ? opt(row, 'acuan_tanggal') : null;
       inserts.push(
         stmt(
           `INSERT INTO kegiatan (
-            id, nama, jenis, icon, jam_mulai, jam_selesai, waktu, urutan, untuk_absensi, hari_aktif_json, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            id, nama, jenis, icon, jam_mulai, jam_selesai, waktu, urutan, untuk_absensi,
+            hari_aktif_json, interval_minggu, acuan_tanggal, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             String(row.id),
             str(row, 'nama'),
@@ -255,6 +269,8 @@ export async function writeSnapshotToTursoTables(
             Number(row.urutan) || 0,
             row.untuk_absensi === false ? 0 : 1,
             JSON.stringify(row.hari_aktif ?? []),
+            intervalMinggu,
+            acuan,
             opt(row, 'updated_at') ?? now,
           ]
         )
@@ -891,6 +907,7 @@ export async function readSnapshotFromTursoTables(
     } catch {
       hari = [];
     }
+    const intervalRaw = Number(r.interval_minggu);
     return {
       id: String(r.id),
       nama: String(r.nama ?? ''),
@@ -902,6 +919,9 @@ export async function readSnapshotFromTursoTables(
       urutan: Number(r.urutan) || 0,
       untuk_absensi: !(r.untuk_absensi === 0 || r.untuk_absensi === 0n),
       hari_aktif: hari,
+      interval_minggu:
+        Number.isFinite(intervalRaw) && intervalRaw >= 1 ? Math.floor(intervalRaw) : 1,
+      acuan_tanggal: r.acuan_tanggal ? String(r.acuan_tanggal) : undefined,
     };
   });
 

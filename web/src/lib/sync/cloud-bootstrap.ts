@@ -1,26 +1,16 @@
-import { createClient } from '@libsql/client/web';
-import {
-  markOnboardingComplete,
-  mergeAppSettings,
-  type AppSettings,
-} from '@/lib/app-settings';
+import { markOnboardingComplete, type AppSettings } from '@/lib/app-settings';
 import { applySettingsFromCloud } from '@/lib/client-api';
+import { getTursoClient, isTursoDirectEnabled, pingTurso } from '@/lib/turso/client';
+import { loadSettingsFromTurso, saveSettingsToTurso } from '@/lib/turso/repos/settings';
+import { ensureTursoSchemaPatches } from '@/lib/sync/turso-relational';
 
 export function isTursoConfigured(): boolean {
-  const url = (import.meta.env.VITE_TURSO_DATABASE_URL as string | undefined)?.trim();
-  const token = (import.meta.env.VITE_TURSO_AUTH_TOKEN as string | undefined)?.trim();
-  return Boolean(url && token);
+  return isTursoDirectEnabled();
 }
 
 /** Mode full-online: Turso adalah satu-satunya sumber kebenaran. */
 export function isTursoCloudAuthority(): boolean {
   return isTursoConfigured();
-}
-
-function tursoClient() {
-  const url = (import.meta.env.VITE_TURSO_DATABASE_URL as string).trim();
-  const authToken = (import.meta.env.VITE_TURSO_AUTH_TOKEN as string).trim();
-  return createClient({ url, authToken });
 }
 
 function assertOnline(): void {
@@ -29,36 +19,11 @@ function assertOnline(): void {
   }
 }
 
-async function pullRemoteSettings(): Promise<AppSettings | null> {
-  const client = tursoClient();
-  const res = await client.execute(
-    `SELECT payload, updated_at FROM app_settings WHERE id = 'default' LIMIT 1`
-  );
-  if (!res.rows.length) return null;
-  const payload = String(res.rows[0].payload ?? '');
-  if (!payload) return null;
-  try {
-    const parsed = JSON.parse(payload) as Partial<AppSettings>;
-    return mergeAppSettings({ ...parsed, setupSelesai: true });
-  } catch {
-    return null;
-  }
-}
-
 /** Push settings ke Turso (cepat, tanpa full snapshot). */
 export async function pushSettingsToTurso(settings: AppSettings): Promise<void> {
   if (!isTursoConfigured()) return;
   assertOnline();
-  const client = tursoClient();
-  const payload = JSON.stringify(mergeAppSettings({ ...settings, setupSelesai: true }));
-  const updatedAt = new Date().toISOString();
-  await client.execute({
-    sql: `INSERT INTO app_settings (id, payload, updated_at) VALUES ('default', ?, ?)
-          ON CONFLICT(id) DO UPDATE SET
-            payload = excluded.payload,
-            updated_at = excluded.updated_at`,
-    args: [payload, updatedAt],
-  });
+  await saveSettingsToTurso(settings);
 }
 
 export type CloudBootstrapResult = {
@@ -68,9 +33,9 @@ export type CloudBootstrapResult = {
 };
 
 /**
- * Full-online boot: wajib Turso + internet.
- * Pull cloud dulu (seed lokal hanya jika tabel cloud kosong).
- * Gagal → throw (UI cloudBlocked).
+ * Boot direct-Turso: cek internet + ping cloud + load settings.
+ * Tidak seed dari lokal / tidak pull snapshot penuh ke RAM sebagai SoT.
+ * Entity di-fetch live per request API.
  */
 export async function bootstrapFromCloud(): Promise<CloudBootstrapResult> {
   if (!isTursoConfigured()) {
@@ -80,15 +45,11 @@ export async function bootstrapFromCloud(): Promise<CloudBootstrapResult> {
   assertOnline();
   markOnboardingComplete();
 
-  const { runCloudBootstrap } = await import('@/lib/sync/turso-sync');
-  await runCloudBootstrap();
+  const client = getTursoClient();
+  await ensureTursoSchemaPatches(client);
+  await pingTurso();
 
-  const remote = await pullRemoteSettings();
-  if (remote) {
-    await applySettingsFromCloud(remote);
-    return { cloudMode: true, appliedRemote: true };
-  }
-
-  await applySettingsFromCloud(mergeAppSettings({ setupSelesai: true }));
-  return { cloudMode: true, appliedRemote: false };
+  const remote = await loadSettingsFromTurso();
+  await applySettingsFromCloud(remote);
+  return { cloudMode: true, appliedRemote: true };
 }

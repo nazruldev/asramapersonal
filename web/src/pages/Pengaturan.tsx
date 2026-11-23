@@ -5,7 +5,6 @@ import { useAppReload } from '@/hooks/use-app-reload';
 import {
   ChevronDown,
   Clock,
-  KeyRound,
   Moon,
   Save,
   Sun,
@@ -18,14 +17,6 @@ import {
   INDONESIA_TIMEZONES,
   normalizeIndonesiaTimezone,
 } from '@/lib/indonesia-timezone';
-import { AppSecuritySettingsForm } from '@/components/app-login-gate';
-import {
-  PIN_MAX_LENGTH,
-  PIN_MIN_LENGTH,
-  clampPinInput,
-  getSessionUser,
-  pinLengthError,
-} from '@/lib/app-auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -35,101 +26,22 @@ import {
   type AppSettings,
 } from '@/lib/app-settings';
 import { useTheme } from '@/lib/theme';
-import { appSelectClass } from '@/lib/form-styles';
 import { toast } from '@/lib/toast';
 import { cn } from '@/lib/utils';
 import { appCardClass } from '@/lib/surface-styles';
 import { PageWithPullRefresh } from '@/components/page-with-pull-refresh';
 
-type SectionId = 'umum' | 'tampilan' | 'keamanan';
+type SectionId = 'umum' | 'tampilan';
 
 const SECTIONS: { id: SectionId; label: string; icon: typeof Sun }[] = [
   { id: 'umum', label: 'Umum', icon: SlidersHorizontal },
   { id: 'tampilan', label: 'Tampilan', icon: Sun },
-  { id: 'keamanan', label: 'Keamanan', icon: KeyRound },
 ];
 
 function SettingsCard({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <div className={cn(appCardClass, 'p-3.5 space-y-3', className)}>
       {children}
-    </div>
-  );
-}
-
-/** Ganti PIN akun yang sedang login (pengawas & admin). */
-function PinAkunSayaForm() {
-  const user = getSessionUser();
-  const [currentPin, setCurrentPin] = useState('');
-  const [newPin, setNewPin] = useState('');
-  const [confirmPin, setConfirmPin] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  if (!user) return null;
-
-  const submit = async () => {
-    const pinErr = pinLengthError(newPin);
-    if (pinErr) {
-      toast.error(pinErr);
-      return;
-    }
-    if (newPin !== confirmPin) {
-      toast.error('Konfirmasi PIN tidak sama');
-      return;
-    }
-    setLoading(true);
-    try {
-      const res = await fetch('/api/auth/change-pin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: user.id, currentPin, newPin }),
-      });
-      const data = (await res.json().catch(() => ({}))) as { error?: string };
-      if (!res.ok) {
-        toast.error(data.error || 'Gagal mengganti PIN');
-        return;
-      }
-      toast.success('PIN akun berhasil diganti');
-      setCurrentPin('');
-      setNewPin('');
-      setConfirmPin('');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="space-y-2">
-      <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide">
-        PIN akun saya ({user.nama})
-      </h3>
-      <Input
-        type="password"
-        inputMode="numeric"
-        maxLength={PIN_MAX_LENGTH}
-        placeholder="PIN saat ini"
-        value={currentPin}
-        onChange={(e) => setCurrentPin(clampPinInput(e.target.value))}
-      />
-      <Input
-        type="password"
-        inputMode="numeric"
-        maxLength={PIN_MAX_LENGTH}
-        placeholder={`PIN baru (${PIN_MIN_LENGTH}–${PIN_MAX_LENGTH} digit)`}
-        value={newPin}
-        onChange={(e) => setNewPin(clampPinInput(e.target.value))}
-      />
-      <Input
-        type="password"
-        inputMode="numeric"
-        maxLength={PIN_MAX_LENGTH}
-        placeholder="Ulangi PIN baru"
-        value={confirmPin}
-        onChange={(e) => setConfirmPin(clampPinInput(e.target.value))}
-      />
-      <Button type="button" variant="outline" className="w-full" disabled={loading} onClick={() => void submit()}>
-        {loading ? 'Menyimpan…' : 'Ganti PIN saya'}
-      </Button>
     </div>
   );
 }
@@ -214,14 +126,17 @@ export default function Pengaturan() {
       {section === 'umum' && (
         <div className="space-y-3 animate-in fade-in duration-150">
           <SettingsCard>
-            <h2 className="text-xs font-bold text-slate-800 uppercase tracking-wide">Profil asrama</h2>
+            <h2 className="text-xs font-bold text-slate-800 uppercase tracking-wide">Profil lembaga</h2>
+            <p className="text-[11px] text-slate-500 leading-snug">
+              Nama sekolah / pondok untuk laporan &amp; dokumen. Judul di beranda memakai nama asrama aktif (master data asrama).
+            </p>
             <div className="space-y-2">
-              <Label htmlFor="namaAsrama" className="text-xs">Nama asrama</Label>
+              <Label htmlFor="namaAsrama" className="text-xs">Nama sekolah / pondok</Label>
               <Input
                 id="namaAsrama"
                 value={form.namaAsrama}
                 onChange={(e) => setForm({ ...form, namaAsrama: e.target.value })}
-                placeholder="Asrama Putra Al-Ikhlas"
+                placeholder="Contoh: Pondok Pesantren Al-Khairaat"
               />
             </div>
           </SettingsCard>
@@ -235,7 +150,7 @@ export default function Pengaturan() {
               Hanya zona Indonesia (WIB, WITA, WIT). Default WITA (Asia/Makassar).
             </p>
             <div className="space-y-2">
-              <Label className="text-xs">Zona operasional asrama</Label>
+              <Label className="text-xs">Zona operasional</Label>
               <button
                 type="button"
                 onClick={() => setZonaPickerOpen(true)}
@@ -317,18 +232,6 @@ export default function Pengaturan() {
           </SettingsCard>
         </div>
       )}
-
-      {section === 'keamanan' && (
-        <div className="space-y-3 animate-in fade-in duration-150">
-          <SettingsCard>
-            <PinAkunSayaForm />
-          </SettingsCard>
-          <SettingsCard>
-            <AppSecuritySettingsForm />
-          </SettingsCard>
-        </div>
-      )}
-
     </PageWithPullRefresh>
   );
 }

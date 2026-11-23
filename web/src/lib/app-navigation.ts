@@ -31,7 +31,7 @@ export function resolveScreenBackTo(
   return fallbackBackTo;
 }
 
-/** Root tab Izin & BK sesuai sub-halaman yang sedang dibuka */
+/** Root tab Izin & Pelanggaran sesuai sub-halaman yang sedang dibuka */
 export function izinBkTabRoot(pathname: string): string {
   if (pathname === '/laporan/pembinaan' || pathname.startsWith('/laporan/pembinaan/')) {
     return '/laporan/pembinaan';

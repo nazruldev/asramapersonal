@@ -5,6 +5,7 @@ import { isAppHubScreen, normalizeAppPathname } from '@/lib/app-navigation';
 import { parseKamarIdFromPath } from '@/lib/kamar-path';
 import { parseSantriIdFromDetailPath } from '@/lib/santri-detail';
 import { parseSantriIdFromKamarRiwayatPath } from '@/lib/santri-kamar-riwayat';
+import { parseSantriIdFromTunggakanPath } from '@/lib/santri-tunggakan';
 
 export type ScreenHeaderMeta = {
   title: string;
@@ -28,7 +29,7 @@ export function getScreenHeader(pathname: string): ScreenHeaderMeta | null {
   const pembinaanSantriId = parsePembinaanSantriIdFromPath(path);
   if (pembinaanSantriId) {
     return {
-      title: 'Detail Catatan BK',
+      title: 'Detail Pelanggaran',
       backTo: '/laporan/pembinaan',
     };
   }
@@ -45,6 +46,14 @@ export function getScreenHeader(pathname: string): ScreenHeaderMeta | null {
   if (santriKamarRiwayatId) {
     return {
       title: 'Riwayat Kamar',
+      backTo: '/master/santri',
+    };
+  }
+
+  const santriTagihanId = parseSantriIdFromTunggakanPath(path);
+  if (santriTagihanId) {
+    return {
+      title: 'Tagihan Santri',
       backTo: '/master/santri',
     };
   }
@@ -129,7 +138,7 @@ export function getScreenHeader(pathname: string): ScreenHeaderMeta | null {
       backTo: '/laporan',
     },
     '/laporan/pembinaan': {
-      title: 'Pelanggaran & Teguran',
+      title: 'Pelanggaran',
       backTo: '/laporan',
     },
     '/laporan/peringkat': {
@@ -154,6 +163,10 @@ export function getScreenHeader(pathname: string): ScreenHeaderMeta | null {
     },
     '/profil': {
       title: 'Profil',
+      backTo: '/',
+    },
+    '/notifikasi': {
+      title: 'Notifikasi',
       backTo: '/',
     },
     '/ganti-akun': {

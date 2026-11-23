@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { ClockAlert, ListOrdered, ShieldAlert, Trophy } from 'lucide-react';
+import { ClockAlert, ShieldAlert, Trophy } from 'lucide-react';
 import { useAppStore } from '@/store/app-store';
 import { useReloadKeyReady } from '@/hooks/use-reload-key';
 import { PageWithPullRefresh } from '@/components/page-with-pull-refresh';
@@ -21,7 +21,6 @@ import { withBackTo } from '@/lib/app-navigation';
 const TAB_ICONS = {
   izin: ClockAlert,
   pelanggaran: ShieldAlert,
-  teguran: ListOrdered,
 } as const;
 
 function rankBadgeClass(rank: number) {
@@ -72,7 +71,7 @@ export default function Peringkat() {
         <div className="min-w-0">
           <p className="text-xs font-bold text-slate-900 dark:text-slate-50">Daftar Peringkat Santri</p>
           <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">
-            Pantau santri yang sering izin, pelanggaran, atau teguran. Ketuk nama untuk lihat riwayat lengkap.
+            Pantau santri yang sering izin atau pelanggaran. Ketuk nama untuk lihat riwayat lengkap.
           </p>
         </div>
       </div>
@@ -106,7 +105,7 @@ export default function Peringkat() {
         <EmptyState
           icon={TAB_ICONS[tab]}
           title="Belum ada data untuk peringkat ini"
-          description="Data akan muncul setelah ada catatan izin atau BK yang relevan."
+          description="Data akan muncul setelah ada catatan izin atau pelanggaran yang relevan."
           variant="inline"
         />
       ) : (

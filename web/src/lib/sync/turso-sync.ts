@@ -10,7 +10,6 @@ import type { OfflineDbSnapshot } from '@/lib/db/snapshot-types';
 import {
   applyTombstonesToTurso,
   countTursoOperationalRows,
-  readSnapshotFromTursoTables,
   upsertKamarRowsToTurso,
   writeSnapshotToTursoTables,
 } from '@/lib/sync/turso-relational';
@@ -250,43 +249,17 @@ function sessionAsramaScope(): string | null {
 const PULL_CURSOR_KEY = 'pull_cursor';
 const PULL_SCOPE_KEY = 'pull_scope';
 
-/** Pull dari tabel Turso → RAM (full-online). */
+/**
+ * Direct Turso: tidak lagi mengisi RAM sebagai SoT.
+ * Hanya pastikan cloud reachable; UI refetch lewat /api (live SELECT).
+ */
 export async function pullFromTurso(): Promise<string> {
   await ensureOnline();
   const client = createTursoClient();
   const counts = await countTursoOperationalRows(client);
-  const scope = sessionAsramaScope();
-  const scopeKey = scope ?? '';
-  const startedAt = new Date().toISOString();
-  const nextCursor = new Date(Date.now() - 30_000).toISOString();
-
-  if (counts.santri > 0 || counts.kamar > 0 || counts.kelas > 0) {
-    // Full-online: selalu full snapshot ke RAM (bukan delta offline SQLite).
-    const snap = await readSnapshotFromTursoTables(client, scope);
-    await applyTableSnapshot(snap, startedAt);
-    await setSyncMeta(PULL_CURSOR_KEY, nextCursor);
-    await setSyncMeta(PULL_SCOPE_KEY, scopeKey);
-    return `Pull tabel Turso (santri=${counts.santri}, kamar=${counts.kamar})`;
-  }
-
-  // Migrasi: tabel kosong tapi snapshot JSON masih ada
-  const remote = await readRemoteSnapshot(client);
-  if (remote.payload) {
-    let parsed: SnapshotShape;
-    try {
-      parsed = JSON.parse(remote.payload) as SnapshotShape;
-    } catch {
-      return 'Cloud kosong (tabel & snapshot tidak valid)';
-    }
-    await applyRemotePayload(remote.payload, remote.updatedAt);
-    if (!isOperationallyEmpty(parsed)) {
-      await writeSnapshotToTursoTables(client, parsed as unknown as OfflineDbSnapshot);
-      return `Migrasi snapshot → tabel Turso (${remote.updatedAt})`;
-    }
-    return `Pull snapshot kosong (${remote.updatedAt})`;
-  }
-
-  return 'Cloud kosong (belum ada data di tabel)';
+  await setSyncMeta(PULL_CURSOR_KEY, new Date().toISOString());
+  await setSyncMeta(PULL_SCOPE_KEY, sessionAsramaScope() ?? '');
+  return `Cloud siap (santri=${counts.santri}, kamar=${counts.kamar}) — refetch via API`;
 }
 
 /** Push lokal → tabel Turso (setelah simpan). */
@@ -300,51 +273,16 @@ export async function pushToTurso(): Promise<string> {
 }
 
 /**
- * Boot full-online (tabel entity):
- * - Tabel cloud kosong + lokal ada data → seed ke tabel
- * - Tabel cloud ada data → pull tabel
- * - Snapshot JSON ada tapi tabel kosong → migrasi ke tabel
+ * Boot direct-Turso: jangan seed dari lokal ke cloud.
+ * Pastikan tabel reachable; data dibaca live per request.
  */
 export async function bootstrapOnlineSnapshot(): Promise<string> {
   await ensureOnline();
   const client = createTursoClient();
-  const local = await exportSyncSnapshot();
+  const { ensureTursoSchemaPatches } = await import('@/lib/sync/turso-relational');
+  await ensureTursoSchemaPatches(client);
   const counts = await countTursoOperationalRows(client);
-  const tablesEmpty = counts.santri === 0 && counts.kamar === 0;
-  const localEmpty = isOperationallyEmpty(local.snapshot as SnapshotShape);
-
-  if (tablesEmpty && !localEmpty) {
-    const at = await writeLocalToTursoTables(client, local, new Date().toISOString());
-    void publishSyncSignal('seed');
-    return `Seed tabel Turso dari lokal (${at})`;
-  }
-
-  if (!tablesEmpty) {
-    const snap = await readSnapshotFromTursoTables(client, sessionAsramaScope());
-    const at = new Date().toISOString();
-    await applyTableSnapshot(snap, at);
-    return `Pull tabel Turso (santri=${counts.santri}, kamar=${counts.kamar})`;
-  }
-
-  // Tabel kosong: coba migrasi dari snapshot JSON
-  const remote = await readRemoteSnapshot(client);
-  if (remote.payload) {
-    let parsed: SnapshotShape | null = null;
-    try {
-      parsed = JSON.parse(remote.payload) as SnapshotShape;
-    } catch {
-      parsed = null;
-    }
-    if (parsed && !isOperationallyEmpty(parsed)) {
-      await writeSnapshotToTursoTables(client, parsed as unknown as OfflineDbSnapshot);
-      await applyRemotePayload(remote.payload, remote.updatedAt);
-      return `Migrasi snapshot → tabel Turso (${remote.updatedAt})`;
-    }
-  }
-
-  const at = await writeLocalToTursoTables(client, local, new Date().toISOString());
-  void publishSyncSignal('seed');
-  return `Seed tabel Turso kosong (${at})`;
+  return `Boot direct Turso (santri=${counts.santri}, kamar=${counts.kamar})`;
 }
 
 async function runWithStatus(fn: () => Promise<string>): Promise<SyncStatus> {
@@ -387,10 +325,7 @@ async function runWithStatus(fn: () => Promise<string>): Promise<SyncStatus> {
   }
 }
 
-/**
- * Full-online: refresh dari cloud (pull).
- * Mutasi sudah await push ke Turso; sync berkala cukup pull.
- */
+/** Direct mode: ping cloud saja; UI di-refresh lewat reloadAll / fetch API. */
 async function syncRound(): Promise<string> {
   return pullFromTurso();
 }
@@ -575,29 +510,23 @@ export function startAutoSync(): void {
 
   startAblyRealtime((signal) => {
     console.info('[ably] remote change from', signal.deviceId, signal.reason ?? '');
-    void runWithStatus(() => pullFromTurso())
-      .then(() => {
-        refreshUiAfterRemotePull();
-        // Electron/web: toast OS jika jendela di belakang.
-        if (
-          typeof document !== 'undefined' &&
-          document.visibilityState === 'hidden' &&
-          typeof Notification !== 'undefined' &&
-          Notification.permission === 'granted'
-        ) {
-          try {
-            new Notification('Asrama Manager', {
-              body: 'Data asrama diperbarui — disinkronkan otomatis',
-              silent: false,
-            });
-          } catch {
-            /* ignore */
-          }
-        }
-      })
-      .catch((err) => {
-        console.warn('[ably] remote pull failed:', err);
-      });
+    // Direct Turso: jangan apply snapshot ke RAM — cukup refetch UI (/api → live SELECT).
+    refreshUiAfterRemotePull();
+    if (
+      typeof document !== 'undefined' &&
+      document.visibilityState === 'hidden' &&
+      typeof Notification !== 'undefined' &&
+      Notification.permission === 'granted'
+    ) {
+      try {
+        new Notification('Asrama Manager', {
+          body: 'Data asrama diperbarui di cloud',
+          silent: false,
+        });
+      } catch {
+        /* ignore */
+      }
+    }
   });
 
   const maybeSync = async (): Promise<boolean> => {
@@ -665,5 +594,5 @@ export function startAutoSync(): void {
     delay = ok ? BASE_DELAY : Math.min(delay * 2, MAX_DELAY);
     scheduleNext();
   });
-  console.info('[sync] mode=full-online-turso + ably-realtime');
+  console.info('[sync] mode=direct-turso + ably-refetch');
 }

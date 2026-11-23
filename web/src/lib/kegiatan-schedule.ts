@@ -44,7 +44,13 @@ export type KegiatanSchedule = {
   urutan?: number;
   /** false = tidak muncul di halaman absensi */
   untuk_absensi?: boolean;
+  /** 1 = setiap minggu (default); 2 = dua minggu sekali; dst. */
+  interval_minggu?: number;
+  /** YYYY-MM-DD di minggu aktif pertama; wajib jika interval_minggu > 1 */
+  acuan_tanggal?: string;
 };
+
+const DATE_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export function getDayIndexFromDateKey(dateKey: string): number {
   return new Date(`${dateKey}T12:00:00`).getDay();
@@ -53,6 +59,58 @@ export function getDayIndexFromDateKey(dateKey: string): number {
 export function isKegiatanActiveOnDay(hariAktif: number[] | undefined, dayIndex: number): boolean {
   if (!hariAktif || hariAktif.length === 0) return true;
   return hariAktif.includes(dayIndex);
+}
+
+/** Senin sebagai awal minggu (ISO-like). */
+export function mondayOfWeekDateKey(dateKey: string): string | null {
+  if (!DATE_KEY_RE.test(dateKey)) return null;
+  const d = new Date(`${dateKey}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return null;
+  const day = d.getDay(); // 0=Min … 6=Sab
+  const offsetFromMonday = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + offsetFromMonday);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+}
+
+function daysBetweenDateKeys(a: string, b: string): number | null {
+  const da = new Date(`${a}T12:00:00`);
+  const db = new Date(`${b}T12:00:00`);
+  if (Number.isNaN(da.getTime()) || Number.isNaN(db.getTime())) return null;
+  return Math.round((db.getTime() - da.getTime()) / 86_400_000);
+}
+
+export function normalizeIntervalMinggu(raw?: number | null): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 1) return 1;
+  return Math.floor(n);
+}
+
+/**
+ * Apakah kegiatan masuk jadwal pada tanggal tertentu (hari + interval minggu).
+ * Interval > 1 tanpa acuan_tanggal → tidak aktif.
+ */
+export function isKegiatanActiveOnDate(keg: KegiatanSchedule, dateKey: string): boolean {
+  const day = getDayIndexFromDateKey(dateKey);
+  if (!isKegiatanActiveOnDay(keg.hari_aktif, day)) return false;
+
+  const interval = normalizeIntervalMinggu(keg.interval_minggu);
+  if (interval <= 1) return true;
+
+  const acuan = keg.acuan_tanggal?.trim();
+  if (!acuan || !DATE_KEY_RE.test(acuan)) return false;
+
+  const weekDate = mondayOfWeekDateKey(dateKey);
+  const weekAcuan = mondayOfWeekDateKey(acuan);
+  if (!weekDate || !weekAcuan) return false;
+
+  const dayDiff = daysBetweenDateKeys(weekAcuan, weekDate);
+  if (dayDiff === null) return false;
+  const weekDiff = Math.floor(dayDiff / 7);
+  // Modulo aman untuk weekDiff negatif
+  return ((weekDiff % interval) + interval) % interval === 0;
 }
 
 export function formatWaktuKegiatan(jamMulai?: string, jamSelesai?: string): string {
@@ -70,6 +128,20 @@ export function formatHariAktif(hariAktif?: number[]): string {
   return sorted
     .map((d) => HARI_LABELS.find((h) => h.index === d)?.short ?? String(d))
     .join(', ');
+}
+
+export function formatIntervalMinggu(intervalMinggu?: number): string {
+  const n = normalizeIntervalMinggu(intervalMinggu);
+  if (n <= 1) return 'tiap minggu';
+  return `tiap ${n} minggu`;
+}
+
+/** Ringkas untuk list: "Sen, Rab · tiap 2 minggu" */
+export function formatKegiatanJadwalRingkas(keg: KegiatanSchedule): string {
+  const hari = formatHariAktif(keg.hari_aktif);
+  const interval = normalizeIntervalMinggu(keg.interval_minggu);
+  if (interval <= 1) return hari;
+  return `${hari} · ${formatIntervalMinggu(interval)}`;
 }
 
 export function compareKegiatanUrutan(a: KegiatanSchedule, b: KegiatanSchedule): number {
@@ -90,11 +162,8 @@ export function filterKegiatanForAbsensiDate(
   list: KegiatanSchedule[],
   dateKey: string
 ): KegiatanSchedule[] {
-  const day = getDayIndexFromDateKey(dateKey);
   return sortKegiatanForAbsensi(
-    list.filter(
-      (k) => k.untuk_absensi !== false && isKegiatanActiveOnDay(k.hari_aktif, day)
-    )
+    list.filter((k) => k.untuk_absensi !== false && isKegiatanActiveOnDate(k, dateKey))
   );
 }
 

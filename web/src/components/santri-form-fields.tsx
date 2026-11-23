@@ -163,19 +163,10 @@ export function SantriFormFields({
         </button>
       </div>
 
-      <div>
-        {label(genderLocked ? 'Jenis Kelamin' : 'Jenis Kelamin *')}
-        {genderLocked ? (
-          <div
-            className={cn(
-              fieldBase(theme),
-              'flex items-center text-sm opacity-90 cursor-not-allowed'
-            )}
-          >
-            {genderLocked}
-            <span className="ml-2 text-[10px] text-slate-400">(sesuai asrama {asramaNorm.toLowerCase()})</span>
-          </div>
-        ) : (
+      {/* Putra/Putri: gender otomatis dari jenis asrama — field disembunyikan. */}
+      {!genderLocked ? (
+        <div>
+          {label('Jenis Kelamin *')}
           <select
             value={formData.jenis_kelamin}
             onChange={(e) => setFormData({ ...formData, jenis_kelamin: e.target.value })}
@@ -185,8 +176,8 @@ export function SantriFormFields({
             <option value="Laki-laki">Laki-laki</option>
             <option value="Perempuan">Perempuan</option>
           </select>
-        )}
-      </div>
+        </div>
+      ) : null}
 
       <div>
         {label('Nomor HP Wali')}

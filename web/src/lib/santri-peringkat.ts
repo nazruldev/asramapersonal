@@ -3,7 +3,7 @@ import { getPelanggaranTier } from '@/lib/app-settings';
 import type { PembinaanRow } from '@/lib/pembinaan-group';
 import type { EntityRow } from '@/store/app-store';
 
-export type PeringkatKind = 'izin' | 'pelanggaran' | 'teguran';
+export type PeringkatKind = 'izin' | 'pelanggaran';
 
 export type PeringkatEntry = {
   santriId: string;
@@ -48,29 +48,28 @@ function toRanked(entries: PeringkatEntry[]): PeringkatEntry[] {
 /** Total surat izin per santri (semua riwayat). */
 export function buildPeringkatIzin(izinList: IzinRow[], santriList: SantriRow[]): PeringkatEntry[] {
   const counts = new Map<string, number>();
-  for (const i of izinList) {
-    const id = String(i.santri_id ?? '').trim();
-    if (!id) continue;
-    counts.set(id, (counts.get(id) ?? 0) + 1);
+  for (const row of izinList) {
+    const sid = String(row.santri_id ?? '');
+    if (!sid) continue;
+    counts.set(sid, (counts.get(sid) ?? 0) + 1);
   }
   const rows: PeringkatEntry[] = [];
   for (const [santriId, count] of counts) {
     if (count <= 0) continue;
     if (!findSantri(santriList, santriId)) continue;
-    const meta = santriMeta(santriList, santriId);
-    rows.push({ santriId, ...meta, count });
+    rows.push({ santriId, ...santriMeta(santriList, santriId), count });
   }
   return toRanked(rows);
 }
 
-/** Hitungan akumulasi pelanggaran resmi di profil santri. */
+/** Peringkat dari akumulasi jumlah_pelanggaran di profil santri. */
 export function buildPeringkatPelanggaran(
   santriList: SantriRow[],
   settings: AppSettings
 ): PeringkatEntry[] {
   const rows: PeringkatEntry[] = [];
   for (const s of santriList) {
-    const count = Number(s.jumlah_pelanggaran ?? 0);
+    const count = Number(s.jumlah_pelanggaran) || 0;
     if (count <= 0) continue;
     const tier = getPelanggaranTier(count, settings);
     rows.push({
@@ -81,25 +80,6 @@ export function buildPeringkatPelanggaran(
       count,
       sublabel: tier?.label,
     });
-  }
-  return toRanked(rows);
-}
-
-/** Jumlah catatan BK jenis Teguran per santri. */
-export function buildPeringkatTeguran(
-  pembinaanList: PembinaanRow[],
-  santriList: SantriRow[]
-): PeringkatEntry[] {
-  const counts = new Map<string, number>();
-  for (const p of pembinaanList) {
-    if (p.jenis !== 'Teguran') continue;
-    counts.set(p.santri_id, (counts.get(p.santri_id) ?? 0) + 1);
-  }
-  const rows: PeringkatEntry[] = [];
-  for (const [santriId, count] of counts) {
-    if (count <= 0) continue;
-    if (!findSantri(santriList, santriId)) continue;
-    rows.push({ santriId, ...santriMeta(santriList, santriId), count });
   }
   return toRanked(rows);
 }
@@ -118,8 +98,6 @@ export function buildPeringkatForKind(
       return buildPeringkatIzin(ctx.izin, ctx.santri);
     case 'pelanggaran':
       return buildPeringkatPelanggaran(ctx.santri, ctx.settings);
-    case 'teguran':
-      return buildPeringkatTeguran(ctx.pembinaan, ctx.santri);
   }
 }
 
@@ -135,11 +113,5 @@ export const PERINGKAT_TABS: { id: PeringkatKind; label: string; hint: string; c
     label: 'Pelanggaran',
     hint: 'Hitungan pelanggaran akumulasi tertinggi',
     countLabel: 'x',
-  },
-  {
-    id: 'teguran',
-    label: 'Teguran',
-    hint: 'Catatan teguran BK terbanyak',
-    countLabel: 'teguran',
   },
 ];

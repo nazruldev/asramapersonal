@@ -5,6 +5,7 @@
 import { format, parse } from 'date-fns';
 import { id as localeId } from 'date-fns/locale';
 import { formatIzinBatasKembali } from '@/lib/izin-group';
+import { pembinaanJenisLabel } from '@/lib/pembinaan-group';
 import { formatAsalWilayah, hasAsalWilayah, type SantriAsalWilayahFields } from '@/lib/wilayah-types';
 import {
   aggregateSantriByKecamatan,
@@ -17,8 +18,8 @@ import {
   ABSENSI_STATUS_ORDER,
   computeAbsensiRekap,
   computeLaporanSummary,
-  laporanRekapInterval,
-  periodLabel,
+  computePelanggaranPeriodRanks,
+  computePembayaranRekap,
   type AbsensiStatusCounts,
   type LaporanContext,
   type LaporanReportId,
@@ -37,12 +38,42 @@ function rowDate(row: EntityRow, field: string): string {
   return typeof v === 'string' ? v : '';
 }
 
-function inCtxPeriod(iso: string, ctx: LaporanContext, now: Date): boolean {
-  if (!iso) return false;
-  const { start, end } = laporanRekapInterval(ctx.period, ctx.customRange, now);
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return false;
-  return d >= start && d <= end;
+/**
+ * Parse tanggal aman timezone:
+ * - `yyyy-MM-dd` / midnight UTC → hari kalender lokal (hindari geser -1 hari)
+ * - datetime penuh → Date biasa
+ */
+function parseAppDate(iso: string): Date | null {
+  const raw = String(iso ?? '').trim();
+  if (!raw) return null;
+  const datePart = raw.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+    const d = new Date(raw);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  const rest = raw.slice(10).trim();
+  const isCalendarDay =
+    !rest ||
+    rest === 'T00:00:00.000Z' ||
+    rest === 'T00:00:00Z' ||
+    /^T00:00:00(\.0+)?(Z|[+-]00:00)?$/i.test(rest) ||
+    (!rest.includes('T') && !rest.includes(':'));
+  if (isCalendarDay) {
+    const [y, m, d] = datePart.split('-').map(Number);
+    const local = new Date(y, m - 1, d);
+    return Number.isNaN(local.getTime()) ? null : local;
+  }
+  const d = new Date(raw);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function dateSortKey(iso: string): number {
+  return parseAppDate(iso)?.getTime() ?? 0;
+}
+
+// Laporan selalu mencakup seluruh riwayat — tidak ada filter tanggal.
+function inCtxPeriod(_iso: string, _ctx: LaporanContext, _now: Date): boolean {
+  return true;
 }
 
 function fmtLongDate(d = new Date()) {
@@ -50,14 +81,24 @@ function fmtLongDate(d = new Date()) {
 }
 
 function fmtShortDateTime(iso: string) {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso || '—';
+  const d = parseAppDate(iso);
+  if (!d) return iso?.trim() ? iso : '—';
+  // Kalau sumbernya hanya tanggal kalender, jangan tampilkan jam palsu 07:00.
+  const raw = String(iso ?? '').trim();
+  const rest = raw.slice(10).trim();
+  const dateOnly =
+    /^\d{4}-\d{2}-\d{2}$/.test(raw.slice(0, 10)) &&
+    (!rest ||
+      rest === 'T00:00:00.000Z' ||
+      rest === 'T00:00:00Z' ||
+      /^T00:00:00(\.0+)?(Z|[+-]00:00)?$/i.test(rest));
+  if (dateOnly) return format(d, 'd MMM yyyy', { locale: localeId });
   return format(d, 'd MMM yyyy HH:mm', { locale: localeId });
 }
 
 function fmtShortDate(iso: string) {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso || '—';
+  const d = parseAppDate(iso);
+  if (!d) return iso?.trim() ? iso : '—';
   return format(d, 'd MMM yyyy', { locale: localeId });
 }
 
@@ -290,58 +331,197 @@ function buildAbsensiHtml(ctx: LaporanContext, now: Date): string {
   ].join('');
 }
 
+function isSingleSantriCtx(ctx: LaporanContext): boolean {
+  return ctx.santri.length === 1;
+}
+
+function resolveSantriLabel(
+  ctx: LaporanContext,
+  santriId: string,
+  fallbackNama: string
+): { nama: string; kamar: string; kelas: string } {
+  const s =
+    ctx.santri.find((x) => String(x.id) === santriId) ??
+    ctx.santri.find((x) => String(x.nama) === fallbackNama);
+  return {
+    nama: String(s?.nama ?? (fallbackNama || '—')),
+    kamar: String(s?.kamar ?? '—'),
+    kelas: String(s?.kelas ?? '—'),
+  };
+}
+
+/** Akumulasi izin per santri (1 baris = 1 orang). */
+function buildIzinPerSantriSummary(ctx: LaporanContext, rows: EntityRow[]): string {
+  type Acc = { id: string; nama: string; kamar: string; total: number; belum: number; sudah: number };
+  const map = new Map<string, Acc>();
+  for (const i of rows) {
+    const id = String(i.santri_id ?? i.santri_nama ?? '');
+    const namaRaw = String(i.santri_nama ?? '—');
+    const key = id || namaRaw;
+    const label = resolveSantriLabel(ctx, String(i.santri_id ?? ''), namaRaw);
+    const cur = map.get(key) ?? {
+      id: key,
+      nama: label.nama,
+      kamar: label.kamar !== '—' ? label.kamar : String(i.santri_kamar ?? '—'),
+      total: 0,
+      belum: 0,
+      sudah: 0,
+    };
+    cur.total += 1;
+    if (i.status_kembali === 'Belum') cur.belum += 1;
+    else cur.sudah += 1;
+    map.set(key, cur);
+  }
+  const ranked = [...map.values()].sort((a, b) => b.total - a.total || a.nama.localeCompare(b.nama, 'id'));
+  return htmlTable(
+    ['No', 'Nama', 'Kamar', 'Total izin', 'Belum kembali', 'Sudah kembali'],
+    ranked.map((r, idx) => [idx + 1, r.nama, r.kamar, r.total, r.belum, r.sudah]),
+    'Tidak ada catatan izin'
+  );
+}
+
+/** Akumulasi pelanggaran per santri (1 baris = 1 orang). */
+function buildBkPerSantriSummary(ctx: LaporanContext, rows: EntityRow[]): string {
+  type Acc = {
+    id: string;
+    nama: string;
+    kamar: string;
+    total: number;
+    poin: number;
+  };
+  const map = new Map<string, Acc>();
+  for (const p of rows) {
+    const id = String(p.santri_id ?? p.santri_nama ?? '');
+    const namaRaw = String(p.santri_nama ?? '—');
+    const key = id || namaRaw;
+    const label = resolveSantriLabel(ctx, String(p.santri_id ?? ''), namaRaw);
+    const s = ctx.santri.find((x) => String(x.id) === String(p.santri_id ?? '')) ??
+      ctx.santri.find((x) => String(x.nama) === namaRaw);
+    const cur = map.get(key) ?? {
+      id: key,
+      nama: label.nama,
+      kamar: label.kamar !== '—' ? label.kamar : String(p.santri_kamar ?? '—'),
+      total: 0,
+      poin: Number(s?.jumlah_pelanggaran ?? 0),
+    };
+    cur.total += 1;
+    map.set(key, cur);
+  }
+  const ranked = [...map.values()].sort(
+    (a, b) => b.total - a.total || a.nama.localeCompare(b.nama, 'id')
+  );
+  return htmlTable(
+    ['No', 'Nama', 'Kamar', 'Jumlah catatan', 'Akumulasi poin'],
+    ranked.map((r, idx) => [idx + 1, r.nama, r.kamar, r.total, r.poin]),
+    'Belum ada catatan'
+  );
+}
+
 function buildIzinHtml(ctx: LaporanContext, now: Date): string {
-  const rows = ctx.izin.filter((i) => inCtxPeriod(rowDate(i, 'tanggal_keluar'), ctx, now));
+  const rows = ctx.izin
+    .filter((i) => inCtxPeriod(rowDate(i, 'tanggal_keluar'), ctx, now))
+    .sort(
+      (a, b) =>
+        dateSortKey(rowDate(b, 'tanggal_keluar')) - dateSortKey(rowDate(a, 'tanggal_keluar'))
+    );
   const belum = rows.filter((i) => i.status_kembali === 'Belum').length;
   const sudah = rows.filter((i) => i.status_kembali === 'Sudah').length;
-  const tableRows = rows.map((i, idx) => [
-    idx + 1,
-    String(i.santri_nama ?? '—'),
-    String(i.santri_kamar ?? '—'),
-    i.status_kembali === 'Belum' ? 'Belum kembali' : 'Sudah kembali',
-    fmtShortDateTime(rowDate(i, 'tanggal_keluar')),
-    formatIzinBatasKembali(rowDate(i, 'batas_kembali')),
-    String(i.alasan ?? '—'),
-    String(i.penjemput ?? '—'),
-  ]);
+  const single = isSingleSantriCtx(ctx);
+  const namaSatu = single ? String(ctx.santri[0]?.nama ?? 'Santri') : '';
+
+  // Satu santri → semua baris izinnya. Semua santri → akumulasi dulu, lalu rincian.
+  const detailHeaders = single
+    ? ['No', 'Status', 'Keluar', 'Batas', 'Alasan', 'Penjemput']
+    : ['No', 'Nama', 'Kamar', 'Status', 'Keluar', 'Batas', 'Alasan', 'Penjemput'];
+  const detailRows = rows.map((i, idx) => {
+    const status = i.status_kembali === 'Belum' ? 'Belum kembali' : 'Sudah kembali';
+    const common = [
+      status,
+      fmtShortDateTime(rowDate(i, 'tanggal_keluar')),
+      formatIzinBatasKembali(rowDate(i, 'batas_kembali')),
+      String(i.alasan ?? '—'),
+      String(i.penjemput ?? '—'),
+    ];
+    if (single) return [idx + 1, ...common];
+    return [
+      idx + 1,
+      String(i.santri_nama ?? '—'),
+      String(i.santri_kamar ?? '—'),
+      ...common,
+    ];
+  });
 
   return [
     kvTable([
+      ...(single ? [['Santri', namaSatu] as [string, string | number]] : []),
       ['Total izin', rows.length],
       ['Belum kembali', belum],
       ['Sudah kembali', sudah],
     ]),
-    h3('Rincian'),
-    htmlTable(
-      ['No', 'Nama', 'Kamar', 'Status', 'Keluar', 'Batas', 'Alasan', 'Penjemput'],
-      tableRows,
-      'Tidak ada izin pada periode ini'
-    ),
+    single
+      ? ''
+      : `${h3('Akumulasi per santri (1 baris = 1 orang)')}${buildIzinPerSantriSummary(ctx, rows)}`,
+    h3(single ? `Semua izin ${namaSatu} (${rows.length})` : `Rincian setiap izin (${rows.length})`),
+    htmlTable(detailHeaders, detailRows, 'Tidak ada catatan izin'),
   ].join('');
 }
 
 function buildPembinaanHtml(ctx: LaporanContext, now: Date): string {
-  const rows = ctx.pembinaan.filter((p) => inCtxPeriod(rowDate(p, 'tanggal'), ctx, now));
+  const rows = ctx.pembinaan
+    .filter((p) => inCtxPeriod(rowDate(p, 'tanggal'), ctx, now))
+    .sort((a, b) => dateSortKey(rowDate(b, 'tanggal')) - dateSortKey(rowDate(a, 'tanggal')));
   const summary = computeLaporanSummary(ctx, now);
-  const jenisRows = Object.entries(summary.bkByJenis).map(([j, n]) => [j, n]);
-  const detail = rows.map((p, idx) => [
-    idx + 1,
-    String(p.santri_nama ?? '—'),
-    String(p.santri_kamar ?? '—'),
-    String(p.jenis ?? '—'),
-    fmtShortDate(rowDate(p, 'tanggal')),
-    String(p.keterangan ?? '—'),
-    String(p.tindak_lanjut ?? '—'),
+  const jenisRows = Object.entries(summary.bkByJenis).map(([j, n]) => [
+    pembinaanJenisLabel(j),
+    n,
   ]);
+  const single = isSingleSantriCtx(ctx);
+  const namaSatu = single ? String(ctx.santri[0]?.nama ?? 'Santri') : '';
+  const poinSatu = single ? Number(ctx.santri[0]?.jumlah_pelanggaran ?? 0) : 0;
+
+  const detailHeaders = single
+    ? ['No', 'Tanggal', 'Jenis', 'Keterangan', 'Tindak lanjut']
+    : ['No', 'Nama', 'Kamar', 'Tanggal', 'Jenis', 'Keterangan', 'Tindak lanjut'];
+  const detailRows = rows.map((p, idx) => {
+    const common = [
+      fmtShortDate(rowDate(p, 'tanggal')),
+      pembinaanJenisLabel(String(p.jenis ?? '')),
+      String(p.keterangan ?? '—'),
+      String(p.tindak_lanjut ?? '—'),
+    ];
+    if (single) return [idx + 1, ...common];
+    return [
+      idx + 1,
+      String(p.santri_nama ?? '—'),
+      String(p.santri_kamar ?? '—'),
+      ...common,
+    ];
+  });
 
   return [
+    kvTable([
+      ...(single
+        ? [
+            ['Santri', namaSatu] as [string, string | number],
+            ['Akumulasi poin pelanggaran', poinSatu] as [string, string | number],
+          ]
+        : []),
+      ['Total catatan pelanggaran', rows.length],
+    ]),
     h3('Ringkasan jenis'),
     htmlTable(['Jenis', 'Jumlah'], jenisRows, 'Belum ada'),
-    h3('Rincian'),
+    single
+      ? ''
+      : `${h3('Akumulasi per santri (1 baris = 1 orang)')}${buildBkPerSantriSummary(ctx, rows)}`,
+    h3(
+      single
+        ? `Semua catatan pelanggaran ${namaSatu} (${rows.length})`
+        : `Rincian setiap catatan (${rows.length})`
+    ),
     htmlTable(
-      ['No', 'Nama', 'Kamar', 'Jenis', 'Tanggal', 'Keterangan', 'Tindak lanjut'],
-      detail,
-      'Belum ada catatan pelanggaran/pembinaan pada periode ini'
+      detailHeaders,
+      detailRows,
+      'Belum ada catatan pelanggaran'
     ),
   ].join('');
 }
@@ -380,23 +560,78 @@ function buildKelasHtml(ctx: LaporanContext): string {
   return htmlTable(['No', 'Kelas', 'Jumlah santri'], rows, 'Belum ada data santri');
 }
 
-function buildPelanggaranHtml(ctx: LaporanContext): string {
-  const ranked = [...ctx.santri]
-    .map((s) => ({
-      nama: String(s.nama ?? 'Santri'),
-      kamar: String(s.kamar ?? '—'),
-      kelas: String(s.kelas ?? '—'),
-      poin: Number(s.jumlah_pelanggaran ?? 0),
-    }))
-    .filter((s) => s.poin > 0)
-    .sort((a, b) => b.poin - a.poin);
+function formatRp(n: number): string {
+  return `Rp ${new Intl.NumberFormat('id-ID', { maximumFractionDigits: 0 }).format(n || 0)}`;
+}
 
-  const rows = ranked.map((s, idx) => [idx + 1, s.nama, s.kelas, s.kamar, s.poin]);
+function buildPelanggaranHtml(ctx: LaporanContext, now: Date): string {
+  const ranked = computePelanggaranPeriodRanks(ctx, now);
+  const rows = ranked.map((s, idx) => [idx + 1, s.nama, s.kelas, s.kamar, s.count]);
   return htmlTable(
-    ['Peringkat', 'Nama', 'Kelas', 'Kamar', 'Akumulasi'],
+    ['Peringkat', 'Nama', 'Kelas', 'Kamar', 'Pelanggaran'],
     rows,
-    'Belum ada santri dengan hitungan pelanggaran'
+    'Belum ada catatan pelanggaran'
   );
+}
+
+function buildPembayaranHtml(ctx: LaporanContext): string {
+  const rekap = computePembayaranRekap(ctx);
+  const jenisRows = rekap.byJenis.map((j, idx) => [
+    idx + 1,
+    j.nama,
+    j.jumlah,
+    formatRp(j.nominal),
+    formatRp(j.terbayar),
+    formatRp(j.sisa),
+  ]);
+  const belumLunasRows = rekap.belumLunas.map((t, idx) => [
+    idx + 1,
+    t.nama,
+    t.kelas,
+    t.kamar,
+    t.jumlahTagihan,
+    formatRp(t.totalSisa),
+  ]);
+  const tunggakanRows = rekap.tunggakan.map((t, idx) => [
+    idx + 1,
+    t.nama,
+    t.kelas,
+    t.kamar,
+    t.jumlahTagihan,
+    formatRp(t.totalSisa),
+  ]);
+
+  return [
+    kvTable([
+      ['Total tagihan', rekap.totalTagihan],
+      ['Nominal', formatRp(rekap.totalNominal)],
+      ['Terbayar', formatRp(rekap.totalTerbayar)],
+      ['Sisa total', formatRp(rekap.totalSisa)],
+      ['Sisa dalam tempo', formatRp(rekap.totalSisaDalamTempo)],
+      ['Sisa tunggakan (jatuh tempo)', formatRp(rekap.totalSisaTunggakan)],
+      ['Belum', rekap.byStatus.belum],
+      ['Sebagian', rekap.byStatus.sebagian],
+      ['Lunas', rekap.byStatus.lunas],
+    ]),
+    h3('Per jenis tagihan'),
+    htmlTable(
+      ['No', 'Jenis', 'Jumlah', 'Nominal', 'Terbayar', 'Sisa'],
+      jenisRows,
+      'Belum ada tagihan'
+    ),
+    h3(`Belum lunas — masih dalam tempo (${rekap.belumLunas.length} santri)`),
+    htmlTable(
+      ['No', 'Nama', 'Kelas', 'Kamar', 'Tagihan', 'Sisa'],
+      belumLunasRows,
+      'Tidak ada tagihan belum lunas dalam tempo'
+    ),
+    h3(`Tunggakan — sudah jatuh tempo (${rekap.tunggakan.length} santri)`),
+    htmlTable(
+      ['No', 'Nama', 'Kelas', 'Kamar', 'Tagihan', 'Sisa'],
+      tunggakanRows,
+      'Tidak ada tunggakan / lewat jatuh tempo'
+    ),
+  ].join('');
 }
 
 function buildWilayahHtml(ctx: LaporanContext): string {
@@ -443,6 +678,9 @@ export type SantriLaporanRow = {
   alpa: number;
   izinCount: number;
   bkCount: number;
+  /** Catatan BK jenis Pelanggaran dalam periode. */
+  pelanggaranPeriod: number;
+  /** Akumulasi seumur hidup di profil santri. */
   poin: number;
 };
 
@@ -460,10 +698,14 @@ export function computePerSantriRows(ctx: LaporanContext, now = new Date()): San
       const pb = bk.filter((p) => String(p.santri_id) === id || String(p.santri_nama) === nama);
       let hadir = 0;
       let alpa = 0;
+      let pelanggaranPeriod = 0;
       for (const a of abs) {
         const st = String(a.status ?? '');
         if (st === 'Hadir') hadir += 1;
         if (st === 'Alpa') alpa += 1;
+      }
+      for (const p of pb) {
+        if (String(p.jenis) === 'Pelanggaran') pelanggaranPeriod += 1;
       }
       return {
         id,
@@ -475,6 +717,7 @@ export function computePerSantriRows(ctx: LaporanContext, now = new Date()): San
         alpa,
         izinCount: iz.length,
         bkCount: pb.length,
+        pelanggaranPeriod,
         poin: Number(s.jumlah_pelanggaran ?? 0),
       };
     })
@@ -488,20 +731,24 @@ export function buildPerSantriSummaryHtml(ctx: LaporanContext, now = new Date())
     s.nama,
     s.kelas,
     s.kamar,
-    s.bkCount,
+    s.pelanggaranPeriod,
     s.poin,
   ]);
   return [
-    h3('Ringkasan semua santri (periode)'),
+    h3('Ringkasan semua santri'),
     htmlTable(
-      ['No', 'Nama', 'Kelas', 'Kamar', 'Pelanggaran/Pembinaan', 'Jumlah pelanggaran'],
+      ['No', 'Nama', 'Kelas', 'Kamar', 'Pelanggaran', 'Akumulasi'],
       tableRows,
       'Belum ada data santri'
     ),
   ].join('');
 }
 
-/** Detail satu santri: profil + tabel BK periode. */
+function matchSantriRow(row: EntityRow, id: string, nama: string): boolean {
+  return String(row.santri_id ?? '') === id || String(row.santri_nama ?? '') === nama;
+}
+
+/** Detail satu santri — laporan lengkap: profil + absensi + izin + semua BK. */
 export function buildSingleSantriHtml(
   ctx: LaporanContext,
   santriId: string,
@@ -514,15 +761,34 @@ export function buildSingleSantriHtml(
 
   const id = String(s.id ?? '');
   const nama = String(s.nama ?? 'Santri');
-  const bk = ctx.pembinaan.filter(
-    (p) =>
-      inCtxPeriod(rowDate(p, 'tanggal'), ctx, now) &&
-      (String(p.santri_id) === id || String(p.santri_nama) === nama)
-  );
+  const match = (row: EntityRow) => matchSantriRow(row, id, nama);
 
+  const absensi = ctx.absensi.filter(
+    (a) => inCtxPeriod(rowDate(a, 'tanggal'), ctx, now) && match(a)
+  );
+  const izin = ctx.izin.filter(
+    (i) => inCtxPeriod(rowDate(i, 'tanggal_keluar'), ctx, now) && match(i)
+  );
+  // BK: seluruh catatan (bukan hanya periode) agar laporan ke ortu lengkap.
+  const bk = ctx.pembinaan
+    .filter((p) => match(p))
+    .sort((a, b) => dateSortKey(rowDate(b, 'tanggal')) - dateSortKey(rowDate(a, 'tanggal')));
+
+  let hadir = 0;
+  let alpa = 0;
+  let sakit = 0;
+  let izinAbs = 0;
+  for (const a of absensi) {
+    const st = String(a.status ?? '');
+    if (st === 'Hadir') hadir += 1;
+    else if (st === 'Alpa') alpa += 1;
+    else if (st === 'Sakit') sakit += 1;
+    else if (st === 'Izin') izinAbs += 1;
+  }
   const asal = hasAsalWilayah(s as SantriAsalWilayahFields)
     ? formatAsalWilayah(s as SantriAsalWilayahFields)
     : '—';
+  const periode = 'semua data';
 
   return [
     kvTable([
@@ -530,18 +796,50 @@ export function buildSingleSantriHtml(
       ['Kelas', String(s.kelas ?? '—')],
       ['Kamar', String(s.kamar ?? '—')],
       ['Asal', asal],
-      ['Jumlah pelanggaran', Number(s.jumlah_pelanggaran ?? 0)],
+      ['Akumulasi pelanggaran', Number(s.jumlah_pelanggaran ?? 0)],
+      ['Cakupan absensi/izin', periode],
     ]),
-    h3(`Pelanggaran/Pembinaan (${bk.length})`),
+    h3(`Ringkasan absensi (${periode})`),
+    kvTable([
+      ['Total catatan', absensi.length],
+      ['Hadir', hadir],
+      ['Alpa', alpa],
+      ['Sakit', sakit],
+      ['Izin (absensi)', izinAbs],
+    ]),
+    h3(`Rincian absensi (${absensi.length})`),
+    htmlTable(
+      ['Tanggal', 'Kegiatan', 'Status'],
+      absensi.map((a) => [
+        fmtShortDate(rowDate(a, 'tanggal')),
+        String(a.kegiatan_nama ?? a.kegiatan ?? '—'),
+        String(a.status ?? '—'),
+      ]),
+      'Tidak ada catatan absensi'
+    ),
+    h3(`Perizinan (${izin.length}) — ${periode}`),
+    htmlTable(
+      ['Keluar', 'Batas', 'Status', 'Alasan', 'Penjemput'],
+      izin.map((i) => [
+        fmtShortDateTime(rowDate(i, 'tanggal_keluar')),
+        formatIzinBatasKembali(rowDate(i, 'batas_kembali')),
+        i.status_kembali === 'Belum' ? 'Belum kembali' : 'Sudah kembali',
+        String(i.alasan ?? '—'),
+        String(i.penjemput ?? '—'),
+      ]),
+      'Tidak ada catatan izin'
+    ),
+    h3(`Pelanggaran — seluruh catatan (${bk.length})`),
+    kvTable([['Total catatan pelanggaran', bk.length]]),
     htmlTable(
       ['Tanggal', 'Jenis', 'Keterangan', 'Tindak lanjut'],
       bk.map((p) => [
         fmtShortDate(rowDate(p, 'tanggal')),
-        String(p.jenis ?? '—'),
+        pembinaanJenisLabel(String(p.jenis ?? '')),
         String(p.keterangan ?? '—'),
         String(p.tindak_lanjut ?? '—'),
       ]),
-      'Tidak ada catatan pelanggaran/pembinaan pada periode'
+      'Belum ada catatan pelanggaran'
     ),
   ].join('');
 }
@@ -549,10 +847,10 @@ export function buildSingleSantriHtml(
 /** Detail semua santri yang punya aktivitas di periode (untuk paket penuh). */
 export function buildPerSantriDetailHtml(ctx: LaporanContext, now = new Date()): string {
   const rows = computePerSantriRows(ctx, now).filter(
-    (s) => s.bkCount > 0 || s.poin > 0
+    (s) => s.bkCount > 0 || s.pelanggaranPeriod > 0 || s.poin > 0
   );
   if (!rows.length) {
-    return `${buildPerSantriSummaryHtml(ctx, now)}<p class="empty">Tidak ada catatan pelanggaran/pembinaan per santri pada periode ini.</p>`;
+    return `${buildPerSantriSummaryHtml(ctx, now)}<p class="empty">Tidak ada catatan pelanggaran per santri.</p>`;
   }
 
   const details = rows
@@ -584,9 +882,11 @@ export function buildReportSectionHtml(
     case 'kelas':
       return buildKelasHtml(ctx);
     case 'pelanggaran':
-      return buildPelanggaranHtml(ctx);
+      return buildPelanggaranHtml(ctx, now);
     case 'wilayah':
       return buildWilayahHtml(ctx);
+    case 'pembayaran':
+      return buildPembayaranHtml(ctx);
     case 'persantri':
       return buildPerSantriDetailHtml(ctx, now);
     default:
@@ -607,11 +907,12 @@ export const LAPORAN_TABLE_SECTION_TITLES: Record<LaporanReportId | 'persantri',
   harian: 'Laporan Harian',
   absensi: 'Rekap Absensi',
   izin: 'Rekap Perizinan',
-  pembinaan: 'Rekap Pelanggaran/Pembinaan',
+  pembinaan: 'Rekap Pelanggaran',
   kamar: 'Rekap Hunian Kamar',
   kelas: 'Rekap Santri per Kelas',
   pelanggaran: 'Peringkat Pelanggaran',
   wilayah: 'Sebaran Asal Wilayah',
+  pembayaran: 'Rekap Pembayaran',
   persantri: 'Laporan per Santri',
 };
 
@@ -620,7 +921,6 @@ export function buildLaporanTablesDocumentHtml(
   now = new Date(),
   opts?: { title?: string; ids?: Array<LaporanReportId | 'persantri'> }
 ): string {
-  const periode = periodLabel(ctx.period, ctx.customRange);
   const generatedAt = format(now, "EEEE, d MMMM yyyy HH:mm", { locale: localeId });
   const ids = opts?.ids ?? LAPORAN_TABLE_BUNDLE_IDS;
   const docTitle = opts?.title ?? 'Paket laporan lengkap (tabel)';
@@ -628,9 +928,9 @@ export function buildLaporanTablesDocumentHtml(
   const sections = ids
     .map((id) => {
       const subtitle =
-        id === 'harian' || id === 'kamar' || id === 'kelas' || id === 'pelanggaran'
+        id === 'harian' || id === 'kamar' || id === 'kelas'
           ? ''
-          : `Periode: ${periode}`;
+          : 'Cakupan: semua data';
       return section(LAPORAN_TABLE_SECTION_TITLES[id], buildReportSectionHtml(id, ctx, now), subtitle);
     })
     .join('');
@@ -647,7 +947,7 @@ export function buildLaporanTablesDocumentHtml(
     <h1>${escapeHtml(ctx.namaAsrama)}</h1>
     <p class="meta">
       <strong>${escapeHtml(docTitle)}</strong><br />
-      Periode rekap: ${escapeHtml(periode)} · Tanggal laporan: ${escapeHtml(fmtLongDate(now))}<br />
+      Cakupan: semua data · Tanggal laporan: ${escapeHtml(fmtLongDate(now))}<br />
       Dicetak: ${escapeHtml(generatedAt)}
     </p>
   </header>
@@ -668,7 +968,6 @@ export function buildSingleSantriDocumentHtml(
     ctx.santri.find((x) => String(x.id) === santriId) ??
     ctx.santri.find((x) => String(x.nama) === santriId);
   const nama = String(s?.nama ?? 'Santri');
-  const periode = periodLabel(ctx.period, ctx.customRange);
   const generatedAt = format(now, "EEEE, d MMMM yyyy HH:mm", { locale: localeId });
   const body = buildSingleSantriHtml(ctx, santriId, now);
 
@@ -683,16 +982,216 @@ export function buildSingleSantriDocumentHtml(
   <header class="doc-header">
     <h1>${escapeHtml(ctx.namaAsrama)}</h1>
     <p class="meta">
-      <strong>Laporan per santri: ${escapeHtml(nama)}</strong><br />
-      Periode: ${escapeHtml(periode)}<br />
+      <strong>Laporan lengkap santri: ${escapeHtml(nama)}</strong><br />
+      Absensi, izin &amp; pelanggaran: seluruh catatan<br />
       Dicetak: ${escapeHtml(generatedAt)}
     </p>
   </header>
   <section class="report-section">
-    <h2>Data &amp; aktivitas</h2>
+    <h2>Profil, absensi, izin &amp; pelanggaran</h2>
     ${body}
   </section>
-  <footer class="doc-footer">Laporan individual santri</footer>
+  <footer class="doc-footer">Laporan lengkap individual — cocok dibagikan ke orangtua/wali</footer>
+</body>
+</html>`;
+}
+
+/** Baris catatan pelanggaran untuk PDF ke orangtua. */
+export type BkWaliRecord = {
+  tanggal: string;
+  jenis: string;
+  keterangan?: string;
+  tindak_lanjut?: string;
+};
+
+export type BkWaliSantriInfo = {
+  nama: string;
+  kelas?: string;
+  kamar?: string;
+  nomorWali?: string;
+  poinAkumulasi?: number;
+  tierLabel?: string | null;
+};
+
+/** PDF untuk orangtua: profil singkat + seluruh catatan pelanggaran. */
+export function buildBkWaliDocumentHtml(opts: {
+  namaAsrama: string;
+  santri: BkWaliSantriInfo;
+  records: BkWaliRecord[];
+  now?: Date;
+}): string {
+  const now = opts.now ?? new Date();
+  const generatedAt = format(now, "EEEE, d MMMM yyyy HH:mm", { locale: localeId });
+  const nama = opts.santri.nama.trim() || 'Santri';
+  const sorted = [...opts.records].sort(
+    (a, b) => dateSortKey(b.tanggal) - dateSortKey(a.tanggal)
+  );
+  const poin = opts.santri.poinAkumulasi ?? 0;
+  const tier = opts.santri.tierLabel?.trim();
+
+  const body = [
+    kvTable([
+      ['Nama', nama],
+      ['Kelas', opts.santri.kelas?.trim() || '—'],
+      ['Kamar', opts.santri.kamar?.trim() || '—'],
+      ['Nomor wali', opts.santri.nomorWali?.trim() || '—'],
+      ['Total catatan pelanggaran', sorted.length],
+      ['Akumulasi pelanggaran', poin + (tier ? ` (${tier})` : '')],
+    ]),
+    h3(`Rincian catatan pelanggaran (${sorted.length})`),
+    htmlTable(
+      ['No', 'Tanggal', 'Jenis', 'Keterangan', 'Tindak lanjut'],
+      sorted.map((r, idx) => [
+        idx + 1,
+        fmtShortDate(r.tanggal),
+        pembinaanJenisLabel(r.jenis),
+        r.keterangan?.trim() || '—',
+        r.tindak_lanjut?.trim() || '—',
+      ]),
+      'Belum ada catatan pelanggaran'
+    ),
+  ].join('');
+
+  return `<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <title>Laporan Pelanggaran ${escapeHtml(nama)} — ${escapeHtml(opts.namaAsrama)}</title>
+  <style>${LAPORAN_PRINT_CSS}</style>
+</head>
+<body>
+  <header class="doc-header">
+    <h1>${escapeHtml(opts.namaAsrama)}</h1>
+    <p class="meta">
+      <strong>Laporan pelanggaran untuk orangtua/wali</strong><br />
+      Santri: ${escapeHtml(nama)} · Seluruh catatan pelanggaran<br />
+      Dicetak: ${escapeHtml(generatedAt)}
+    </p>
+  </header>
+  <section class="report-section">
+    <h2>Profil &amp; ringkasan pelanggaran</h2>
+    ${body}
+  </section>
+  <footer class="doc-footer">
+    Dokumen resmi catatan pelanggaran asrama — dibagikan kepada orangtua/wali sebagai PDF.
+  </footer>
+</body>
+</html>`;
+}
+
+/** Baris tagihan belum lunas untuk PDF tunggakan ke orangtua. */
+export type TunggakanWaliItem = {
+  nama_jenis: string;
+  periode: string;
+  nominal: number;
+  terbayar: number;
+  sisa: number;
+  status: string;
+  jatuh_tempo?: string;
+  lewat_tempo: boolean;
+};
+
+export type TunggakanWaliSantriInfo = {
+  nama: string;
+  kelas?: string;
+  kamar?: string;
+  nomorWali?: string;
+};
+
+const NAMA_BULAN_PDF = [
+  'Januari',
+  'Februari',
+  'Maret',
+  'April',
+  'Mei',
+  'Juni',
+  'Juli',
+  'Agustus',
+  'September',
+  'Oktober',
+  'November',
+  'Desember',
+];
+
+function labelPeriodePdf(periode: string): string {
+  const m = periode.match(/^(\d{4})-(\d{2})$/);
+  if (!m) return periode || '—';
+  return `${NAMA_BULAN_PDF[Number(m[2]) - 1] ?? m[2]} ${m[1]}`;
+}
+
+function statusTagihanLabel(status: string): string {
+  if (status === 'sebagian') return 'Sebagian';
+  if (status === 'lunas') return 'Lunas';
+  return 'Belum bayar';
+}
+
+/** PDF untuk orangtua: profil singkat + tagihan belum lunas / tunggakan. */
+export function buildTunggakanWaliDocumentHtml(opts: {
+  namaAsrama: string;
+  santri: TunggakanWaliSantriInfo;
+  items: TunggakanWaliItem[];
+  now?: Date;
+}): string {
+  const now = opts.now ?? new Date();
+  const generatedAt = format(now, "EEEE, d MMMM yyyy HH:mm", { locale: localeId });
+  const nama = opts.santri.nama.trim() || 'Santri';
+  const items = [...opts.items].sort((a, b) => {
+    if (a.lewat_tempo !== b.lewat_tempo) return a.lewat_tempo ? -1 : 1;
+    return `${b.periode}|${b.nama_jenis}`.localeCompare(`${a.periode}|${a.nama_jenis}`);
+  });
+  const totalSisa = items.reduce((acc, t) => acc + Math.max(0, t.sisa), 0);
+  const lewatTempo = items.filter((t) => t.lewat_tempo).length;
+
+  const body = [
+    kvTable([
+      ['Nama', nama],
+      ['Kelas', opts.santri.kelas?.trim() || '—'],
+      ['Kamar', opts.santri.kamar?.trim() || '—'],
+      ['Nomor wali', opts.santri.nomorWali?.trim() || '—'],
+      ['Tagihan belum lunas', items.length],
+      ['Lewat jatuh tempo', lewatTempo],
+      ['Total sisa', formatRp(totalSisa)],
+    ]),
+    h3(`Rincian tagihan belum lunas (${items.length})`),
+    htmlTable(
+      ['No', 'Jenis', 'Periode', 'Nominal', 'Terbayar', 'Sisa', 'Jatuh tempo', 'Keterangan'],
+      items.map((t, idx) => [
+        idx + 1,
+        t.nama_jenis || '—',
+        labelPeriodePdf(t.periode),
+        formatRp(t.nominal),
+        formatRp(t.terbayar),
+        formatRp(t.sisa),
+        t.jatuh_tempo ? fmtShortDate(t.jatuh_tempo) : '—',
+        t.lewat_tempo ? 'Lewat tempo' : statusTagihanLabel(t.status),
+      ]),
+      'Tidak ada tagihan belum lunas'
+    ),
+  ].join('');
+
+  return `<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <title>Laporan Tunggakan ${escapeHtml(nama)} — ${escapeHtml(opts.namaAsrama)}</title>
+  <style>${LAPORAN_PRINT_CSS}</style>
+</head>
+<body>
+  <header class="doc-header">
+    <h1>${escapeHtml(opts.namaAsrama)}</h1>
+    <p class="meta">
+      <strong>Laporan tunggakan / tagihan belum lunas untuk orangtua/wali</strong><br />
+      Santri: ${escapeHtml(nama)} · Semua periode<br />
+      Dicetak: ${escapeHtml(generatedAt)}
+    </p>
+  </header>
+  <section class="report-section">
+    <h2>Profil &amp; ringkasan tunggakan</h2>
+    ${body}
+  </section>
+  <footer class="doc-footer">
+    Dokumen resmi tagihan asrama — dibagikan kepada orangtua/wali sebagai PDF.
+  </footer>
 </body>
 </html>`;
 }

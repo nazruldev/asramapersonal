@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Building2, Check, ChevronDown } from 'lucide-react';
+import { AppLoadingIndicator } from '@/components/app-loading-indicator';
 import { AppModal } from '@/components/ui/app-modal';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app-store';
@@ -9,6 +10,7 @@ import {
   setActiveAsramaId,
   subscribeSessionUser,
 } from '@/lib/app-auth';
+import { subscribeAsramaListChanged } from '@/lib/asrama-list-events';
 import { toast } from '@/lib/toast';
 
 type AsramaSwitcherProps = {
@@ -31,21 +33,27 @@ export function AsramaSwitcher({
   const [sessionUser, setSessionUserState] = useState(() => getSessionUser());
   const [asramaList, setAsramaList] = useState<Asrama[] | null>(null);
   const [open, setOpen] = useState(false);
+  const [switchingLabel, setSwitchingLabel] = useState<string | null>(null);
 
   useEffect(() => subscribeSessionUser(() => setSessionUserState(getSessionUser())), []);
 
   useEffect(() => {
     let cancelled = false;
-    void fetch('/api/asrama')
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data) => {
-        if (!cancelled) setAsramaList(data as Asrama[]);
-      })
-      .catch(() => {
-        if (!cancelled) setAsramaList([]);
-      });
+    const fetchList = () => {
+      void fetch('/api/asrama')
+        .then((r) => (r.ok ? r.json() : []))
+        .then((data) => {
+          if (!cancelled) setAsramaList(data as Asrama[]);
+        })
+        .catch(() => {
+          if (!cancelled) setAsramaList([]);
+        });
+    };
+    fetchList();
+    const unsub = subscribeAsramaListChanged(fetchList);
     return () => {
       cancelled = true;
+      unsub();
     };
   }, []);
 
@@ -65,13 +73,24 @@ export function AsramaSwitcher({
     : 'Semua asrama';
 
   const pilih = (id: string | null) => {
+    if (id === activeId) {
+      setOpen(false);
+      return;
+    }
+    const label =
+      id === null
+        ? 'Semua asrama'
+        : (options.find((a) => a.id === id)?.nama ?? 'asrama');
     setOpen(false);
+    setSwitchingLabel(label);
     void (async () => {
       try {
         await setActiveAsramaId(id);
         await reloadAll();
       } catch (err) {
         toast.error(err instanceof Error ? err.message : 'Gagal sync setelah ganti asrama');
+      } finally {
+        setSwitchingLabel(null);
       }
     })();
   };
@@ -114,11 +133,18 @@ export function AsramaSwitcher({
     <>
       {trigger}
 
-      <AppModal open={open} onClose={() => setOpen(false)} title="Pilih Asrama">
+      <AppModal
+        open={open}
+        onClose={() => {
+          if (!switchingLabel) setOpen(false);
+        }}
+        title="Pilih Asrama"
+      >
         <div className="space-y-1">
           {bisaPilihSemua && (
             <button
               type="button"
+              disabled={!!switchingLabel}
               onClick={() => pilih(null)}
               className={cn(
                 'w-full flex items-center gap-2 rounded-sm px-3 py-2.5 text-left text-sm font-semibold transition-colors',
@@ -136,6 +162,7 @@ export function AsramaSwitcher({
             <button
               key={a.id}
               type="button"
+              disabled={!!switchingLabel}
               onClick={() => pilih(a.id)}
               className={cn(
                 'w-full flex items-center gap-2 rounded-sm px-3 py-2.5 text-left text-sm font-semibold transition-colors',
@@ -151,6 +178,14 @@ export function AsramaSwitcher({
           ))}
         </div>
       </AppModal>
+
+      {switchingLabel ? (
+        <AppLoadingIndicator
+          fullscreen
+          dim
+          message={`Mengganti ke ${switchingLabel}…`}
+        />
+      ) : null}
     </>
   );
 }

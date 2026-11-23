@@ -34,6 +34,7 @@ import Absensi from './pages/Absensi';
 import Izin from './pages/Izin';
 import IzinDetail from './pages/IzinDetail';
 import SantriKamarRiwayat from './pages/SantriKamarRiwayat';
+import SantriTunggakan from './pages/SantriTunggakan';
 import Pembinaan from './pages/Pembinaan';
 import PembinaanDetail from './pages/PembinaanDetail';
 import Master from './pages/Master';
@@ -52,6 +53,7 @@ import Pembayaran from './pages/Pembayaran';
 import Asrama from './pages/Asrama';
 import PenggunaPage from './pages/Pengguna';
 import Profil from './pages/Profil';
+import Notifikasi from './pages/Notifikasi';
 import GantiAkun from './pages/GantiAkun';
 import { RequireAkses } from './components/require-akses';
 import { useKeyboardInset } from './hooks/use-keyboard-inset';
@@ -68,8 +70,6 @@ import { AppOnlineGate } from './components/app-online-gate';
 import { toast } from './lib/toast';
 import { useAndroidBackButton } from './hooks/use-android-back-button';
 import { subscribeSyncStatus } from './lib/sync/turso-sync';
-import { ShellPullToRefresh } from './components/pull-to-refresh';
-
 function AppShell() {
   useKeyboardInset();
   const headerRight = useScreenHeaderActionsSlot();
@@ -79,7 +79,6 @@ function AppShell() {
   const { theme, toggleTheme } = useTheme();
   const [isScrolled, setIsScrolled] = useState(false);
   const [unlocked, setUnlocked] = useState(() => isAuthenticatedSession());
-  const shellRef = useRef<HTMLDivElement>(null);
   const mainContentRef = useRef<HTMLDivElement>(null);
   const hydrate = useAppStore((s) => s.hydrate);
   const retryCloudHydrate = useAppStore((s) => s.retryCloudHydrate);
@@ -109,6 +108,19 @@ function AppShell() {
         const { pullPembayaranFromTurso } = await import('@/lib/pembayaran-store');
         await pullPembayaranFromTurso();
         if (!cancelled) await reloadAll();
+        if (!cancelled) {
+          const { rescheduleLocalReminders } = await import('@/lib/local-reminders');
+          rescheduleLocalReminders();
+          const { syncOperationalInAppNotifications } = await import(
+            '@/lib/in-app-notifications'
+          );
+          const { useAppStore: store } = await import('@/store/app-store');
+          const st = store.getState();
+          await syncOperationalInAppNotifications({
+            kegiatan: st.kegiatan as never,
+            izin: st.izin as never,
+          });
+        }
       } catch (err) {
         if (!cancelled) {
           toast.error(err instanceof Error ? err.message : 'Gagal sync ulang setelah boot');
@@ -120,19 +132,51 @@ function AppShell() {
     };
   }, [hydrated, cloudBlocked, reloadAll]);
 
-  // Full-online: offline = error, bukan lanjut lokal.
+  // Tap pengingat lokal → buka halaman terkait.
+  useEffect(() => {
+    const onNav = (ev: Event) => {
+      const path = (ev as CustomEvent<{ path?: string }>).detail?.path;
+      if (typeof path === 'string' && path.startsWith('/')) {
+        navigate(path);
+      }
+    };
+    window.addEventListener('asrama:local-reminder-navigate', onNav);
+    return () => window.removeEventListener('asrama:local-reminder-navigate', onNav);
+  }, [navigate]);
+
+  // Direct Turso: offline = blank (cloudBlocked), bukan lanjut cache lokal.
   useEffect(() => {
     if (!isTursoConfigured()) return;
-    return subscribeSyncStatus((s) => {
-      if (s.configured && !s.online) {
-        if (!offlineToastShown.current) {
-          offlineToastShown.current = true;
-          toast.error('Offline — aplikasi memerlukan koneksi ke Turso.');
-        }
-      } else if (s.online) {
-        offlineToastShown.current = false;
+    const applyOffline = () => {
+      useAppStore.setState({
+        cloudBlocked: true,
+        hydrateError: 'Tidak ada internet. Aplikasi wajib online ke Turso.',
+      });
+      if (!offlineToastShown.current) {
+        offlineToastShown.current = true;
+        toast.error('Tidak ada internet — aplikasi dikunci sampai online.');
       }
+    };
+    const applyOnline = () => {
+      offlineToastShown.current = false;
+      if (useAppStore.getState().cloudBlocked) {
+        void useAppStore.getState().retryCloudHydrate();
+      }
+    };
+    const unsub = subscribeSyncStatus((s) => {
+      if (s.configured && !s.online) applyOffline();
+      else if (s.online) applyOnline();
     });
+    const onOffline = () => applyOffline();
+    const onOnline = () => applyOnline();
+    window.addEventListener('offline', onOffline);
+    window.addEventListener('online', onOnline);
+    if (typeof navigator !== 'undefined' && !navigator.onLine) applyOffline();
+    return () => {
+      unsub();
+      window.removeEventListener('offline', onOffline);
+      window.removeEventListener('online', onOnline);
+    };
   }, []);
 
   const isHome = location.pathname === '/';
@@ -177,7 +221,7 @@ function AppShell() {
       isActive: location.pathname === '/laporan/absensi',
     },
     {
-      name: 'Izin & BK',
+      name: 'Izin & Pelanggaran',
       path: '/laporan/izin',
       icon: ClockAlert,
       badge: activeIzin.length > 0 ? activeIzin.length : null,
@@ -260,11 +304,8 @@ function AppShell() {
     <div className={`h-[100dvh] max-h-[100dvh] overflow-hidden selection:bg-emerald-500 selection:text-white font-sans antialiased ${theme === 'dark' ? 'bg-slate-950' : 'bg-slate-100'}`}>
       {/* Responsive shell: phone → tablet → desktop */}
       <div
-        ref={shellRef}
         className={`w-full h-full max-h-[100dvh] flex flex-col relative mx-auto overflow-hidden ${theme === 'dark' ? 'bg-slate-900' : 'bg-slate-50'} ${/Electron/.test(navigator.userAgent) ? 'max-w-none' : 'max-w-full sm:max-w-xl md:max-w-2xl lg:max-w-4xl xl:max-w-5xl'}`}
       >
-        <ShellPullToRefresh shellRef={shellRef} scrollRef={mainContentRef} />
-
         {isHome ? (
           <AppHomeHeader
             namaAsrama={settings.namaAsrama}
@@ -329,6 +370,11 @@ function AppShell() {
                 match: (p) => /^\/master\/santri\/[^/]+\/kamar$/.test(p),
                 element: <SantriKamarRiwayat />,
               },
+              {
+                path: '/master/santri/:santriId/tagihan',
+                match: (p) => /^\/master\/santri\/[^/]+\/(tagihan|tunggakan)$/.test(p),
+                element: <SantriTunggakan />,
+              },
               { path: '/master/kamar', match: (p) => p === '/master/kamar', element: <Kamar /> },
               {
                 path: '/master/kamar/:kamarId',
@@ -364,6 +410,7 @@ function AppShell() {
               { path: '/database', match: (p) => p === '/database', element: <DatabasePage /> },
               { path: '/pengaturan', match: (p) => p === '/pengaturan', element: <Pengaturan /> },
               { path: '/profil', match: (p) => p === '/profil', element: <Profil /> },
+              { path: '/notifikasi', match: (p) => p === '/notifikasi', element: <Notifikasi /> },
               { path: '/ganti-akun', match: (p) => p === '/ganti-akun', element: <GantiAkun /> },
               { path: '/penjadwalan', match: (p) => p === '/penjadwalan', element: <PenjadwalanList /> },
               {
@@ -393,7 +440,9 @@ function AppShell() {
             )}
           >
             {showMobileAction ? (
-              <div className="sm:hidden px-3 pt-2 pb-0 flex items-center gap-2">
+              // py-2 di dalam bar aksi: tombol tidak nempel ke tab menu.
+              // Parent footer tetap tanpa gap (satu pembungkus menempel ke nav).
+              <div className="sm:hidden px-3 py-2 flex items-center gap-2">
                 {addAction ? (
                   <button
                     type="button"

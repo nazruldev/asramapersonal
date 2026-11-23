@@ -8,7 +8,7 @@ import { toast } from '@/lib/toast';
 
 /**
  * Popup konfirmasi update OTA (Android/Capacitor).
- * Dicek saat app start & tiap pull-to-refresh — "Nanti" menutup,
+ * Dicek saat app start & tiap refresh manual — "Nanti" menutup,
  * dan prompt tampil lagi pada launch berikutnya sampai di-update.
  */
 export function OtaUpdatePrompt() {

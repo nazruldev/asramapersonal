@@ -10,8 +10,8 @@ function nativeStorageNote(): string {
 
   if (tursoOn) {
     return (
-      'Mode full-online Turso. Semua baca/tulis ke cloud. ' +
-      'Internet wajib. Web, PC, dan Android memakai database Turso yang sama.'
+      'Mode direct Turso: setiap baca/tulis tembak cloud langsung. ' +
+      'Internet wajib — tanpa jaringan layar dikunci. Web, PC, dan Android memakai database Turso yang sama.'
     );
   }
 

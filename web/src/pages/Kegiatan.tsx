@@ -17,9 +17,10 @@ import { useConfirmDialog } from '@/lib/use-confirm-dialog';
 import { toast } from '@/lib/toast';
 import {
   ALL_DAYS,
-  formatHariAktif,
+  formatKegiatanJadwalRingkas,
   formatWaktuKegiatan,
   HARI_LABELS,
+  normalizeIntervalMinggu,
   sortKegiatanForAbsensi,
   type KegiatanSchedule,
 } from '@/lib/kegiatan-schedule';
@@ -33,6 +34,8 @@ import {
 } from '@/lib/form-styles';
 import { KegiatanMark } from '@/components/kegiatan-mark';
 
+type FrekuensiMode = '1' | '2' | 'custom';
+
 type KegiatanForm = {
   nama: string;
   jenis: string;
@@ -40,7 +43,32 @@ type KegiatanForm = {
   jam_selesai: string;
   hari_aktif: number[];
   untuk_absensi: boolean;
+  frekuensi_mode: FrekuensiMode;
+  interval_custom: string;
+  acuan_tanggal: string;
 };
+
+function intervalFromForm(form: KegiatanForm): number {
+  if (form.frekuensi_mode === '1') return 1;
+  if (form.frekuensi_mode === '2') return 2;
+  return normalizeIntervalMinggu(Number(form.interval_custom));
+}
+
+function frekuensiModeFromInterval(interval?: number): FrekuensiMode {
+  const n = normalizeIntervalMinggu(interval);
+  if (n <= 1) return '1';
+  if (n === 2) return '2';
+  return 'custom';
+}
+
+/** YYYY-MM-DD lokal (bukan UTC). */
+function todayDateKey(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 
 const emptyForm = (): KegiatanForm => ({
   nama: '',
@@ -49,11 +77,15 @@ const emptyForm = (): KegiatanForm => ({
   jam_selesai: '',
   hari_aktif: [...ALL_DAYS],
   untuk_absensi: true,
+  frekuensi_mode: '1',
+  interval_custom: '3',
+  acuan_tanggal: todayDateKey(),
 });
 
 function formFromKegiatan(kegiatan: KegiatanSchedule): KegiatanForm {
   const hari =
     kegiatan.hari_aktif && kegiatan.hari_aktif.length > 0 ? [...kegiatan.hari_aktif] : [...ALL_DAYS];
+  const interval = normalizeIntervalMinggu(kegiatan.interval_minggu);
   return {
     nama: kegiatan.nama,
     jenis: kegiatan.jenis,
@@ -61,6 +93,10 @@ function formFromKegiatan(kegiatan: KegiatanSchedule): KegiatanForm {
     jam_selesai: kegiatan.jam_selesai ?? '',
     hari_aktif: hari,
     untuk_absensi: kegiatan.untuk_absensi !== false,
+    frekuensi_mode: frekuensiModeFromInterval(interval),
+    interval_custom: String(interval > 2 ? interval : 3),
+    // Default hari ini supaya pengawas awam tidak perlu mengisi manual.
+    acuan_tanggal: kegiatan.acuan_tanggal?.trim() || todayDateKey(),
   };
 }
 
@@ -69,6 +105,8 @@ function payloadFromForm(form: KegiatanForm, urutan?: number) {
     form.hari_aktif.length === 7 || form.hari_aktif.length === 0 ? ALL_DAYS : form.hari_aktif;
   const jam_mulai = form.jam_mulai.trim();
   const jam_selesai = form.jam_selesai.trim();
+  const interval_minggu = intervalFromForm(form);
+  const acuan = form.acuan_tanggal.trim() || todayDateKey();
   return {
     nama: form.nama.trim(),
     jenis: form.jenis,
@@ -78,6 +116,8 @@ function payloadFromForm(form: KegiatanForm, urutan?: number) {
     hari_aktif: hariAktif,
     urutan,
     untuk_absensi: form.untuk_absensi,
+    interval_minggu,
+    acuan_tanggal: interval_minggu > 1 ? acuan : undefined,
   };
 }
 
@@ -144,6 +184,15 @@ export default function Kegiatan() {
     if (!formData.nama.trim() || !formData.jenis) {
       toast.error('Nama dan jenis kegiatan harus diisi');
       return;
+    }
+    const interval = intervalFromForm(formData);
+    if (formData.frekuensi_mode === 'custom' && interval < 2) {
+      toast.error('Interval custom minimal 2 minggu');
+      return;
+    }
+    // Tanggal acuan kosong → otomatis hari ini (aman untuk pengguna awam).
+    if (interval > 1 && !formData.acuan_tanggal.trim()) {
+      setFormData((prev) => ({ ...prev, acuan_tanggal: todayDateKey() }));
     }
     saveMutation.mutate();
   };
@@ -225,7 +274,10 @@ export default function Kegiatan() {
                     )}
                   </div>
                   <p className="text-[11px] text-emerald-700/90 mt-1.5 font-medium">
-                    {formatHariAktif(kegiatan.hari_aktif)}
+                    {formatKegiatanJadwalRingkas(kegiatan)}
+                    {normalizeIntervalMinggu(kegiatan.interval_minggu) > 1 && kegiatan.acuan_tanggal
+                      ? ` · acuan ${kegiatan.acuan_tanggal}`
+                      : ''}
                     {kegiatan.untuk_absensi === false ? ' · tidak di absensi' : ''}
                   </p>
                 </div>
@@ -340,6 +392,55 @@ export default function Kegiatan() {
               Contoh: Muhadarah hanya Sen & Kam — matikan hari lainnya.
             </p>
           </div>
+          <div>
+            <label className={appLabelClass}>Frekuensi</label>
+            <select
+              value={formData.frekuensi_mode}
+              onChange={(e) => {
+                const mode = e.target.value as FrekuensiMode;
+                setFormData((prev) => ({
+                  ...prev,
+                  frekuensi_mode: mode,
+                  // Otomatis isi hari ini — pengguna awam tinggal biarkan.
+                  acuan_tanggal:
+                    mode !== '1' ? prev.acuan_tanggal.trim() || todayDateKey() : prev.acuan_tanggal,
+                }));
+              }}
+              className={appSelectClass}
+            >
+              <option value="1">Setiap minggu</option>
+              <option value="2">Setiap 2 minggu</option>
+              <option value="custom">Custom (N minggu)</option>
+            </select>
+          </div>
+          {formData.frekuensi_mode === 'custom' && (
+            <div>
+              <label className={appLabelClass}>Setiap berapa minggu</label>
+              <input
+                type="number"
+                min={2}
+                max={52}
+                value={formData.interval_custom}
+                onChange={(e) => setFormData({ ...formData, interval_custom: e.target.value })}
+                className={appFieldClass}
+              />
+            </div>
+          )}
+          {formData.frekuensi_mode !== '1' && (
+            <div>
+              <label className={appLabelClass}>Mulai dari tanggal</label>
+              <input
+                type="date"
+                value={formData.acuan_tanggal || todayDateKey()}
+                onChange={(e) => setFormData({ ...formData, acuan_tanggal: e.target.value })}
+                className={appFieldClass}
+              />
+              <p className="text-[10px] text-slate-400 mt-1">
+                Sudah terisi otomatis hari ini. Biarkan saja jika kegiatan mulai minggu ini. Ganti
+                hanya jika mau mulai dari minggu lain.
+              </p>
+            </div>
+          )}
           <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
             <input
               type="checkbox"

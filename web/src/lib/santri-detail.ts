@@ -29,10 +29,46 @@ export function parseSantriIdFromDetailPath(pathname: string): string | null {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
+/** Parse tanggal aman: yyyy-MM-dd / midnight UTC → hari lokal (tidak geser -1). */
+function parseSantriDisplayDate(value: string): Date | null {
+  const raw = value.trim();
+  if (!raw) return null;
+  const datePart = raw.slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+    const rest = raw.slice(10).trim();
+    const isCalendarDay =
+      !rest ||
+      rest === 'T00:00:00.000Z' ||
+      rest === 'T00:00:00Z' ||
+      /^T00:00:00(\.0+)?(Z|[+-]00:00)?$/i.test(rest);
+    if (isCalendarDay) {
+      const [y, m, d] = datePart.split('-').map(Number);
+      const local = new Date(y, m - 1, d);
+      return Number.isNaN(local.getTime()) ? null : local;
+    }
+  }
+  const d = new Date(raw);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 export function formatSantriDateTime(value?: string | null): string {
   if (!value) return '—';
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '—';
+  const d = parseSantriDisplayDate(value);
+  if (!d) return '—';
+  const rest = value.trim().slice(10).trim();
+  const dateOnly =
+    /^\d{4}-\d{2}-\d{2}$/.test(value.trim().slice(0, 10)) &&
+    (!rest ||
+      rest === 'T00:00:00.000Z' ||
+      rest === 'T00:00:00Z' ||
+      /^T00:00:00(\.0+)?(Z|[+-]00:00)?$/i.test(rest));
+  if (dateOnly) {
+    return d.toLocaleDateString('id-ID', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    });
+  }
   return d.toLocaleString('id-ID', {
     day: 'numeric',
     month: 'long',
@@ -44,8 +80,8 @@ export function formatSantriDateTime(value?: string | null): string {
 
 export function formatSantriDate(value?: string | null): string {
   if (!value) return '—';
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '—';
+  const d = parseSantriDisplayDate(value);
+  if (!d) return '—';
   return d.toLocaleDateString('id-ID', {
     day: 'numeric',
     month: 'long',

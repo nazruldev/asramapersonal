@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router';
 import {
   Banknote,
@@ -70,6 +70,16 @@ type AsramaLite = { id: string; nama: string };
 
 const rupiah = (n: number) =>
   `Rp ${new Intl.NumberFormat('id-ID', { maximumFractionDigits: 0 }).format(n || 0)}`;
+
+/** Format input angka jadi 1.000.000 (hanya digit). */
+const formatRupiahInput = (raw: string): string => {
+  const digits = raw.replace(/\D/g, '');
+  if (!digits) return '';
+  return new Intl.NumberFormat('id-ID', { maximumFractionDigits: 0 }).format(Number(digits));
+};
+
+const parseRupiahInput = (formatted: string): number =>
+  Number(formatted.replace(/\D/g, '')) || 0;
 
 const bulanIni = () => new Date().toISOString().slice(0, 7);
 
@@ -148,6 +158,8 @@ export default function Pembayaran() {
 
   // filter aktif (diterapkan)
   const [fPeriode, setFPeriode] = useState(bulanIni());
+  /** Tunggakan default: semua periode agar yang lewat tempo tidak terlewat. */
+  const [fPeriodeTunggakan, setFPeriodeTunggakan] = useState('');
   const [fJenis, setFJenis] = useState('');
   const [fStatus, setFStatus] = useState('');
   const [fSearch, setFSearch] = useState('');
@@ -178,7 +190,9 @@ export default function Pembayaran() {
       const [j, t, u] = await Promise.all([
         api<TagihanJenis[]>('/api/pembayaran/jenis'),
         api<TagihanView[]>(`/api/pembayaran/tagihan?${params}`),
-        api<TunggakanRow[]>(`/api/pembayaran/tunggakan${fPeriode ? `?periode=${fPeriode}` : ''}`),
+        api<TunggakanRow[]>(
+          `/api/pembayaran/tunggakan${fPeriodeTunggakan ? `?periode=${fPeriodeTunggakan}` : ''}`
+        ),
       ]);
       setJenis(j);
       setTagihan(t);
@@ -188,7 +202,7 @@ export default function Pembayaran() {
     } finally {
       setLoading(false);
     }
-  }, [fPeriode, fJenis, fStatus]);
+  }, [fPeriode, fPeriodeTunggakan, fJenis, fStatus]);
 
   useEffect(() => {
     let cancelled = false;
@@ -215,6 +229,28 @@ export default function Pembayaran() {
   }, [cloudReady, load]);
 
   const isPembayaranScreen = location.pathname === '/master/pembayaran';
+  const wasPembayaranScreen = useRef(false);
+
+  // KeepAlive: state bertahan saat pindah halaman — reset filter setiap kali masuk lagi.
+  useEffect(() => {
+    if (isPembayaranScreen && !wasPembayaranScreen.current) {
+      const p = bulanIni();
+      setFPeriode(p);
+      setFPeriodeTunggakan('');
+      setFJenis('');
+      setFStatus('');
+      setFSearch('');
+      setFJenisAktif('semua');
+      setDraftPeriode(p);
+      setDraftJenis('');
+      setDraftStatus('');
+      setDraftJenisAktif('semua');
+      setFilterOpen(false);
+      setTab('tagihan');
+    }
+    wasPembayaranScreen.current = isPembayaranScreen;
+  }, [isPembayaranScreen]);
+
   const headerAddAction = useMemo(() => {
     if (!isPembayaranScreen) return null;
     if (tab === 'tagihan') {
@@ -236,10 +272,12 @@ export default function Pembayaran() {
   const hasActiveFilter =
     tab === 'jenis'
       ? fJenisAktif !== 'semua'
-      : Boolean(fPeriode !== bulanIni() || fJenis || (tab === 'tagihan' && fStatus));
+      : tab === 'tunggakan'
+        ? Boolean(fPeriodeTunggakan)
+        : Boolean(fPeriode !== bulanIni() || fJenis || fStatus);
 
   const openFilter = () => {
-    setDraftPeriode(fPeriode);
+    setDraftPeriode(tab === 'tunggakan' ? fPeriodeTunggakan : fPeriode);
     setDraftJenis(fJenis);
     setDraftStatus(fStatus);
     setDraftJenisAktif(fJenisAktif);
@@ -249,10 +287,12 @@ export default function Pembayaran() {
   const applyFilters = () => {
     if (tab === 'jenis') {
       setFJenisAktif(draftJenisAktif);
+    } else if (tab === 'tunggakan') {
+      setFPeriodeTunggakan(draftPeriode);
     } else {
-      setFPeriode(draftPeriode);
+      setFPeriode(draftPeriode || bulanIni());
       setFJenis(draftJenis);
-      if (tab === 'tagihan') setFStatus(draftStatus);
+      setFStatus(draftStatus);
     }
     setFilterOpen(false);
   };
@@ -261,6 +301,9 @@ export default function Pembayaran() {
     if (tab === 'jenis') {
       setDraftJenisAktif('semua');
       setFJenisAktif('semua');
+    } else if (tab === 'tunggakan') {
+      setDraftPeriode('');
+      setFPeriodeTunggakan('');
     } else {
       const p = bulanIni();
       setDraftPeriode(p);
@@ -416,13 +459,13 @@ export default function Pembayaran() {
           Filter aktif:
           {tab === 'jenis'
             ? ` ${fJenisAktif === 'aktif' ? 'hanya aktif' : 'hanya nonaktif'}`
-            : [
-                fPeriode ? ` ${labelPeriode(fPeriode)}` : '',
-                fJenis ? ` · ${jenis.find((j) => j.id === fJenis)?.nama ?? 'jenis'}` : '',
-                tab === 'tagihan' && fStatus
-                  ? ` · ${STATUS_META[fStatus]?.label ?? fStatus}`
-                  : '',
-              ].join('')}
+            : tab === 'tunggakan'
+              ? ` ${labelPeriode(fPeriodeTunggakan)}`
+              : [
+                  fPeriode ? ` ${labelPeriode(fPeriode)}` : '',
+                  fJenis ? ` · ${jenis.find((j) => j.id === fJenis)?.nama ?? 'jenis'}` : '',
+                  fStatus ? ` · ${STATUS_META[fStatus]?.label ?? fStatus}` : '',
+                ].join('')}
         </p>
       ) : null}
 
@@ -508,7 +551,9 @@ export default function Pembayaran() {
             description={
               fSearch
                 ? 'Tidak ada hasil pencarian.'
-                : `Semua tagihan ${labelPeriode(fPeriode)} sudah lunas.`
+                : fPeriodeTunggakan
+                  ? `Belum ada tagihan lewat jatuh tempo untuk ${labelPeriode(fPeriodeTunggakan)}. Tagihan belum bayar yang masih dalam tempo ada di tab Tagihan.`
+                  : 'Belum ada tagihan lewat jatuh tempo di semua periode. Tagihan belum bayar yang masih dalam tempo ada di tab Tagihan.'
             }
           />
         ) : (
@@ -516,7 +561,7 @@ export default function Pembayaran() {
             {filteredTunggakan.map((r) => {
               const wa = waLink(
                 r.santri_wali,
-                `Assalamu'alaikum Bapak/Ibu Wali dari ${r.santri_nama}. Mengingatkan tagihan yang belum lunas sebesar ${rupiah(r.total_sisa)} (${r.jumlah_tagihan} tagihan). Mohon segera diselesaikan. Terima kasih.`
+                `Assalamu'alaikum Bapak/Ibu Wali dari ${r.santri_nama}. Mengingatkan tunggakan (sudah jatuh tempo) sebesar ${rupiah(r.total_sisa)} (${r.jumlah_tagihan} tagihan). Mohon segera diselesaikan. Terima kasih.`
               );
               return (
                 <div key={r.santri_id} className={cn(appCardClass, 'p-3')}>
@@ -546,7 +591,7 @@ export default function Pembayaran() {
                       {rupiah(r.total_sisa)}
                     </p>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      {r.jumlah_tagihan} tagihan belum lunas
+                      {r.jumlah_tagihan} tagihan lewat tempo
                     </p>
                   </div>
                   <div className="mt-2 space-y-1">
@@ -670,12 +715,40 @@ export default function Pembayaran() {
             <>
               <div>
                 <label className={appLabelThemed(theme)}>Periode</label>
-                <input
-                  type="month"
-                  value={draftPeriode}
-                  onChange={(e) => setDraftPeriode(e.target.value)}
-                  className={appFieldThemed(theme)}
-                />
+                {tab === 'tunggakan' ? (
+                  <div className="space-y-2">
+                    <select
+                      value={draftPeriode ? 'bulan' : 'semua'}
+                      onChange={(e) => {
+                        if (e.target.value === 'semua') setDraftPeriode('');
+                        else setDraftPeriode(draftPeriode || bulanIni());
+                      }}
+                      className={appSelectClass}
+                    >
+                      <option value="semua">Semua periode</option>
+                      <option value="bulan">Pilih bulan</option>
+                    </select>
+                    {draftPeriode ? (
+                      <input
+                        type="month"
+                        value={draftPeriode}
+                        onChange={(e) => setDraftPeriode(e.target.value)}
+                        className={appFieldThemed(theme)}
+                      />
+                    ) : (
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-snug">
+                        Menampilkan semua tunggakan lewat jatuh tempo (semua bulan).
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <input
+                    type="month"
+                    value={draftPeriode}
+                    onChange={(e) => setDraftPeriode(e.target.value)}
+                    className={appFieldThemed(theme)}
+                  />
+                )}
               </div>
               {tab === 'tagihan' ? (
                 <>
@@ -1179,7 +1252,7 @@ function JenisFormModal({
   useEffect(() => {
     if (!open) return;
     setNama(editing?.nama ?? '');
-    setNominal(editing ? String(editing.nominal_default || '') : '');
+    setNominal(editing ? formatRupiahInput(String(editing.nominal_default || '')) : '');
     setPeriodeJenis(editing?.periode_jenis ?? 'bulanan');
     setAktif(editing?.aktif !== false);
   }, [open, editing]);
@@ -1197,7 +1270,7 @@ function JenisFormModal({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           nama: nama.trim(),
-          nominal_default: Number(nominal) || 0,
+          nominal_default: parseRupiahInput(nominal),
           periode_jenis: periodeJenis,
           aktif,
         }),
@@ -1236,12 +1309,12 @@ function JenisFormModal({
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <label className={appLabelThemed(theme)}>Nominal Bawaan</label>
+            <label className={appLabelThemed(theme)}>Nominal</label>
             <input
               value={nominal}
-              onChange={(e) => setNominal(e.target.value.replace(/[^0-9]/g, ''))}
+              onChange={(e) => setNominal(formatRupiahInput(e.target.value))}
               inputMode="numeric"
-              placeholder="0"
+              placeholder="Rp 0"
               className={appFieldThemed(theme)}
             />
           </div>
@@ -1307,7 +1380,7 @@ function TagihanDetailModal({
     setJumlah('');
     setTanggal(new Date().toISOString().slice(0, 10));
     setCatatan('');
-    setNominalEdit(tagihan ? String(tagihan.nominal) : '');
+    setNominalEdit(tagihan ? formatRupiahInput(String(tagihan.nominal)) : '');
     void loadTransaksi();
   }, [tagihan, loadTransaksi]);
 
@@ -1316,7 +1389,7 @@ function TagihanDetailModal({
   const sisa = Math.max(0, tagihan.nominal - tagihan.terbayar);
 
   const bayar = async (lunas = false) => {
-    const n = lunas ? sisa : Number(jumlah);
+    const n = lunas ? sisa : parseRupiahInput(jumlah);
     if (!Number.isFinite(n) || n <= 0) {
       toast.error('Isi jumlah pembayaran.');
       return;
@@ -1342,7 +1415,7 @@ function TagihanDetailModal({
   };
 
   const simpanNominal = async () => {
-    const n = Number(nominalEdit);
+    const n = parseRupiahInput(nominalEdit);
     if (!Number.isFinite(n) || n < 0) {
       toast.error('Nominal tidak valid.');
       return;
@@ -1408,7 +1481,7 @@ function TagihanDetailModal({
             <div className="grid grid-cols-2 gap-2">
               <input
                 value={jumlah}
-                onChange={(e) => setJumlah(e.target.value.replace(/[^0-9]/g, ''))}
+                onChange={(e) => setJumlah(formatRupiahInput(e.target.value))}
                 inputMode="numeric"
                 placeholder={`Sisa ${rupiah(sisa)}`}
                 className={appFieldThemed(theme)}
@@ -1485,8 +1558,9 @@ function TagihanDetailModal({
           <div className="flex gap-2">
             <input
               value={nominalEdit}
-              onChange={(e) => setNominalEdit(e.target.value.replace(/[^0-9]/g, ''))}
+              onChange={(e) => setNominalEdit(formatRupiahInput(e.target.value))}
               inputMode="numeric"
+              placeholder="Rp 0"
               className={appFieldThemed(theme)}
             />
             <Button variant="outline" onClick={simpanNominal} disabled={saving}>

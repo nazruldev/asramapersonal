@@ -21,6 +21,7 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -196,6 +197,16 @@ public class HtmlToPdfPlugin extends Plugin {
                                                 call.reject("PDF kosong — coba lagi");
                                                 return;
                                             }
+                                            // Capgo/Capacitor Share hanya menerima file:// (bukan content://).
+                                            // Salin ke cache agar bisa dibagikan via FileProvider.
+                                            File shareFile = new File(
+                                                    getContext().getCacheDir(),
+                                                    "share-" + System.currentTimeMillis() + "-" + filename);
+                                            try (FileOutputStream fos = new FileOutputStream(shareFile)) {
+                                                fos.write(bytes);
+                                            }
+                                            Uri fileUri = Uri.fromFile(shareFile);
+
                                             Uri saved = DownloadsHelper.saveBytes(
                                                     getContext(),
                                                     filename,
@@ -205,7 +216,9 @@ public class HtmlToPdfPlugin extends Plugin {
                                                 openPdfWithViewer(saved);
                                             }
                                             JSObject ret = new JSObject();
-                                            ret.put("uri", saved.toString());
+                                            // file:// untuk Share; content/download tetap di unduhan.
+                                            ret.put("uri", fileUri.toString());
+                                            ret.put("downloadUri", saved != null ? saved.toString() : "");
                                             call.resolve(ret);
                                         } catch (Exception e) {
                                             call.reject(

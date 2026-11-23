@@ -2,7 +2,10 @@ export const PEMBINAAN_PAGE_SIZE = 8;
 
 import { normalizeAppPathname } from '@/lib/app-navigation';
 
-export type PembinaanCategory = 'Semua' | 'Pelanggaran' | 'Teguran';
+/** Satu-satunya jenis catatan yang dipakai aplikasi (teguran dihapus). */
+export const PEMBINAAN_JENIS_PELANGGARAN = 'Pelanggaran' as const;
+
+export type PembinaanCategory = 'Semua' | 'Pelanggaran';
 
 export type PembinaanRow = {
   id: string;
@@ -22,6 +25,7 @@ export type SantriPembinaanGroup = {
   records: PembinaanRow[];
   latestTanggal: string;
   countPelanggaran: number;
+  /** @deprecated teguran dihapus — selalu 0 */
   countTeguran: number;
 };
 
@@ -30,9 +34,8 @@ export function pembinaanDetailPath(santriId: string): string {
 }
 
 export function parsePembinaanCategoryParam(value: string | null): PembinaanCategory {
-  if (value === 'Pelanggaran' || value === 'Teguran' || value === 'Semua') {
-    return value;
-  }
+  if (value === 'Pelanggaran' || value === 'Semua') return value;
+  // Legacy query ?jenis=Teguran → tampilkan semua pelanggaran
   return 'Semua';
 }
 
@@ -41,7 +44,7 @@ export function filterPembinaanByCategory(
   category: PembinaanCategory
 ): PembinaanRow[] {
   if (category === 'Semua') return rows;
-  return rows.filter((item) => item.jenis === category);
+  return rows.filter((item) => item.jenis === PEMBINAAN_JENIS_PELANGGARAN || item.jenis === 'Teguran');
 }
 
 export function groupPembinaanBySantri(rows: PembinaanRow[]): SantriPembinaanGroup[] {
@@ -66,8 +69,8 @@ export function groupPembinaanBySantri(rows: PembinaanRow[]): SantriPembinaanGro
     if (new Date(item.tanggal).getTime() > new Date(group.latestTanggal).getTime()) {
       group.latestTanggal = item.tanggal;
     }
-    if (item.jenis === 'Pelanggaran') group.countPelanggaran += 1;
-    else if (item.jenis === 'Teguran') group.countTeguran += 1;
+    // Semua catatan dihitung sebagai pelanggaran (legacy teguran ikut dihitung).
+    group.countPelanggaran += 1;
   }
 
   return Array.from(map.values())
@@ -80,15 +83,13 @@ export function groupPembinaanBySantri(rows: PembinaanRow[]): SantriPembinaanGro
     .sort((a, b) => new Date(b.latestTanggal).getTime() - new Date(a.latestTanggal).getTime());
 }
 
-export function getPembinaanBadgeStyle(jenis: string): string {
-  switch (jenis) {
-    case 'Teguran':
-      return 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800';
-    case 'Pelanggaran':
-      return 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800';
-    default:
-      return 'bg-slate-50 text-slate-700 border-slate-200 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-600';
-  }
+export function getPembinaanBadgeStyle(_jenis?: string): string {
+  return 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800';
+}
+
+/** Label tampilan jenis — teguran legacy ditampilkan sebagai Pelanggaran. */
+export function pembinaanJenisLabel(_jenis?: string): string {
+  return 'Pelanggaran';
 }
 
 export function parsePembinaanSantriIdFromPath(pathname: string): string | null {

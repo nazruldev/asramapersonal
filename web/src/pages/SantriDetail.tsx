@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router';
 import { useMutation } from '@tanstack/react-query';
 import {
   AlertTriangle,
+  Banknote,
   BedDouble,
   CalendarCheck,
   ChevronRight,
@@ -31,6 +32,7 @@ import { AppModal, AppModalFooter } from '@/components/ui/app-modal';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { BottomPicker } from '@/components/ui/bottom-picker';
 import { Button } from '@/components/ui/button';
+import { SantriAvatar } from '@/components/santri-avatar';
 import { SantriFormFields } from '@/components/santri-form-fields';
 import { emptyWilayahForm, wilayahFromSantri } from '@/components/wilayah-asal-fields';
 import { AsalWilayahInfo } from '@/components/asal-wilayah-info';
@@ -57,21 +59,81 @@ import { fetchSantriById } from '@/lib/santri-api';
 import { fetchAbsensiForLaporanPeriod } from '@/lib/absensi-api';
 import { fetchIzinForLaporanPeriod, fetchPembinaanForLaporanPeriod } from '@/lib/laporan-data-api';
 import {
+  downloadBkWaliPdf,
   downloadLaporanPerSantri,
   downloadSingleLaporanPdf,
+  downloadTunggakanWaliPdf,
+  shareBkWaliPdf,
   shareLaporanPerSantri,
   shareSingleLaporanPdf,
+  shareTunggakanWaliPdf,
 } from '@/lib/laporan-print';
+import { isTagihanTunggakan, sisaTagihan, type TagihanRow } from '@/lib/pembayaran-store';
+import { santriTagihanPath } from '@/lib/santri-tunggakan';
+import { getSessionUser, subscribeSessionUser } from '@/lib/app-auth';
+import {
+  autoJenisKelaminFromAsrama,
+  getPelanggaranTier,
+  resolveJenisAsramaAktif,
+} from '@/lib/app-settings';
 import type { LaporanContext, LaporanPeriod, LaporanReportId } from '@/lib/laporan-reports';
 import type { KegiatanSchedule } from '@/lib/kegiatan-schedule';
 
-type SantriReportId = 'persantri' | Extract<LaporanReportId, 'absensi' | 'izin' | 'pembinaan'>;
+type SantriReportId =
+  | 'persantri'
+  | 'bk-ortu'
+  | 'tunggakan-ortu'
+  | Extract<LaporanReportId, 'absensi' | 'izin' | 'pembinaan'>;
 
-const SANTRI_REPORTS: { id: SantriReportId; title: string; desc: string; icon: typeof FileText; tone: string }[] = [
-  { id: 'persantri', title: 'Laporan Santri', desc: 'Laporan lengkap santri ini (absensi, izin, pembinaan).', icon: UserRound, tone: 'text-emerald-600' },
-  { id: 'absensi', title: 'Rekap Absensi', desc: 'Riwayat kehadiran santri ini.', icon: CalendarCheck, tone: 'text-emerald-600' },
-  { id: 'izin', title: 'Rekap Perizinan', desc: 'Riwayat izin keluar santri ini.', icon: ClockAlert, tone: 'text-emerald-600' },
-  { id: 'pembinaan', title: 'Rekap Pembinaan', desc: 'Catatan pembinaan/pelanggaran santri ini.', icon: ShieldAlert, tone: 'text-emerald-600' },
+const SANTRI_REPORTS: {
+  id: SantriReportId;
+  title: string;
+  desc: string;
+  icon: typeof FileText;
+  tone: string;
+}[] = [
+  {
+    id: 'persantri',
+    title: 'Laporan Lengkap',
+    desc: 'Profil + absensi + izin + seluruh catatan pelanggaran (PDF).',
+    icon: UserRound,
+    tone: 'text-emerald-600',
+  },
+  {
+    id: 'bk-ortu',
+    title: 'PDF pelanggaran ke orangtua',
+    desc: 'Semua catatan pelanggaran — siap dibagikan ke wali.',
+    icon: ShieldAlert,
+    tone: 'text-rose-600',
+  },
+  {
+    id: 'tunggakan-ortu',
+    title: 'PDF tagihan belum lunas ke orangtua',
+    desc: 'Semua tagihan belum lunas (semua periode) — siap dibagikan ke wali.',
+    icon: Banknote,
+    tone: 'text-rose-600',
+  },
+  {
+    id: 'absensi',
+    title: 'Rekap Absensi',
+    desc: 'Riwayat kehadiran santri ini.',
+    icon: CalendarCheck,
+    tone: 'text-emerald-600',
+  },
+  {
+    id: 'izin',
+    title: 'Rekap Perizinan',
+    desc: 'Riwayat izin keluar santri ini.',
+    icon: ClockAlert,
+    tone: 'text-emerald-600',
+  },
+  {
+    id: 'pembinaan',
+    title: 'Rekap Pelanggaran',
+    desc: 'Seluruh riwayat catatan pelanggaran santri ini.',
+    icon: FileText,
+    tone: 'text-amber-600',
+  },
 ];
 
 const emptyForm = {
@@ -85,16 +147,6 @@ const emptyForm = {
   catatan_medis: '',
   foto: '',
 };
-
-function getInitials(name: string) {
-  if (!name) return 'S';
-  return name
-    .split(' ')
-    .slice(0, 2)
-    .map((n) => n[0])
-    .join('')
-    .toUpperCase();
-}
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
@@ -153,8 +205,10 @@ export default function SantriDetail() {
   const izinList = useAppStore((s) => s.izin) as IzinRow[];
   const pembinaanList = useAppStore((s) => s.pembinaan) as PembinaanRow[];
   const settings = useAppStore((s) => s.settings);
-  const jenisAsrama = String(settings.jenisAsrama ?? '').toUpperCase();
-  const autoGender = jenisAsrama === 'PUTRA' ? 'Laki-laki' : jenisAsrama === 'PUTRI' ? 'Perempuan' : '';
+  const [sessionUser, setSessionUser] = useState(() => getSessionUser());
+  useEffect(() => subscribeSessionUser(() => setSessionUser(getSessionUser())), []);
+  const jenisAsrama = resolveJenisAsramaAktif(settings, sessionUser?.activeAsramaId);
+  const autoGender = autoJenisKelaminFromAsrama(jenisAsrama);
   const dashboardStats = useAppStore((s) => s.dashboard);
   const kegiatanMaster = useAppStore((s) => s.kegiatan) as KegiatanSchedule[];
 
@@ -213,10 +267,15 @@ export default function SantriDetail() {
 
   const saveMutation = useMutation({
     mutationFn: async (body: Record<string, unknown>) => {
+      const { maybeCompressImageDataUrl } = await import('@/lib/image-compress');
+      const foto = await maybeCompressImageDataUrl(
+        typeof body.foto === 'string' ? body.foto : ''
+      );
+      const payload = { ...body, foto };
       const res = await fetch(`/api/santri/${santriId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!res.ok) throw new Error((data as { error?: string }).error || 'Gagal menyimpan');
@@ -286,7 +345,13 @@ export default function SantriDetail() {
       fetchIzinForLaporanPeriod(period),
       fetchPembinaanForLaporanPeriod(period),
     ])
-      .then(([abs, iz, pb]) =>
+      .then(([abs, iz, pb]) => {
+        // Gabung BK store (seluruh riwayat) + hasil periode agar laporan lengkap ke ortu utuh.
+        const byId = new Map<string, EntityRow>();
+        for (const row of [...(pb as EntityRow[]), ...(pembinaanList as unknown as EntityRow[])]) {
+          const id = String(row.id ?? '');
+          if (id) byId.set(id, row);
+        }
         setReportCtx({
           namaAsrama: settings.namaAsrama,
           period,
@@ -295,21 +360,90 @@ export default function SantriDetail() {
           kamar: kamarList as unknown as EntityRow[],
           absensi: abs as EntityRow[],
           izin: iz as EntityRow[],
-          pembinaan: pb as EntityRow[],
+          pembinaan: Array.from(byId.values()),
           kegiatan: kegiatanMaster,
-        })
-      )
+        });
+      })
       .catch(() => toast.error('Gagal memuat data laporan'))
       .finally(() => setReportLoading(false));
-  }, [reportCtx, settings.namaAsrama, dashboardStats, santriList, kamarList, kegiatanMaster]);
+  }, [
+    reportCtx,
+    settings.namaAsrama,
+    dashboardStats,
+    santriList,
+    kamarList,
+    kegiatanMaster,
+    pembinaanList,
+  ]);
 
   const runSantriReport = useCallback(
     async (action: 'unduh' | 'bagikan') => {
-      if (!reportCtx || !reportPick || !santri) return;
+      if (!reportPick || !santri) return;
       const sid = String(santri.id);
       setReportBusy(action);
       try {
-        if (reportPick === 'persantri') {
+        if (reportPick === 'bk-ortu') {
+          const bkRows = pembinaanList.filter((p) => String(p.santri_id) === sid);
+          const poin = Number(santri.jumlah_pelanggaran) || 0;
+          const tier = getPelanggaranTier(poin, settings);
+          const opts = {
+            namaAsrama: settings.namaAsrama || 'Asrama',
+            santri: {
+              nama: santri.nama,
+              kelas: santri.kelas,
+              kamar: santri.kamar,
+              nomorWali: santri.nomor_wali,
+              poinAkumulasi: poin,
+              tierLabel: tier?.level ? tier.label : null,
+            },
+            records: bkRows.map((r) => ({
+              tanggal: r.tanggal,
+              jenis: r.jenis,
+              keterangan: r.keterangan,
+              tindak_lanjut: r.tindak_lanjut,
+            })),
+          };
+          await (action === 'unduh' ? downloadBkWaliPdf(opts) : shareBkWaliPdf(opts));
+        } else if (reportPick === 'tunggakan-ortu') {
+          await fetch('/api/pembayaran/sync', { method: 'POST' }).catch(() => null);
+          const res = await fetch(
+            `/api/pembayaran/tagihan?santri_id=${encodeURIComponent(sid)}`
+          );
+          if (!res.ok) throw new Error('Gagal memuat tagihan');
+          const rows = (await res.json()) as TagihanRow[];
+          const items = (Array.isArray(rows) ? rows : [])
+            .filter((t) => sisaTagihan(t) > 0)
+            .map((t) => ({
+              nama_jenis: t.nama_jenis,
+              periode: t.periode,
+              nominal: t.nominal,
+              terbayar: t.terbayar,
+              sisa: sisaTagihan(t),
+              status: t.status,
+              jatuh_tempo: t.jatuh_tempo,
+              lewat_tempo: isTagihanTunggakan(t),
+            }));
+          if (!items.length) {
+            toast.error('Tidak ada tagihan belum lunas untuk santri ini');
+            return;
+          }
+          const opts = {
+            namaAsrama: settings.namaAsrama || 'Asrama',
+            santri: {
+              nama: santri.nama,
+              kelas: santri.kelas,
+              kamar: santri.kamar,
+              nomorWali: santri.nomor_wali,
+            },
+            items,
+          };
+          await (action === 'unduh'
+            ? downloadTunggakanWaliPdf(opts)
+            : shareTunggakanWaliPdf(opts));
+        } else if (!reportCtx) {
+          toast.error('Data laporan belum siap. Coba lagi.');
+          return;
+        } else if (reportPick === 'persantri') {
           await (action === 'unduh'
             ? downloadLaporanPerSantri(reportCtx, sid)
             : shareLaporanPerSantri(reportCtx, sid));
@@ -325,7 +459,7 @@ export default function SantriDetail() {
         setReportBusy(null);
       }
     },
-    [reportCtx, reportPick, santri]
+    [reportCtx, reportPick, santri, pembinaanList, settings]
   );
 
   const headerEditAction = useMemo(
@@ -356,12 +490,15 @@ export default function SantriDetail() {
         '@capacitor/camera'
       );
       const photo = await CapacitorCamera.getPhoto({
-        quality: 90,
+        quality: 80,
         allowEditing: false,
         resultType: CameraResultType.DataUrl,
+        width: 1024,
         source: source === 'camera' ? CameraSource.Camera : CameraSource.Photos,
       });
-      setFormData({ ...formData, foto: photo.dataUrl || '' });
+      const { maybeCompressImageDataUrl } = await import('@/lib/image-compress');
+      const foto = await maybeCompressImageDataUrl(photo.dataUrl || '');
+      setFormData({ ...formData, foto });
     } catch {
       // dibatalkan pengguna
     }
@@ -388,7 +525,7 @@ export default function SantriDetail() {
   const requestDelete = () => {
     if (!santri) return;
     confirmDialog.ask({
-      message: `Hapus "${santri.nama}" secara permanen? Riwayat izin, absensi, catatan BK, penjadwalan, dan riwayat kamar santri ini ikut dihapus.`,
+      message: `Hapus "${santri.nama}" secara permanen? Riwayat izin, absensi, catatan pelanggaran, penjadwalan, dan riwayat kamar santri ini ikut dihapus.`,
       confirmLabel: 'Ya, Hapus',
       destructive: true,
       onConfirm: () =>
@@ -518,17 +655,7 @@ export default function SantriDetail() {
         <>
           <div className={cn(appCardClass, 'p-4 space-y-3')}>
             <div className="flex gap-3">
-              {santri.foto ? (
-                <img
-                  src={santri.foto}
-                  alt={santri.nama}
-                  className="w-16 h-16 rounded-sm object-cover shrink-0"
-                />
-              ) : (
-                <div className="w-16 h-16 rounded-sm bg-emerald-700 text-white font-bold text-lg flex items-center justify-center shrink-0">
-                  {getInitials(santri.nama)}
-                </div>
-              )}
+              <SantriAvatar nama={santri.nama} foto={santri.foto} size="lg" />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <h2 className="text-base font-bold text-slate-900 dark:text-slate-50 leading-snug">
@@ -579,7 +706,7 @@ export default function SantriDetail() {
                 <p className="text-lg font-black text-slate-900 dark:text-slate-50 tabular-nums">
                   {pembinaanCount}
                 </p>
-                <p className="text-[10px] text-slate-500">Catatan BK</p>
+                <p className="text-[10px] text-slate-500">Pelanggaran</p>
               </div>
             </div>
           </div>
@@ -591,7 +718,9 @@ export default function SantriDetail() {
               <AsalWilayahInfo row={santri} Row={InfoRow} />
             </div>
             <InfoRow label="Nomor wali" value={santri.nomor_wali?.trim() || '—'} />
-            {santri.jenis_kelamin ? <InfoRow label="Jenis kelamin" value={santri.jenis_kelamin} /> : null}
+            {!autoGender && santri.jenis_kelamin ? (
+              <InfoRow label="Jenis kelamin" value={santri.jenis_kelamin} />
+            ) : null}
             {santri.created_by ? <InfoRow label="Dibuat oleh" value={santri.created_by} /> : null}
             {santri.updated_by ? <InfoRow label="Terakhir diubah oleh" value={santri.updated_by} /> : null}
             <InfoRow label="Cara hubungi" value={hubungiLabel} />
@@ -773,10 +902,18 @@ export default function SantriDetail() {
             />
             <ActionBtn
               icon={<ShieldAlert className="w-4 h-4 text-rose-600" />}
-              label="Riwayat pembinaan (BK)"
+              label="Riwayat pelanggaran"
               onClick={() => {
                 setActionSheetOpen(false);
                 navigate(pembinaanDetailPath(santri.id), withBackTo(detailBack));
+              }}
+            />
+            <ActionBtn
+              icon={<Banknote className="w-4 h-4 text-rose-600" />}
+              label="Lihat tagihan"
+              onClick={() => {
+                setActionSheetOpen(false);
+                navigate(santriTagihanPath(santri.id), withBackTo(detailBack));
               }}
             />
             <ActionBtn
@@ -863,7 +1000,11 @@ export default function SantriDetail() {
         <div className="space-y-2">
           <button
             type="button"
-            disabled={reportBusy !== null || reportLoading || !reportCtx}
+            disabled={
+              reportBusy !== null ||
+              reportLoading ||
+              (reportPick !== 'bk-ortu' && reportPick !== 'tunggakan-ortu' && !reportCtx)
+            }
             onClick={() => void runSantriReport('unduh')}
             className={cn(
               appCardClass,
@@ -881,7 +1022,11 @@ export default function SantriDetail() {
           </button>
           <button
             type="button"
-            disabled={reportBusy !== null || reportLoading || !reportCtx}
+            disabled={
+              reportBusy !== null ||
+              reportLoading ||
+              (reportPick !== 'bk-ortu' && reportPick !== 'tunggakan-ortu' && !reportCtx)
+            }
             onClick={() => void runSantriReport('bagikan')}
             className={cn(
               appCardClass,

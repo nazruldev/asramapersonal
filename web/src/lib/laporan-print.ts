@@ -2,9 +2,16 @@ import { Capacitor } from '@capacitor/core';
 import { format } from 'date-fns';
 import { notifyFileSaved } from '@/lib/file-download-hints';
 import {
+  buildBkWaliDocumentHtml,
   buildLaporanTablesDocumentHtml,
   buildSingleSantriDocumentHtml,
+  buildTunggakanWaliDocumentHtml,
+  LAPORAN_TABLE_BUNDLE_IDS,
   LAPORAN_TABLE_SECTION_TITLES,
+  type BkWaliRecord,
+  type BkWaliSantriInfo,
+  type TunggakanWaliItem,
+  type TunggakanWaliSantriInfo,
 } from '@/lib/laporan-html-tables';
 import { saveHtmlAsPdf, shareHtmlAsPdf } from '@/lib/save-html-as-pdf';
 import { toast } from '@/lib/toast';
@@ -163,6 +170,145 @@ function santriFilteredCtx(
   };
 }
 
+/** Rentang tanggal opsional (YYYY-MM-DD, inklusif). Kosong = semua data. */
+export type LaporanDateRange = { dari?: string; sampai?: string };
+
+function inDateRange(iso: unknown, range: LaporanDateRange): boolean {
+  const d = String(iso ?? '').slice(0, 10);
+  if (!d) return false;
+  if (range.dari && d < range.dari) return false;
+  if (range.sampai && d > range.sampai) return false;
+  return true;
+}
+
+function ctxInRange(ctx: LaporanContext, range: LaporanDateRange): LaporanContext {
+  return {
+    ...ctx,
+    absensi: ctx.absensi.filter((a) => inDateRange(a.tanggal, range)),
+    izin: ctx.izin.filter((i) => inDateRange(i.tanggal_keluar, range)),
+    pembinaan: ctx.pembinaan.filter((p) => inDateRange(p.tanggal, range)),
+    tagihan: ctx.tagihan?.filter((t) =>
+      inDateRange(`${String(t.periode ?? '').slice(0, 7)}-15`, range)
+    ),
+  };
+}
+
+/** Filter ctx ke beberapa santri terpilih (checklist). */
+function santriFilteredCtxMulti(ctx: LaporanContext, santriIds: string[]): LaporanContext {
+  const picked = ctx.santri.filter((x) => santriIds.includes(String(x.id)));
+  const idSet = new Set(picked.map((x) => String(x.id)));
+  const namaSet = new Set(picked.map((x) => String(x.nama ?? '')));
+  const match = (row: Record<string, unknown>) =>
+    idSet.has(String(row.santri_id ?? '')) || namaSet.has(String(row.santri_nama ?? ''));
+  return {
+    ...ctx,
+    santri: picked,
+    absensi: ctx.absensi.filter(match),
+    izin: ctx.izin.filter(match),
+    pembinaan: ctx.pembinaan.filter(match),
+    tagihan: ctx.tagihan?.filter(match),
+  };
+}
+
+export type LaporanScope = LaporanReportId | 'persantri' | 'lengkap';
+
+/** Bangun HTML laporan untuk cakupan + santri terpilih + rentang opsional. */
+export function laporanHtmlForSelection(
+  scope: LaporanScope,
+  ctx: LaporanContext,
+  opts?: { santriIds?: string[]; range?: LaporanDateRange },
+  now = new Date()
+): { html: string; filename: string; title: string } {
+  const stamp = format(now, 'yyyy-MM-dd-HHmm');
+  let useCtx = ctx;
+
+  if (opts?.range?.dari || opts?.range?.sampai) {
+    useCtx = ctxInRange(useCtx, opts.range);
+  }
+
+  const ids = opts?.santriIds?.filter(Boolean) ?? [];
+  let namePart = '';
+  let title =
+    scope === 'lengkap'
+      ? 'Paket laporan lengkap (tabel)'
+      : scope === 'persantri'
+        ? 'Laporan Santri'
+        : LAPORAN_TABLE_SECTION_TITLES[scope];
+
+  // Satu santri → format dokumen khusus satu santri.
+  if (ids.length === 1 && scope !== 'lengkap') {
+    const sid = ids[0];
+    const s = useCtx.santri.find((x) => String(x.id) === sid) ?? useCtx.santri.find((x) => String(x.nama) === sid);
+    const nama = String(s?.nama ?? 'Santri');
+    namePart = `-${safeFilenamePart(nama)}`;
+    if (scope === 'persantri') {
+      return {
+        html: buildSingleSantriDocumentHtml(useCtx, sid, now),
+        filename: `laporan-santri${namePart}-${stamp}.pdf`,
+        title: `Laporan Santri — ${nama}`,
+      };
+    }
+    const { filtered } = santriFilteredCtx(useCtx, sid);
+    useCtx = filtered;
+    title = `${title} — ${nama}`;
+  } else {
+    if (ids.length >= 1) {
+      useCtx = santriFilteredCtxMulti(useCtx, ids);
+      const labelSantri =
+        ids.length === 1
+          ? String(useCtx.santri[0]?.nama ?? 'Santri')
+          : `${ids.length} santri`;
+      namePart = `-${safeFilenamePart(labelSantri)}`;
+      title = `${title} — ${labelSantri}`;
+    }
+    if (scope === 'persantri') {
+      const html = buildLaporanTablesDocumentHtml(useCtx, now, {
+        title: 'Laporan per santri (tabel)',
+        ids: ['persantri'],
+      });
+      return { html, filename: `laporan-per-santri${namePart}-${stamp}.pdf`, title };
+    }
+    if (scope === 'lengkap') {
+      const html = buildLaporanTablesDocumentHtml(useCtx, now, { title });
+      return { html, filename: `laporan-lengkap${namePart}-${stamp}.pdf`, title };
+    }
+  }
+
+  const html = buildLaporanTablesDocumentHtml(useCtx, now, { title, ids: [scope] });
+  return { html, filename: `laporan-${scope}${namePart}-${stamp}.pdf`, title };
+}
+
+/** Pratinjau laporan di tab/jendela baru (tanpa mengunduh). */
+export function previewLaporanHtml(html: string): void {
+  const w = window.open('', '_blank');
+  if (!w) {
+    toast.error('Popup pratinjau diblokir browser. Izinkan popup lalu coba lagi.');
+    return;
+  }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+}
+
+/** Satu pintu: unduh / bagikan / preview laporan dengan santri & rentang opsional. */
+export async function runLaporanAction(
+  action: 'unduh' | 'bagikan' | 'preview',
+  scope: LaporanScope,
+  ctx: LaporanContext,
+  opts?: { santriIds?: string[]; range?: LaporanDateRange }
+): Promise<void> {
+  const { html, filename, title } = laporanHtmlForSelection(scope, ctx, opts);
+  if (action === 'preview') {
+    previewLaporanHtml(html);
+    return;
+  }
+  if (action === 'unduh') {
+    await savePdfWithPrintFallback(html, filename);
+    return;
+  }
+  await sharePdf(html, filename, title);
+}
+
 function singleLaporanHtml(
   id: LaporanReportId,
   ctx: LaporanContext,
@@ -201,9 +347,14 @@ async function savePdfWithPrintFallback(html: string, filename: string): Promise
 async function sharePdf(html: string, filename: string, title: string): Promise<void> {
   try {
     const result = await shareHtmlAsPdf(html, filename, title);
-    if (result === 'fallback_saved') notifyFileSaved('native_downloads', filename);
-  } catch {
-    toast.error('Gagal membagikan laporan');
+    if (result === 'canceled') return;
+    if (result === 'fallback_saved') {
+      notifyFileSaved('native_downloads', filename);
+      toast.success('Laporan disimpan — bagikan dari folder Unduhan jika perlu.');
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Gagal membagikan laporan';
+    toast.error(msg.length > 160 ? 'Gagal membagikan laporan. Coba unduh PDF lalu bagikan.' : msg);
   }
 }
 
@@ -259,6 +410,70 @@ export async function shareLaporanPerSantri(
     `laporan-santri-${safeFilenamePart(nama)}-${format(now, 'yyyy-MM-dd')}.pdf`,
     `Laporan Santri — ${nama}`
   );
+}
+
+/** PDF pelanggaran ke orangtua (dari detail pelanggaran). */
+export async function shareBkWaliPdf(
+  opts: {
+    namaAsrama: string;
+    santri: BkWaliSantriInfo;
+    records: BkWaliRecord[];
+  },
+  now = new Date()
+): Promise<void> {
+  const nama = opts.santri.nama.trim() || 'Santri';
+  const html = buildBkWaliDocumentHtml({ ...opts, now });
+  await sharePdf(
+    html,
+    `laporan-bk-${safeFilenamePart(nama)}-${format(now, 'yyyy-MM-dd')}.pdf`,
+    `Laporan Pelanggaran — ${nama}`
+  );
+}
+
+export async function downloadBkWaliPdf(
+  opts: {
+    namaAsrama: string;
+    santri: BkWaliSantriInfo;
+    records: BkWaliRecord[];
+  },
+  now = new Date()
+): Promise<void> {
+  const nama = opts.santri.nama.trim() || 'Santri';
+  const html = buildBkWaliDocumentHtml({ ...opts, now });
+  const filename = `laporan-bk-${safeFilenamePart(nama)}-${format(now, 'yyyy-MM-dd')}.pdf`;
+  await savePdfWithPrintFallback(html, filename);
+}
+
+/** PDF tunggakan / tagihan belum lunas ke orangtua. */
+export async function shareTunggakanWaliPdf(
+  opts: {
+    namaAsrama: string;
+    santri: TunggakanWaliSantriInfo;
+    items: TunggakanWaliItem[];
+  },
+  now = new Date()
+): Promise<void> {
+  const nama = opts.santri.nama.trim() || 'Santri';
+  const html = buildTunggakanWaliDocumentHtml({ ...opts, now });
+  await sharePdf(
+    html,
+    `laporan-tunggakan-${safeFilenamePart(nama)}-${format(now, 'yyyy-MM-dd')}.pdf`,
+    `Laporan Tunggakan — ${nama}`
+  );
+}
+
+export async function downloadTunggakanWaliPdf(
+  opts: {
+    namaAsrama: string;
+    santri: TunggakanWaliSantriInfo;
+    items: TunggakanWaliItem[];
+  },
+  now = new Date()
+): Promise<void> {
+  const nama = opts.santri.nama.trim() || 'Santri';
+  const html = buildTunggakanWaliDocumentHtml({ ...opts, now });
+  const filename = `laporan-tunggakan-${safeFilenamePart(nama)}-${format(now, 'yyyy-MM-dd')}.pdf`;
+  await savePdfWithPrintFallback(html, filename);
 }
 
 /** Bagikan laporan per santri (semua) via share sheet. */

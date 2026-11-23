@@ -21,6 +21,8 @@ export const SCHEMA_V4_SQL = `
     urutan              INTEGER NOT NULL DEFAULT 0,
     untuk_absensi       INTEGER NOT NULL DEFAULT 0 CHECK (untuk_absensi IN (0, 1)),
     hari_aktif_json     TEXT,
+    interval_minggu     INTEGER NOT NULL DEFAULT 1,
+    acuan_tanggal       TEXT,
     created_by          TEXT,
     updated_by          TEXT
   );

@@ -483,6 +483,7 @@ async function loadV3Snapshot(includeHeavy = true): Promise<OfflineDbSnapshot | 
   const kegiatan = (kegiatanRes.values ?? []).map((row) => {
     const r = row as Record<string, unknown>;
     const hari = r.hari_aktif_json ? JSON.parse(String(r.hari_aktif_json)) : [];
+    const intervalRaw = Number(r.interval_minggu);
     return {
       id: r.id,
       nama: r.nama,
@@ -494,6 +495,8 @@ async function loadV3Snapshot(includeHeavy = true): Promise<OfflineDbSnapshot | 
       urutan: r.urutan ?? 0,
       untuk_absensi: r.untuk_absensi === 1,
       hari_aktif: hari,
+      interval_minggu: Number.isFinite(intervalRaw) && intervalRaw >= 1 ? Math.floor(intervalRaw) : 1,
+      acuan_tanggal: r.acuan_tanggal ? String(r.acuan_tanggal) : undefined,
     };
   });
 
@@ -678,6 +681,7 @@ async function loadV4Snapshot(includeHeavy = true): Promise<OfflineDbSnapshot | 
   const kegiatan = (kegiatanRes.values ?? []).map((row) => {
     const r = row as Record<string, unknown>;
     const hari = r.hari_aktif_json ? JSON.parse(String(r.hari_aktif_json)) : [];
+    const intervalRaw = Number(r.interval_minggu);
     return {
       id: r.id,
       nama: r.nama,
@@ -689,6 +693,8 @@ async function loadV4Snapshot(includeHeavy = true): Promise<OfflineDbSnapshot | 
       urutan: r.urutan ?? 0,
       untuk_absensi: r.untuk_absensi === 1,
       hari_aktif: hari,
+      interval_minggu: Number.isFinite(intervalRaw) && intervalRaw >= 1 ? Math.floor(intervalRaw) : 1,
+      acuan_tanggal: r.acuan_tanggal ? String(r.acuan_tanggal) : undefined,
     };
   });
 
@@ -894,6 +900,14 @@ async function ensureSchemaPatches(): Promise<void> {
   }
   if (!(await tableHasColumn('kegiatan', 'icon'))) {
     await db.execute(`ALTER TABLE kegiatan ADD COLUMN icon TEXT`);
+  }
+  if (!(await tableHasColumn('kegiatan', 'interval_minggu'))) {
+    await db.execute(
+      `ALTER TABLE kegiatan ADD COLUMN interval_minggu INTEGER NOT NULL DEFAULT 1`
+    );
+  }
+  if (!(await tableHasColumn('kegiatan', 'acuan_tanggal'))) {
+    await db.execute(`ALTER TABLE kegiatan ADD COLUMN acuan_tanggal TEXT`);
   }
   if (!(await tableHasColumn('kamar', 'asrama_id'))) {
     await db.execute(`ALTER TABLE kamar ADD COLUMN asrama_id TEXT`);
@@ -1206,8 +1220,15 @@ async function flushKegiatanTable(db: SQLiteDBConnection, kegiatan: Record<strin
   }
   await db.run(`DELETE FROM kegiatan`);
   for (const row of kegiatan) {
+    const intervalRaw = Number(row.interval_minggu);
+    const intervalMinggu =
+      Number.isFinite(intervalRaw) && intervalRaw >= 1 ? Math.floor(intervalRaw) : 1;
+    const acuan = optStr(row, 'acuan_tanggal');
     await db.run(
-      `INSERT INTO kegiatan (id, nama, jenis, icon, jam_mulai, jam_selesai, waktu, urutan, untuk_absensi, hari_aktif_json, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+      `INSERT INTO kegiatan (
+        id, nama, jenis, icon, jam_mulai, jam_selesai, waktu, urutan, untuk_absensi,
+        hari_aktif_json, interval_minggu, acuan_tanggal, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
       [
         String(row.id),
         strField(row, 'nama'),
@@ -1219,6 +1240,8 @@ async function flushKegiatanTable(db: SQLiteDBConnection, kegiatan: Record<strin
         Number(row.urutan) || 0,
         row.untuk_absensi === false ? 0 : 1,
         JSON.stringify(row.hari_aktif ?? []),
+        intervalMinggu,
+        intervalMinggu > 1 ? acuan : null,
       ]
     );
   }

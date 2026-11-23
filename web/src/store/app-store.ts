@@ -274,6 +274,22 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     }
     set(patch);
+
+    // Refresh pengingat lokal + inbox jika jadwal absensi / izin berubah.
+    if (unique.some((k) => k === 'kegiatan' || k === 'izin')) {
+      void import('@/lib/local-reminders')
+        .then(({ rescheduleLocalReminders }) => rescheduleLocalReminders())
+        .catch(() => undefined);
+      void import('@/lib/in-app-notifications')
+        .then(async ({ syncOperationalInAppNotifications }) => {
+          const st = get();
+          await syncOperationalInAppNotifications({
+            kegiatan: st.kegiatan as never,
+            izin: st.izin as never,
+          });
+        })
+        .catch(() => undefined);
+    }
   },
 
   reloadAll: async () => {

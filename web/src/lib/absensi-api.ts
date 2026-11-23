@@ -58,10 +58,13 @@ export function laporanPeriodToDateKeys(
   return laporanRekapToDateKeys(period, customRange, now);
 }
 
+// Laporan selalu memuat seluruh riwayat — tidak ada filter tanggal.
 export async function fetchAbsensiForLaporanPeriod(
-  period: LaporanPeriod,
-  customRange?: LaporanCustomRange
+  _period?: LaporanPeriod,
+  _customRange?: LaporanCustomRange
 ): Promise<AbsensiApiRow[]> {
-  const { dari, sampai } = laporanPeriodToDateKeys(period, customRange);
-  return fetchAbsensiForRange(dari, sampai);
+  const res = await fetch('/api/absensi');
+  if (!res.ok) throw new Error('Gagal memuat absensi');
+  const data = (await res.json()) as Record<string, unknown>[];
+  return data.map(mapAbsensiRow);
 }

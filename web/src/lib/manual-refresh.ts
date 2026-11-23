@@ -3,7 +3,7 @@ import { useOtaUpdateCheck } from '@/lib/ota-update-check';
 
 /**
  * Sync Turso (jika dikonfigurasi) lalu reload seluruh store.
- * Dipakai tombol refresh desktop / shortcut F5 — setara pull-to-refresh.
+ * Dipakai tombol refresh di header / shortcut F5.
  */
 export async function runManualRefresh(): Promise<void> {
   const { isTursoConfigured } = await import('@/lib/sync/cloud-bootstrap');

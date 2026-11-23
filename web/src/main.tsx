@@ -7,6 +7,7 @@ import { initClientApiStore, installNativeApiFetch } from './lib/client-api';
 import { setWebSqliteAvailable } from './lib/offline-db';
 import { startAutoSync, runTursoPull } from './lib/sync/turso-sync';
 import { startAblyPushNotifications } from './lib/sync/ably-push';
+import { startLocalReminders } from './lib/local-reminders';
 import { notifyAppReady } from './lib/app-update';
 import './index.css';
 import App from './App.tsx';
@@ -37,6 +38,8 @@ async function bootstrap() {
       console.warn('[push] sync after notification failed:', err);
     });
   });
+  // Pengingat absensi / izin / tunggakan — lokal di HP (tanpa server).
+  void startLocalReminders();
   if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
     void Notification.requestPermission().catch(() => undefined);
   }
